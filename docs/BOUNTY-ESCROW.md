@@ -80,3 +80,40 @@ That command needs the fully reviewed public signer, guardian, quorum and attemp
 It deliberately asks for the deployer key interactively rather than accepting it from a file, so the
 operator can inspect the destination, bytecode, chain, token, signer quorum, pause guardian, and
 transaction before broadcast.
+
+## Deploying with a browser Tempo wallet
+
+An EVM-compatible Tempo wallet can deploy this contract without revealing its key to this
+repository or to ChatGPT. Use this only after the mainnet deployment gate above has been met.
+
+1. Connect the wallet to **Tempo Mainnet** (chain ID `4217`) and ensure it holds enough `pathUSD`
+   to pay the transaction fee. Tempo has no native gas token; conventional wallet transactions to
+   a contract need a `pathUSD` balance.
+2. Open [Remix](https://remix.ethereum.org), create
+   `WarMachineBountyEscrow.sol`, and paste the exact source from
+   `contracts/src/WarMachineBountyEscrow.sol` at the reviewed Git commit.
+3. In Remix Solidity Compiler select **0.8.30**, enable optimization with **1,000 runs**, and set
+   EVM version to **Cancun**. Compile the `WarMachineBountyEscrow` contract.
+4. In **Deploy & Run**, select **Injected Provider** and confirm the wallet shows Tempo Mainnet.
+   Select `WarMachineBountyEscrow`, then enter these constructor arguments:
+
+   ```text
+   token:              0x20C0000000000000000000000000000000000000
+   pauseGuardian:      <dedicated public guardian address>
+   attemptWindow:      300
+   settlementSigners:  [<signer 1 address>, <signer 2 address>]
+   settlementQuorum:   2
+   ```
+
+   `signer 1` and `signer 2` must be independent, dedicated key holders. They are not allowed to
+   change payout amounts or recipients, but both can attest a result. Do not use the deployer
+   wallet as either signer or pause guardian.
+5. Before approving the wallet popup, verify the chain, exact source commit, compiler settings,
+   token address, guardian, both signer addresses, `300` second window, and `2` quorum. The fee
+   recipient and 2.5% rate are compiled into the contract and cannot be changed during deployment.
+6. Record the deployed address and transaction hash, verify it at
+   [Tempo's contract verifier](https://contracts.tempo.xyz), then test only an extremely small
+   bounty from a second wallet before enabling paid bounties in the Site.
+
+Do not send `pathUSD` directly to the deployed address. The contract only accepts funds through
+`createBounty` and `enterBounty`, after a wallet approves the exact token amount.
