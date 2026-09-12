@@ -145,3 +145,33 @@ When the preview is correct, broadcast from the terminal:
 
 The launcher first requires the literal confirmation `DEPLOY`, then Foundry prompts for the
 burner key locally. Never paste that key into chat, a Site setting, `.env`, or a repository file.
+
+If the burner is connected in a browser wallet whose private key cannot be exported, use the
+same launcher with `-BrowserWallet` instead. Foundry will ask the browser wallet to sign; the
+private key stays in that wallet.
+
+```powershell
+.\scripts\deploy-tempo-escrow.ps1 -DeployerAddress <your wallet address> -Broadcast -BrowserWallet
+```
+
+### Creating the two result signers
+
+They are not funded wallets and do not pay transaction fees. They are two local, encrypted
+keypairs whose **public** addresses are fixed into the escrow. A result needs both signatures, so
+one leaked signing key cannot invent a payout.
+
+Run this once in the desktop terminal after initializing the local configuration:
+
+```powershell
+.\scripts\create-escrow-result-signers.ps1
+```
+
+Foundry prompts locally for a different password for each key and saves encrypted keystores under
+`%LOCALAPPDATA%\WarMachines\settlement-signers`. The script puts only their public addresses into
+the ignored local deployment file. Set `WM_ESCROW_PAUSE_GUARDIAN` to a third, separate public
+address before the preview.
+
+For a small private trial, both signer keypairs may be controlled by the same operator. That is
+not independent protection against a compromised computer. Before public paid bounties, place the
+signers under separate operational controls and build the result-attestation service that uses
+them; the current Site deliberately does not hold these keys.

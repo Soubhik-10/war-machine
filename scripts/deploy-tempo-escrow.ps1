@@ -2,6 +2,7 @@
 param(
     [switch]$Initialize,
     [switch]$Broadcast,
+    [switch]$BrowserWallet,
     [string]$ConfigPath,
     [string]$DeployerAddress
 )
@@ -97,13 +98,22 @@ $forgeArgs = @(
 )
 
 if ($Broadcast) {
-    $confirmation = Read-Host 'Type DEPLOY to open the hidden burner-key prompt and broadcast to Tempo Mainnet'
+    $signerPrompt = if ($BrowserWallet) {
+        'Type DEPLOY to connect Foundry to your browser wallet and broadcast to Tempo Mainnet'
+    } else {
+        'Type DEPLOY to open the hidden burner-key prompt and broadcast to Tempo Mainnet'
+    }
+    $confirmation = Read-Host $signerPrompt
     if ($confirmation -cne 'DEPLOY') {
         Write-Host 'Deployment cancelled before any signing prompt.'
         exit 0
     }
+    if ($BrowserWallet) {
+        $forgeArgs += '--browser'
+    } else {
+        $forgeArgs += @('--interactives', '1')
+    }
     $forgeArgs += @(
-        '--interactives', '1',
         '--broadcast',
         '--verify',
         '--verifier-url', 'https://contracts.tempo.xyz'
