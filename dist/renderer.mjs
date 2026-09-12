@@ -104,9 +104,9 @@ float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(
 float grain(vec2 p){float fade=clamp(1.0-length(fwidth(p))*.7,0.0,1.0);return mix(.5,noise(p),fade);}
 void main(){
  vec3 n=normalize(vNormal),l=normalize(uLightDir),viewDir=normalize(uViewDir),halfDir=normalize(l+viewDir);
- vec3 p=vShadow.xyz/vShadow.w*.5+.5;float sh=0.0,bias=max(.0008*(1.0-dot(n,l)),.00025);
- if(p.x>0.0&&p.x<1.0&&p.y>0.0&&p.y<1.0&&p.z>0.0&&p.z<1.0){for(int x=-1;x<=1;x++)for(int y=-1;y<=1;y++){float depth=texture(uShadow,p.xy+vec2(float(x),float(y))/1024.0).r;sh+=p.z-bias>depth?1.0:0.0;}sh/=9.0;}
  vec2 uv=vSurface.xy;float mat=vSurface.w,broad=noise(uv*3.2),fine=grain(uv*90.0),rough=.68,metal=.1;
+ vec3 p=vShadow.xyz/vShadow.w*.5+.5;float sh=0.0,bias=max(.0015*(1.0-dot(n,l)),.00055);
+ if(p.x>0.0&&p.x<1.0&&p.y>0.0&&p.y<1.0&&p.z>0.0&&p.z<1.0){for(int x=-1;x<=1;x++)for(int y=-1;y<=1;y++){float depth=texture(uShadow,p.xy+vec2(float(x),float(y))/1024.0).r;sh+=smoothstep(.00025,.0017,p.z-bias-depth);}sh/=9.0;}
  vec3 albedo=vColor;
  if(mat<1.5){
   float chips=smoothstep(.66,.82,noise(uv*31.0))*.32;
@@ -123,8 +123,9 @@ void main(){
  }else{rough=.95;metal=0.0;albedo*=.63+broad*.5+fine*.18;}
  float diff=max(dot(n,l),0.0),spec=pow(max(dot(n,halfDir),0.0),mix(85.0,12.0,rough));
  float ambient=.38+.15*max(n.y,0.0),rim=pow(1.0-max(dot(n,viewDir),0.0),3.0)*.09;
- vec3 color=albedo*(ambient+diff*(1.0-sh*.76)*.76)*vec3(1.03,.98,.91);
- color+=mix(vec3(.60,.72,.78),albedo,metal*.55)*spec*(1.0-sh)*mix(.08,.6,1.0-rough);
+ float shadowStrength=mat<3.5?.70:.08;
+ vec3 color=albedo*(ambient+diff*(1.0-sh*shadowStrength)*.76)*vec3(1.03,.98,.91);
+ color+=mix(vec3(.60,.72,.78),albedo,metal*.55)*spec*(1.0-sh*(mat<3.5?1.0:.18))*mix(.08,.6,1.0-rough);
  color+=vec3(.5,.72,.83)*rim;color=mix(color,vColor*1.18,clamp(vGlow,0.0,1.0));
  if(mat>6.5&&mat<7.5)color+=albedo*.24;
  fragColor=vec4(pow(max(color,vec3(0.0)),vec3(.87)),1.0);
@@ -133,8 +134,47 @@ const DEPTH=`#version 300 es
 precision highp float;void main(){}`;
 export class Renderer{
  constructor(canvas){this.canvas=canvas;this.gl=canvas.getContext('webgl2',{alpha:true,antialias:true,preserveDrawingBuffer:true});if(!this.gl)throw Error('WebGL 2 is unavailable');const gl=this.gl;const compile=(src,type)=>{const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s;};const program=fs=>{const p=gl.createProgram();gl.attachShader(p,compile(VS,gl.VERTEX_SHADER));gl.attachShader(p,compile(fs,gl.FRAGMENT_SHADER));gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(p));return p;};this.program=program(FS);this.depthProgram=program(DEPTH);this.buffer=gl.createBuffer();this.shadow=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,this.shadow);gl.texImage2D(gl.TEXTURE_2D,0,gl.DEPTH_COMPONENT24,1024,1024,0,gl.DEPTH_COMPONENT,gl.UNSIGNED_INT,null);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);this.fbo=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,this.fbo);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.TEXTURE_2D,this.shadow,0);gl.drawBuffers([gl.NONE]);gl.readBuffer(gl.NONE);if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error('Shadow buffer is unavailable');gl.bindFramebuffer(gl.FRAMEBUFFER,null);this.params=null;}
- render(geo,{target=[0,0,0],yaw=-.64,elevation=.65,span=9,bg=[.065,.078,.083,0],shadowSpan=16}={}){const gl=this.gl,c=this.canvas,cr=c.getBoundingClientRect(),r={left:cr.left,top:cr.top,width:cr.width||c.width,height:cr.height||c.height},dpr=cr.width?Math.min(window.devicePixelRatio||1,2):1,w=Math.max(1,Math.round(r.width*dpr)),h=Math.max(1,Math.round(r.height*dpr));if(c.width!==w||c.height!==h){c.width=w;c.height=h;}const aspect=w/h,halfY=span*.5,halfX=halfY*aspect;const eye=[target[0]+Math.sin(yaw)*Math.cos(elevation)*30,target[1]+Math.sin(elevation)*30,target[2]+Math.cos(yaw)*Math.cos(elevation)*30];const vp=mul(ortho(-halfX,halfX,-halfY,halfY,.1,100),lookAt(eye,target));// Directional lighting stays anchored to the world, independently of camera tracking.
-const lightEye=[-36,64,-24],lm=mul(ortho(-shadowSpan,shadowSpan,-shadowSpan,shadowSpan,.1,160),lookAt(lightEye,[0,0,0]));this.params={target,eye,halfX,halfY,r,vp};gl.bindBuffer(gl.ARRAY_BUFFER,this.buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(geo.vertices),gl.DYNAMIC_DRAW);gl.enable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);gl.depthFunc(gl.LEQUAL);const setup=(p,matrix)=>{gl.useProgram(p);for(const [name,size,offset] of [['aPosition',3,0],['aNormal',3,12],['aColor',3,24],['aGlow',1,36],['aSurface',4,40]]){const loc=gl.getAttribLocation(p,name);if(loc>=0){gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,size,gl.FLOAT,false,VERTEX_STRIDE*4,offset);}}gl.uniformMatrix4fv(gl.getUniformLocation(p,'uVP'),false,matrix);gl.uniformMatrix4fv(gl.getUniformLocation(p,'uLight'),false,lm);};gl.bindFramebuffer(gl.FRAMEBUFFER,this.fbo);gl.viewport(0,0,1024,1024);gl.clear(gl.DEPTH_BUFFER_BIT);setup(this.depthProgram,lm);gl.drawArrays(gl.TRIANGLES,0,geo.vertices.length/VERTEX_STRIDE);gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,w,h);gl.clearColor(...bg);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);setup(this.program,vp);gl.uniform3fv(gl.getUniformLocation(this.program,'uViewDir'),sub(eye,target));gl.uniform3fv(gl.getUniformLocation(this.program,'uLightDir'),lightEye);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,this.shadow);gl.uniform1i(gl.getUniformLocation(this.program,'uShadow'),0);gl.drawArrays(gl.TRIANGLES,0,geo.vertices.length/VERTEX_STRIDE);}
+ render(geo,{target=[0,0,0],yaw=-.64,elevation=.65,span=9,bg=[.065,.078,.083,0],shadowSpan=16}={}){
+  const gl=this.gl,c=this.canvas,cr=c.getBoundingClientRect(),r={left:cr.left,top:cr.top,width:cr.width||c.width,height:cr.height||c.height},dpr=cr.width?Math.min(window.devicePixelRatio||1,2):1,w=Math.max(1,Math.round(r.width*dpr)),h=Math.max(1,Math.round(r.height*dpr));
+  if(c.width!==w||c.height!==h){c.width=w;c.height=h;}
+  const aspect=w/h,halfY=span*.5,halfX=halfY*aspect;
+  const eye=[target[0]+Math.sin(yaw)*Math.cos(elevation)*30,target[1]+Math.sin(elevation)*30,target[2]+Math.cos(yaw)*Math.cos(elevation)*30];
+  const vp=mul(ortho(-halfX,halfX,-halfY,halfY,.1,100),lookAt(eye,target));
+  // Directional lighting stays anchored to the world, independently of camera tracking.
+  const lightEye=[-36,64,-24],lm=mul(ortho(-shadowSpan,shadowSpan,-shadowSpan,shadowSpan,.1,160),lookAt(lightEye,[0,0,0]));
+  this.params={target,eye,halfX,halfY,r,vp};
+  gl.bindBuffer(gl.ARRAY_BUFFER,this.buffer);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(geo.vertices),gl.DYNAMIC_DRAW);
+  gl.enable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);gl.depthFunc(gl.LEQUAL);
+  const setup=(p,matrix)=>{
+   gl.useProgram(p);
+   for(const [name,size,offset] of [['aPosition',3,0],['aNormal',3,12],['aColor',3,24],['aGlow',1,36],['aSurface',4,40]]){
+    const loc=gl.getAttribLocation(p,name);
+    if(loc>=0){gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,size,gl.FLOAT,false,VERTEX_STRIDE*4,offset);}
+   }
+   gl.uniformMatrix4fv(gl.getUniformLocation(p,'uVP'),false,matrix);
+   gl.uniformMatrix4fv(gl.getUniformLocation(p,'uLight'),false,lm);
+  };
+  gl.bindFramebuffer(gl.FRAMEBUFFER,this.fbo);
+  gl.viewport(0,0,1024,1024);
+  gl.clear(gl.DEPTH_BUFFER_BIT);
+  setup(this.depthProgram,lm);
+  gl.enable(gl.POLYGON_OFFSET_FILL);
+  gl.polygonOffset(1.25,3);
+  gl.drawArrays(gl.TRIANGLES,0,geo.vertices.length/VERTEX_STRIDE);
+  gl.disable(gl.POLYGON_OFFSET_FILL);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  gl.viewport(0,0,w,h);
+  gl.clearColor(...bg);
+  gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+  setup(this.program,vp);
+  gl.uniform3fv(gl.getUniformLocation(this.program,'uViewDir'),sub(eye,target));
+  gl.uniform3fv(gl.getUniformLocation(this.program,'uLightDir'),lightEye);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D,this.shadow);
+  gl.uniform1i(gl.getUniformLocation(this.program,'uShadow'),0);
+  gl.drawArrays(gl.TRIANGLES,0,geo.vertices.length/VERTEX_STRIDE);
+ }
  ray(clientX,clientY){const p=this.params;if(!p)return null;const f=norm(sub(p.target,p.eye)),right=norm(cross(f,[0,1,0])),up=cross(right,f),sx=((clientX-p.r.left)/p.r.width*2-1)*p.halfX,sy=(1-(clientY-p.r.top)/p.r.height*2)*p.halfY;return {origin:p.eye.map((v,i)=>v+right[i]*sx+up[i]*sy),direction:f};}
  pick(clientX,clientY,height=.5){const ray=this.ray(clientX,clientY);if(!ray||Math.abs(ray.direction[1])<1e-9)return null;const t=(height-ray.origin[1])/ray.direction[1];return {x:ray.origin[0]+ray.direction[0]*t,z:ray.origin[2]+ray.direction[2]*t};}
  project(point){const p=this.params;if(!p)return null;const v=[point[0],point[1],point[2],1],q=[0,0,0,0];for(let r=0;r<4;r++)for(let k=0;k<4;k++)q[r]+=p.vp[k*4+r]*v[k];return {x:p.r.left+(q[0]/q[3]+1)*.5*p.r.width,y:p.r.top+(1-q[1]/q[3])*.5*p.r.height};}
