@@ -1,8 +1,12 @@
-import {BY_ID,ARENAS,stats,partSpec,validate,connected,keyOf} from './data.mjs';
+import {BY_ID,ARENAS,stats,partSpec,validate,connected,keyOf,terrainAt,environmentProfile} from './data.mjs';
 
 export function engineeringReport(machine,rules,arenaId='foundry'){
  const s=stats(machine),arena=ARENAS.find(a=>a.id===arenaId)||ARENAS[0],notes=validate(machine,rules).map(text=>({level:'error',text,category:text.includes('move')?'Mobility':text.includes('weapon')?'Weapons':'Structure'}));
- const demand=s.energy-s.power,heat=s.heat-s.cooling*arena.cool;
+ const env=environmentProfile(s,arena,terrainAt(arena,260,400)),demand=s.energy+env.drain-s.power*env.power,heat=s.heat+env.heat-s.cooling*env.cooling;
+ if(arena.climate?.cold)notes.push({level:s.heaters?'good':'warn',category:'Systems',text:`Deep cold: ${Math.round(env.power*100)}% generation. Thermal regulators recover power but use 6 energy/s each.`});
+ if(arena.climate?.heat)notes.push({level:s.insulators?'good':'warn',category:'Defense',text:`Ambient heat adds ${((arena.climate.heat)*env.protection).toFixed(1)} heat/s. Storm insulation reduces environmental heat; active cooling still matters.`});
+ if(arena.terrain.some(t=>['snow','ice'].includes(t.type))&&!s.hovering)notes.push({level:s.winterWheels||s.gyros?'good':'warn',category:'Mobility',text:'Ice and snow reduce control. Stud tires scale with their share of your running gear; a powered gyro restores up to 70% grip.'});
+ if(arena.terrain.some(t=>t.type==='brine'))notes.push({level:s.hovering||s.insulators?'good':'warn',category:'Systems',text:'Brine lanes drain 8 energy/s before insulation. Hovering avoids contact drain; paddle tires or treads reduce the slowdown.'});
  if(demand>1)notes.push({level:'warn',category:'Systems',text:`Energy reserve runs dry in about ${Math.max(1,Math.round(s.capacity/demand))}s of continuous fire. Add generation or reduce weapon demand.`});
  if(heat>1)notes.push({level:'warn',category:'Systems',text:`Continuous fire can overheat in about ${Math.max(1,Math.round(100/heat))}s in ${arena.name}. Add cooling or reduce continuous weapon heat; automatic purges consume power.`});
  const backwards=machine.modules.filter(m=>BY_ID[m.id].rate&&!BY_ID[m.id].arc&&!BY_ID[m.id].mine&&((m.r-(machine.front||0)+4)%4)===2);

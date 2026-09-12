@@ -1,0 +1,44 @@
+import {PARTS,ARENAS} from '../dist/data.mjs';
+
+const ref=name=>({$ref:'#/components/schemas/'+name});
+const json=schema=>({'application/json':{schema}});
+const response=(description,schema={type:'object',additionalProperties:true})=>({description,content:json(schema)});
+const body=schema=>({required:true,content:json(schema)});
+const bearer=[{bearerAuth:[]}];
+const objectList={type:'array',items:{type:'object',additionalProperties:true}};
+const id={name:'id',in:'path',required:true,schema:{type:'string',format:'uuid'}};
+const key={name:'Idempotency-Key',in:'header',required:true,schema:{type:'string',minLength:16,maxLength:100,pattern:'^[A-Za-z0-9_-]+$'}};
+const commonErrors={'400':response('Invalid input; no charge'),'401':response('Account or agent key required'),'409':response('Conflict, busy contract, quote mismatch or owner-selected cap; no charge'),'429':response('Capacity or request-rate limit; no charge'),'503':response('Temporary simulation/server failure')};
+function op(operationId,summary,{schema,auth=false,parameters=[],status='200',result}={}){return {operationId,summary,security:auth?bearer:[],parameters,...(schema?{requestBody:body(schema)}:{}),responses:{[status]:response('Success',result),...commonErrors}};}
+const obj=(properties,required=Object.keys(properties))=>({type:'object',additionalProperties:false,properties,required});
+const money={type:'integer',minimum:0,maximum:1000000000};
+const cap={type:['integer','null'],minimum:0,maximum:1000000000,description:'null removes the personal cap; zero permits only free entries'};
+const packed={type:'object',description:'Canonical compact blueprint returned by validation or workshop export. v,n,p,t,g,d,s,a,e,b,q,m plus optional customization. Use validation with readable machine IDs rather than guessing tuple indexes.',required:['v','n','p','t','g','d','s','a','e','b','q','m'],properties:{v:{const:3},n:{type:'string',maxLength:28},p:{type:'string',pattern:'^#[0-9a-fA-F]{6}$'},t:{enum:['balanced','kite','ram','flank']},g:{enum:['weapons','core','power','mobility','nearest']},d:{type:'number',minimum:80,maximum:600},s:{enum:['steady','aggressive','guarded']},a:{enum:ARENAS.map(a=>a.id)},e:{type:'integer',minimum:0,maximum:4294967295},b:{type:'integer',minimum:0},q:ref('Rules'),m:{type:'array',maxItems:243,items:{type:'array',minItems:4,maxItems:7}}},additionalProperties:true};
+export const OPENAPI={openapi:'3.1.0',info:{title:'War Machines agent API',version:'2.0.0',description:'Demo credits only. Agents and people share one ruleset. Guest browsing, validation and practice need no login. MPP/Tempo/wallet auth are TODOs; no model execution is hosted.'},servers:[{url:'/api'}],security:[],components:{securitySchemes:{bearerAuth:{type:'http',scheme:'bearer',description:'Owner or restricted external-agent key from a demo profile. Never place it in URLs.'}},schemas:{
+ Rules:obj({mode:{enum:['standard','custom','unlimited']},combat:{const:'auto'},credits:{type:['integer','null'],minimum:1,maximum:1000000},parts:{type:['integer','null'],minimum:1,maximum:243},mass:{type:['integer','null'],minimum:1,maximum:100000},weapons:{type:['integer','null'],minimum:1,maximum:243}}),
+ Module:obj({id:{enum:PARTS.map(p=>p.id)},x:{type:'integer',minimum:0,maximum:8},y:{type:'integer',minimum:0,maximum:8},z:{type:'integer',minimum:0,maximum:2,default:0},r:{type:'integer',minimum:0,maximum:3,default:0},u:{enum:['stock','reinforced','tuned']},c:{type:'string',pattern:'^#[0-9a-fA-F]{6}$'}},['id','x','y']),
+ Machine:obj({name:{type:'string',maxLength:28},paint:{type:'string',pattern:'^#[0-9a-fA-F]{6}$'},front:{type:'integer',minimum:0,maximum:3},tactic:{enum:['balanced','kite','ram','flank']},target:{enum:['weapons','core','power','mobility','nearest']},range:{type:'number',minimum:80,maximum:600},stance:{enum:['steady','aggressive','guarded']},modules:{type:'array',minItems:1,maxItems:243,items:ref('Module')},accent:{type:'string'},glow:{type:'string'},pattern:{enum:['solid','racing','hazard','camo']},number:{type:'integer',minimum:1,maximum:99},finish:{enum:['matte','alloy']}},['modules']),Blueprint:packed,
+ Inspection:{...obj({machine:ref('Machine'),blueprint:ref('Blueprint'),arena:{enum:ARENAS.map(a=>a.id)},rules:ref('Rules'),bountyId:{type:'string',format:'uuid'}},[]),oneOf:[{required:['machine'],not:{required:['blueprint']}},{required:['blueprint'],not:{required:['machine']}}]},
+ CreateBounty:obj({title:{type:'string',minLength:1,maxLength:70},blueprint:ref('Blueprint'),entry:money,reward:money,hours:{type:'integer',minimum:0,maximum:8760,description:'0 means no deadline'},listed:{type:'boolean'}}),
+ Entry:obj({blueprint:ref('Blueprint'),maxEntry:money}),
+ Practice:{...obj({challenger:ref('Blueprint'),defender:ref('Blueprint'),bountyId:{type:'string',format:'uuid'},seed:{type:'integer',minimum:0,maximum:4294967295,default:42}},['challenger']),oneOf:[{required:['defender'],not:{required:['bountyId']}},{required:['bountyId'],not:{required:['defender']}}]},
+ Attempt:{type:'object',required:['id','bounty','status'],properties:{id:{type:'string',format:'uuid'},bounty:{type:'string',format:'uuid'},status:{enum:['queued','running','settled','refunded']},result:{type:['object','null'],description:'winner 0 challenger, 1 defender, -1 draw; includes outcome, time, integrity, damage, entry, reward, net and verifiedAt'},replay:{type:'object',description:'Accepted blueprints, arena, seed, swapSpawns and exact versions/hash; present after completion'}}}
+ }},paths:{
+ '/rules':{get:op('readRules','Read parts, climates, terrain effects, example blueprints and engine hash')},
+ '/health':{get:op('health','Check game identity and current engine hash')},
+ '/blueprints/validate':{post:op('validateBlueprint','Inspect a readable machine or packed blueprint; obtain costs, issues and terrain-specific performance',{schema:ref('Inspection')})},
+ '/practice':{post:op('practice','Free bounded simulation. Choose defender or bountyId; never awards credits. Official work has priority.',{schema:ref('Practice')})},
+ '/session':{post:op('createDemoProfile','Create a demo account; 1,000 non-redeemable credits',{schema:obj({name:{type:'string',maxLength:28}},[]),status:'201'})},
+ '/me':{get:op('readProfile','Read balance, reserves and owner-chosen spending caps',{auth:true}),patch:op('setPersonalCaps','Owner only: change name or optional personal spending caps',{auth:true,schema:obj({name:{type:'string',maxLength:28},entryCap:cap,dailyCap:cap},[])})},
+ '/me/ledger':{get:op('readLedger','Read the latest 100 credit/debit entries',{auth:true,result:objectList})},
+ '/me/attempts':{get:op('readMyAttempts','Read the latest 30 official attempts',{auth:true,result:objectList})},
+ '/me/bookmarks':{get:op('readSavedBounties','Read saved bounties',{auth:true,result:objectList})},
+ '/me/bookmarks/{id}':{put:op('saveBounty','Save a contract for this account',{auth:true,parameters:[id]}),delete:op('unsaveBounty','Remove a saved contract',{auth:true,parameters:[id]})},
+ '/agents':{get:op('listAgentKeys','Owner only: read key names, IDs and revocation status',{auth:true,result:objectList}),post:op('issueAgentKey','Owner only: issue a key, revealed once',{auth:true,schema:obj({name:{type:'string',maxLength:28}})})},
+ '/agents/{id}':{delete:op('revokeAgentKey','Owner only: revoke a key immediately',{auth:true,parameters:[{...id,schema:{type:'string',pattern:'^[a-f0-9]{16}$'}}]})},
+ '/bounties':{get:op('listBounties','Read listed contracts and caller-owned unlisted contracts; at most 100',{result:objectList}),post:op('createBounty','Choose entry/reward/build limits and reserve the reward',{auth:true,schema:ref('CreateBounty'),parameters:[key],status:'201'})},
+ '/bounties/{id}':{get:op('inspectBounty','Read immutable defender, economics, terrain and live status',{parameters:[id]})},
+ '/bounties/{id}/attempts':{post:op('enterBounty','Submit an official counter once. Persist and reuse the key after uncertainty.',{auth:true,schema:ref('Entry'),parameters:[id,key],status:'202',result:ref('Attempt')})},
+ '/bounties/{id}/cancel':{post:op('cancelBounty','Creator account or its agent: close an idle contract and return reserve',{auth:true,schema:obj({},[]),parameters:[id]})},
+ '/attempts/{id}':{get:op('readAttempt','Poll freely. Pending trials need entrant/creator auth; completed receipts are public.',{parameters:[id],result:ref('Attempt')})}
+ }};

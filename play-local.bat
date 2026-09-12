@@ -1,9 +1,11 @@
 @echo off
 cd /d "%~dp0"
-where python >nul 2>&1
+where node >nul 2>&1
 if errorlevel 1 (
-  py -3 serve.py --open
-) else (
-  python serve.py --open
+  echo Install Node.js 22.21.1 or newer to run demo bounties.
+  echo For the static sandbox only, run: python serve.py --open
+  pause
+  exit /b 1
 )
+node server.mjs --open
 if errorlevel 1 pause

@@ -1,0 +1,1064 @@
+{
+  "engineHash": "2fe16a3a6e64b6ceb62f65db9ea14a5be12677f6030b1ef2a0949bd58a97fdc4",
+  "factory": {
+    "seeds": [
+      117,
+      93542
+    ],
+    "matches": 1980,
+    "summary": [
+      {
+        "name": "Ironclad",
+        "cost": 1145,
+        "mass": 213,
+        "wins": 296,
+        "losses": 100,
+        "draws": 0,
+        "byArena": {
+          "foundry": {
+            "wins": 27,
+            "losses": 9,
+            "draws": 0
+          },
+          "salt": {
+            "wins": 24,
+            "losses": 12,
+            "draws": 0
+          },
+          "furnace": {
+            "wins": 24,
+            "losses": 12,
+            "draws": 0
+          },
+          "scrapyard": {
+            "wins": 29,
+            "losses": 7,
+            "draws": 0
+          },
+          "glacier": {
+            "wins": 29,
+            "losses": 7,
+            "draws": 0
+          },
+          "badlands": {
+            "wins": 25,
+            "losses": 11,
+            "draws": 0
+          },
+          "reservoir": {
+            "wins": 29,
+            "losses": 7,
+            "draws": 0
+          },
+          "quarry": {
+            "wins": 27,
+            "losses": 9,
+            "draws": 0
+          },
+          "permafrost": {
+            "wins": 32,
+            "losses": 4,
+            "draws": 0
+          },
+          "sunscar": {
+            "wins": 25,
+            "losses": 11,
+            "draws": 0
+          },
+          "brineworks": {
+            "wins": 25,
+            "losses": 11,
+            "draws": 0
+          }
+        },
+        "winRate": 0.7474747474747475
+      },
+      {
+        "name": "Nemesis",
+        "cost": 1005,
+        "mass": 128,
+        "wins": 295,
+        "losses": 101,
+        "draws": 0,
+        "byArena": {
+          "foundry": {
+            "wins": 24,
+            "losses": 12,
+            "draws": 0
+          },
+          "salt": {
+            "wins": 30,
+            "losses": 6,
+            "draws": 0
+          },
+          "furnace": {
+            "wins": 27,
+            "losses": 9,
+            "draws": 0
+          },
+          "scrapyard": {
+            "wins": 25,
+            "losses": 11,
+            "draws": 0
+          },
+          "glacier": {
+            "wins": 23,
+            "losses": 13,
+            "draws": 0
+          },
+          "badlands": {
+            "wins": 29,
+            "losses": 7,
+            "draws": 0
+          },
+          "reservoir": {
+            "wins": 29,
+            "losses": 7,
+            "draws": 0
+          },
+          "quarry": {
+            "wins": 27,
+            "losses": 9,
+            "draws": 0
+          },
+          "permafrost": {
+            "wins": 24,
+            "losses": 12,
+            "draws": 0
+          },
+          "sunscar": {
+            "wins": 28,
+            "losses": 8,
+            "draws": 0
+          },
+          "brineworks": {
+            "wins": 29,
+            "losses": 7,
+            "draws": 0
+          }
+        },
+        "winRate": 0.7449494949494949
+      },
+      {
+        "name": "Bullfrog",
+        "cost": 815,
+        "mass": 167,
+        "wins": 264,
+        "losses": 132,
+        "draws": 0,
+        "byArena": {
+          "foundry": {
+            "wins": 26,
+            "losses": 10,
+            "draws": 0
+          },
+          "salt": {
+            "wins": 24,
+            "losses": 12,
+            "draws": 0
+          },
+          "furnace": {
+            "wins": 24,
+            "losses": 12,
+            "draws": 0
+          },
+          "scrapyard": {
+            "wins": 24,
+            "losses": 12,
+            "draws": 0
+          },
+          "glacier": {
+            "wins": 26,
+            "losses": 10,
+            "draws": 0
+          },
+          "badlands": {
+            "wins": 20,
+            "losses": 16,
+            "draws": 0
+          },
+          "reservoir": {
+            "wins": 24,
+            "losses": 12,
+            "draws": 0
+          },
+          "quarry": {
+            "wins": 25,
+            "losses": 11,
+            "draws": 0
+          },
+          "permafrost": {
+            "wins": 22,
+            "losses": 14,
+            "draws": 0
+          },
+          "sunscar": {
+            "wins": 25,
+            "losses": 11,
+            "draws": 0
+          },
+          "brineworks": {
+            "wins": 24,
+            "losses": 12,
+            "draws": 0
+          }
+        },
+        "winRate": 0.6666666666666666
+      },
+      {
+        "name": "Citadel",
+        "cost": 1175,
+        "mass": 220,
+        "wins": 238,
+        "losses": 154,
+        "draws": 4,
+        "byArena": {
+          "foundry": {
+            "wins": 20,
+            "losses": 16,
+            "draws": 0
+          },
+          "salt": {
+            "wins": 23,
+            "losses": 13,
+            "draws": 0
+          },
+          "furnace": {
+            "wins": 20,
+            "losses": 16,
+            "draws": 0
+          },
+          "scrapyard": {
+            "wins": 22,
+            "losses": 14,
+            "draws": 0
+          },
+          "glacier": {
+            "wins": 22,
+            "losses": 13,
+            "draws": 1
+          },
+          "badlands": {
+            "wins": 25,
+            "losses": 10,
+            "draws": 1
+          },
+          "reservoir": {
+            "wins": 23,
+            "losses": 13,
+            "draws": 0
+          },
+          "quarry": {
+            "wins": 25,
+            "losses": 11,
+            "draws": 0
+          },
+          "permafrost": {
+            "wins": 20,
+            "losses": 15,
+            "draws": 1
+          },
+          "sunscar": {
+            "wins": 17,
+            "losses": 18,
+            "draws": 1
+          },
+          "brineworks": {
+            "wins": 21,
+            "losses": 15,
+            "draws": 0
+          }
+        },
+        "winRate": 0.601010101010101
+      },
+      {
+        "name": "Wraith",
+        "cost": 1146,
+        "mass": 178,
+        "wins": 201,
+        "losses": 193,
+        "draws": 2,
+        "byArena": {
+          "foundry": {
+            "wins": 20,
+            "losses": 16,
+            "draws": 0
+          },
+          "salt": {
+            "wins": 16,
+            "losses": 20,
+            "draws": 0
+          },
+          "furnace": {
+            "wins": 10,
+            "losses": 25,
+            "draws": 1
+          },
+          "scrapyard": {
+            "wins": 23,
+            "losses": 13,
+            "draws": 0
+          },
+          "glacier": {
+            "wins": 19,
+            "losses": 17,
+            "draws": 0
+          },
+          "badlands": {
+            "wins": 25,
+            "losses": 11,
+            "draws": 0
+          },
+          "reservoir": {
+            "wins": 16,
+            "losses": 20,
+            "draws": 0
+          },
+          "quarry": {
+            "wins": 17,
+            "losses": 19,
+            "draws": 0
+          },
+          "permafrost": {
+            "wins": 18,
+            "losses": 17,
+            "draws": 1
+          },
+          "sunscar": {
+            "wins": 20,
+            "losses": 16,
+            "draws": 0
+          },
+          "brineworks": {
+            "wins": 17,
+            "losses": 19,
+            "draws": 0
+          }
+        },
+        "winRate": 0.5075757575757576
+      },
+      {
+        "name": "Longbow",
+        "cost": 760,
+        "mass": 118,
+        "wins": 184,
+        "losses": 212,
+        "draws": 0,
+        "byArena": {
+          "foundry": {
+            "wins": 20,
+            "losses": 16,
+            "draws": 0
+          },
+          "salt": {
+            "wins": 12,
+            "losses": 24,
+            "draws": 0
+          },
+          "furnace": {
+            "wins": 23,
+            "losses": 13,
+            "draws": 0
+          },
+          "scrapyard": {
+            "wins": 21,
+            "losses": 15,
+            "draws": 0
+          },
+          "glacier": {
+            "wins": 14,
+            "losses": 22,
+            "draws": 0
+          },
+          "badlands": {
+            "wins": 14,
+            "losses": 22,
+            "draws": 0
+          },
+          "reservoir": {
+            "wins": 12,
+            "losses": 24,
+            "draws": 0
+          },
+          "quarry": {
+            "wins": 16,
+            "losses": 20,
+            "draws": 0
+          },
+          "permafrost": {
+            "wins": 17,
+            "losses": 19,
+            "draws": 0
+          },
+          "sunscar": {
+            "wins": 18,
+            "losses": 18,
+            "draws": 0
+          },
+          "brineworks": {
+            "wins": 17,
+            "losses": 19,
+            "draws": 0
+          }
+        },
+        "winRate": 0.46464646464646464
+      },
+      {
+        "name": "Marauder",
+        "cost": 667,
+        "mass": 111,
+        "wins": 153,
+        "losses": 238,
+        "draws": 5,
+        "byArena": {
+          "foundry": {
+            "wins": 14,
+            "losses": 22,
+            "draws": 0
+          },
+          "salt": {
+            "wins": 15,
+            "losses": 21,
+            "draws": 0
+          },
+          "furnace": {
+            "wins": 13,
+            "losses": 22,
+            "draws": 1
+          },
+          "scrapyard": {
+            "wins": 12,
+            "losses": 24,
+            "draws": 0
+          },
+          "glacier": {
+            "wins": 17,
+            "losses": 19,
+            "draws": 0
+          },
+          "badlands": {
+            "wins": 15,
+            "losses": 20,
+            "draws": 1
+          },
+          "reservoir": {
+            "wins": 16,
+            "losses": 20,
+            "draws": 0
+          },
+          "quarry": {
+            "wins": 13,
+            "losses": 23,
+            "draws": 0
+          },
+          "permafrost": {
+            "wins": 15,
+            "losses": 19,
+            "draws": 2
+          },
+          "sunscar": {
+            "wins": 11,
+            "losses": 24,
+            "draws": 1
+          },
+          "brineworks": {
+            "wins": 12,
+            "losses": 24,
+            "draws": 0
+          }
+        },
+        "winRate": 0.38636363636363635
+      },
+      {
+        "name": "Blackout",
+        "cost": 830,
+        "mass": 111,
+        "wins": 137,
+        "losses": 258,
+        "draws": 1,
+        "byArena": {
+          "foundry": {
+            "wins": 10,
+            "losses": 26,
+            "draws": 0
+          },
+          "salt": {
+            "wins": 17,
+            "losses": 19,
+            "draws": 0
+          },
+          "furnace": {
+            "wins": 10,
+            "losses": 26,
+            "draws": 0
+          },
+          "scrapyard": {
+            "wins": 8,
+            "losses": 28,
+            "draws": 0
+          },
+          "glacier": {
+            "wins": 15,
+            "losses": 20,
+            "draws": 1
+          },
+          "badlands": {
+            "wins": 10,
+            "losses": 26,
+            "draws": 0
+          },
+          "reservoir": {
+            "wins": 17,
+            "losses": 19,
+            "draws": 0
+          },
+          "quarry": {
+            "wins": 13,
+            "losses": 23,
+            "draws": 0
+          },
+          "permafrost": {
+            "wins": 12,
+            "losses": 24,
+            "draws": 0
+          },
+          "sunscar": {
+            "wins": 10,
+            "losses": 26,
+            "draws": 0
+          },
+          "brineworks": {
+            "wins": 15,
+            "losses": 21,
+            "draws": 0
+          }
+        },
+        "winRate": 0.34595959595959597
+      },
+      {
+        "name": "Sidewinder",
+        "cost": 657,
+        "mass": 92,
+        "wins": 108,
+        "losses": 288,
+        "draws": 0,
+        "byArena": {
+          "foundry": {
+            "wins": 9,
+            "losses": 27,
+            "draws": 0
+          },
+          "salt": {
+            "wins": 10,
+            "losses": 26,
+            "draws": 0
+          },
+          "furnace": {
+            "wins": 11,
+            "losses": 25,
+            "draws": 0
+          },
+          "scrapyard": {
+            "wins": 9,
+            "losses": 27,
+            "draws": 0
+          },
+          "glacier": {
+            "wins": 8,
+            "losses": 28,
+            "draws": 0
+          },
+          "badlands": {
+            "wins": 10,
+            "losses": 26,
+            "draws": 0
+          },
+          "reservoir": {
+            "wins": 10,
+            "losses": 26,
+            "draws": 0
+          },
+          "quarry": {
+            "wins": 8,
+            "losses": 28,
+            "draws": 0
+          },
+          "permafrost": {
+            "wins": 13,
+            "losses": 23,
+            "draws": 0
+          },
+          "sunscar": {
+            "wins": 9,
+            "losses": 27,
+            "draws": 0
+          },
+          "brineworks": {
+            "wins": 11,
+            "losses": 25,
+            "draws": 0
+          }
+        },
+        "winRate": 0.2727272727272727
+      },
+      {
+        "name": "Firefly",
+        "cost": 677,
+        "mass": 86,
+        "wins": 98,
+        "losses": 298,
+        "draws": 0,
+        "byArena": {
+          "foundry": {
+            "wins": 10,
+            "losses": 26,
+            "draws": 0
+          },
+          "salt": {
+            "wins": 9,
+            "losses": 27,
+            "draws": 0
+          },
+          "furnace": {
+            "wins": 17,
+            "losses": 19,
+            "draws": 0
+          },
+          "scrapyard": {
+            "wins": 7,
+            "losses": 29,
+            "draws": 0
+          },
+          "glacier": {
+            "wins": 6,
+            "losses": 30,
+            "draws": 0
+          },
+          "badlands": {
+            "wins": 6,
+            "losses": 30,
+            "draws": 0
+          },
+          "reservoir": {
+            "wins": 4,
+            "losses": 32,
+            "draws": 0
+          },
+          "quarry": {
+            "wins": 9,
+            "losses": 27,
+            "draws": 0
+          },
+          "permafrost": {
+            "wins": 5,
+            "losses": 31,
+            "draws": 0
+          },
+          "sunscar": {
+            "wins": 16,
+            "losses": 20,
+            "draws": 0
+          },
+          "brineworks": {
+            "wins": 9,
+            "losses": 27,
+            "draws": 0
+          }
+        },
+        "winRate": 0.2474747474747475
+      }
+    ],
+    "arenaSummary": [
+      {
+        "id": "foundry",
+        "matches": 180,
+        "leftWins": 93,
+        "rightWins": 87,
+        "draws": 0,
+        "timeouts": 2,
+        "meanSeconds": 27.25444444444411
+      },
+      {
+        "id": "salt",
+        "matches": 180,
+        "leftWins": 90,
+        "rightWins": 90,
+        "draws": 0,
+        "timeouts": 1,
+        "meanSeconds": 25.715740740740394
+      },
+      {
+        "id": "furnace",
+        "matches": 180,
+        "leftWins": 91,
+        "rightWins": 88,
+        "draws": 1,
+        "timeouts": 9,
+        "meanSeconds": 34.19768518518448
+      },
+      {
+        "id": "scrapyard",
+        "matches": 180,
+        "leftWins": 91,
+        "rightWins": 89,
+        "draws": 0,
+        "timeouts": 2,
+        "meanSeconds": 28.15101851851813
+      },
+      {
+        "id": "glacier",
+        "matches": 180,
+        "leftWins": 93,
+        "rightWins": 86,
+        "draws": 1,
+        "timeouts": 6,
+        "meanSeconds": 30.197777777777258
+      },
+      {
+        "id": "badlands",
+        "matches": 180,
+        "leftWins": 96,
+        "rightWins": 83,
+        "draws": 1,
+        "timeouts": 7,
+        "meanSeconds": 35.679814814813994
+      },
+      {
+        "id": "reservoir",
+        "matches": 180,
+        "leftWins": 90,
+        "rightWins": 90,
+        "draws": 0,
+        "timeouts": 2,
+        "meanSeconds": 25.593888888888554
+      },
+      {
+        "id": "quarry",
+        "matches": 180,
+        "leftWins": 91,
+        "rightWins": 89,
+        "draws": 0,
+        "timeouts": 5,
+        "meanSeconds": 31.931388888888286
+      },
+      {
+        "id": "permafrost",
+        "matches": 180,
+        "leftWins": 85,
+        "rightWins": 93,
+        "draws": 2,
+        "timeouts": 4,
+        "meanSeconds": 29.998148148147646
+      },
+      {
+        "id": "sunscar",
+        "matches": 180,
+        "leftWins": 86,
+        "rightWins": 93,
+        "draws": 1,
+        "timeouts": 9,
+        "meanSeconds": 40.169074074073045
+      },
+      {
+        "id": "brineworks",
+        "matches": 180,
+        "leftWins": 91,
+        "rightWins": 89,
+        "draws": 0,
+        "timeouts": 6,
+        "meanSeconds": 30.585462962962428
+      }
+    ],
+    "validPresets": [
+      {
+        "name": "Marauder",
+        "issues": []
+      },
+      {
+        "name": "Longbow",
+        "issues": []
+      },
+      {
+        "name": "Bullfrog",
+        "issues": []
+      },
+      {
+        "name": "Sidewinder",
+        "issues": []
+      },
+      {
+        "name": "Blackout",
+        "issues": []
+      },
+      {
+        "name": "Ironclad",
+        "issues": []
+      },
+      {
+        "name": "Firefly",
+        "issues": []
+      },
+      {
+        "name": "Nemesis",
+        "issues": []
+      },
+      {
+        "name": "Citadel",
+        "issues": []
+      },
+      {
+        "name": "Wraith",
+        "issues": []
+      }
+    ]
+  },
+  "climate": {
+    "seeds": [
+      49003,
+      77581
+    ],
+    "matches": 224,
+    "method": "Matched chassis except named equipment changes, same 1200-credit ceiling, actual costs disclosed. Two opponents, two held-out seeds, both spawn positions. Costs are not equalized with dummy armor; this is sensitivity screening, not a universal fairness claim.",
+    "summary": [
+      {
+        "name": "Rally baseline",
+        "cost": 667,
+        "byArena": [
+          {
+            "arena": "foundry",
+            "wins": 4,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 2
+          },
+          {
+            "arena": "permafrost",
+            "wins": 6,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 0
+          },
+          {
+            "arena": "sunscar",
+            "wins": 3,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 11
+          },
+          {
+            "arena": "brineworks",
+            "wins": 6,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 0
+          }
+        ]
+      },
+      {
+        "name": "Stud tires",
+        "cost": 719,
+        "byArena": [
+          {
+            "arena": "foundry",
+            "wins": 6,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 3
+          },
+          {
+            "arena": "permafrost",
+            "wins": 7,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 0
+          },
+          {
+            "arena": "sunscar",
+            "wins": 2,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 9
+          },
+          {
+            "arena": "brineworks",
+            "wins": 7,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 0
+          }
+        ]
+      },
+      {
+        "name": "Paddle tires",
+        "cost": 719,
+        "byArena": [
+          {
+            "arena": "foundry",
+            "wins": 6,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 3
+          },
+          {
+            "arena": "permafrost",
+            "wins": 8,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 0
+          },
+          {
+            "arena": "sunscar",
+            "wins": 4,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 12
+          },
+          {
+            "arena": "brineworks",
+            "wins": 5,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 1
+          }
+        ]
+      },
+      {
+        "name": "Insulated",
+        "cost": 722,
+        "byArena": [
+          {
+            "arena": "foundry",
+            "wins": 5,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 3
+          },
+          {
+            "arena": "permafrost",
+            "wins": 7,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 0
+          },
+          {
+            "arena": "sunscar",
+            "wins": 1,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 9
+          },
+          {
+            "arena": "brineworks",
+            "wins": 5,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 2
+          }
+        ]
+      },
+      {
+        "name": "Regulated",
+        "cost": 727,
+        "byArena": [
+          {
+            "arena": "foundry",
+            "wins": 5,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 4
+          },
+          {
+            "arena": "permafrost",
+            "wins": 6,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 1
+          },
+          {
+            "arena": "sunscar",
+            "wins": 3,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 10
+          },
+          {
+            "arena": "brineworks",
+            "wins": 4,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 4
+          }
+        ]
+      },
+      {
+        "name": "Stabilized",
+        "cost": 732,
+        "byArena": [
+          {
+            "arena": "foundry",
+            "wins": 5,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 4
+          },
+          {
+            "arena": "permafrost",
+            "wins": 6,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 0
+          },
+          {
+            "arena": "sunscar",
+            "wins": 3,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 11
+          },
+          {
+            "arena": "brineworks",
+            "wins": 3,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 4
+          }
+        ]
+      },
+      {
+        "name": "Flechette",
+        "cost": 692,
+        "byArena": [
+          {
+            "arena": "foundry",
+            "wins": 3,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 2
+          },
+          {
+            "arena": "permafrost",
+            "wins": 4,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 0
+          },
+          {
+            "arena": "sunscar",
+            "wins": 2,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 11
+          },
+          {
+            "arena": "brineworks",
+            "wins": 4,
+            "draws": 0,
+            "matches": 8,
+            "overheats": 1
+          }
+        ]
+      }
+    ]
+  },
+  "sourceCanonicalization": "SHA-256 of engine + data with LF line endings; physics unchanged by normalization"
+}

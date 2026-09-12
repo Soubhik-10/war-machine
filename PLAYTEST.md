@@ -1,3 +1,38 @@
+# Agent season 02 — 12 September 2026
+
+Current verification supersedes historical notes below. Details: docs/BALANCE-REPORT.md.
+
+- 107 automated tests; portable LF/CRLF release fingerprints; 1,980 factory matches; 224 climate sensitivity matches.
+- External engineer dry run: ten candidates, 60 training matches, 4/4 held-out wins with Longbow and no credits spent. Archived-engine mismatch refused correctly.
+- Real CLI validation, bookmark, official climate entry and idempotent retry tested in a separate temporary account/database.
+- Desktop and 390×844 landing/agent/contract views, live Wraith art, colorways and guest API lab checked. Browser error log empty.
+- Created an unlisted zero-entry/zero-reward unlimited Permafrost contract with no deadline. Saved it, filtered Saved by arena/title/zero fee and reopened it.
+- Autonomous free practice at 4×: victory at 24.8s, 1,311 damage; unchanged balance. Result card readable on mobile with a neutral scrim.
+- Ice shader changed to irregular subdued veins; snow is matte. Cosmetic rendering remains independent of physics.
+- Temporary free contract was unsaved and closed; the account balance remained unchanged.
+- Final 241-part worker probes finished in 10.82s and 10.85s.
+- Tempo auth, MPP, mainnet and hosting are TODOs/unconfigured. Source push does not deploy a site.
+
+---
+
+# Demo bounty release — 12 September 2026
+
+The current build adds a local authoritative Node/SQLite bounty server, demo credits and external-agent API. MPP, Tempo, wallets, mainnet and paid hosting remain disabled/TODO. No npm dependencies or hosted AI calls were added.
+
+- 91 automated tests passed, including actual HTTP worker settlement, concurrent entrants, idempotency, refunds, expiry/restart recovery, caps and new terrain mechanics.
+- 1,080 baseline and 1,440 final factory matches measured the balance changes. See [docs/BALANCE-REPORT.md](docs/BALANCE-REPORT.md) for comparable arena samples, costs, limitations and reproducible scripts.
+- Two browser identities created/shared a custom capped coolant contract. Practice left the balance unchanged. Official victory settled the reward once and closed the bounty.
+- Final-version official trial: Marauder versus Firefly in Coolant Basin, seed 4145459044, victory at 12.5 seconds, 1,144 damage, 93.7% versus 33.9% integrity, +90 net credits. Browser exact replay matched the time/damage/result and could not spend or award credits.
+- Tested 390×844 viewport: unlimited quarry creation preserved all uncapped fields, cancellation returned all 100 reserved credits, and focused battle navigation stayed usable without horizontal page overflow. The normal viewport was restored.
+- A new draft named “Draft survives replay” remained intact after replaying an earlier Marauder trial and choosing Refit. The original draft name was restored after testing.
+- Added an in-arena Contract return button and clear verified-replay actions. No errors/warnings appeared in the final browser console check.
+- Final transition checks: Heavy caps carry into Custom contract creation; switching to Unlimited and back restores all four custom values. Eight archived contracts remained browsable after balance changes. Release stamps prevent old tabs from claiming to use new physics.
+- Both 241-part worker probes completed a full 100-second simulated match within the 30-second limit (about 10.3 and 10.5 wall seconds locally). Actual phone hardware and eventual hosting capacity are unmeasured.
+
+The sections below are historical notes from earlier releases; their old test counts, controls and static-only statements do not describe the current bounty server.
+
+---
+
 # Engineering edition — September 2026
 
 Direct combat controls were removed in this revision. Workshop doctrine and hardware determine how both machines fight. Camera, pause, inspection, and replay remain available.

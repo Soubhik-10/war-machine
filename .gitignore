@@ -3,3 +3,9 @@ node_modules/
 *.log
 .env*
 __pycache__/
+.openai/
+var/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+work/

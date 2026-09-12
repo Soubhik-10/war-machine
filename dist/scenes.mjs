@@ -1,7 +1,7 @@
 import {Geometry} from './renderer.mjs';
 import {BY_ID,partSpec,keyOf,connected,LAYER_HEIGHT,terrainAt} from './data.mjs';
 import {world,CELL} from './engine.mjs';
-const colors={sand:'#bca47c',mud:'#4f4c39',oil:'#24363a',ice:'#82c3d0',lava:'#a74c29',vent:'#282c2b',ridge:'#ac8466'};
+const colors={snow:'#c1d8dc',brine:'#577966',sand:'#bca47c',mud:'#4f4c39',oil:'#24363a',ice:'#82c3d0',lava:'#a74c29',vent:'#282c2b',ridge:'#ac8466',coolant:'#4b9f90',rubble:'#827463'};
 const noise=n=>{const x=Math.sin(n*73.19+13)*4731;return x-Math.floor(x);};
 const sceneCache=new Map();
 const wx=x=>(x-600)/CELL,wz=y=>(y-400)/CELL;
@@ -20,7 +20,7 @@ export function workshopScene(machine,{hover=null,selected='cannon',rotation=0,e
  return g;
 }
 function environment(arena){
- if(sceneCache.has(arena.id))return sceneCache.get(arena.id);const g=new Geometry(),[floor,wall,trim]=arena.palette,industrial=['foundry','furnace','scrapyard'].includes(arena.id);g.material=industrial?4:arena.id==='glacier'?6:5;
+ if(sceneCache.has(arena.id))return sceneCache.get(arena.id);const g=new Geometry(),[floor,wall,trim]=arena.palette,industrial=['foundry','furnace','scrapyard'].includes(arena.id);g.material=industrial||arena.id==='permafrost'?4:arena.id==='glacier'?6:5;
  g.box(0,-.3,0,57,.6,40,'#202b30');g.box(0,-.04,0,52.2,.08,34.8,floor);
  for(let z=-17;z<17;z+=4.35)for(let x=-26;x<26;x+=4.35){if(industrial){g.box(x+2.16,.005,z+2.16,4.28,.01,4.28,noise(x*30+z)>.5?floor:wall);g.box(x+2.16,.013,z+2.16,4.18,.008,4.18,floor);for(const dx of [.15,4.15])for(const dz of [.15,4.15])g.cylinder([x+dx,.019,z+dz],[x+dx,.024,z+dz],.035,'#778382',6);}else{for(let k=0;k<3;k++){const n=x*70+z*5+k;g.box(x+noise(n)*4.1,.009,z+noise(n+1)*4.1,.4+noise(n+2),.01,.028,wall);}}}
  for(const x of [-26.3,26.3]){g.bevel(x,.26,0,.55,.52,36,wall);g.box(x,.55,0,.14,.07,35,trim);}
@@ -29,12 +29,14 @@ function environment(arena){
  for(const x of [-24.5,24.5])for(const z of [-15.5,15.5]){g.box(x,.03,z,1.35,.05,1.35,'#26343c');g.cylinder([x,.05,z],[x,3.4,z],.08,wall,8);g.box(x,3.5,z,1.15,.16,.35,'#3b464a');g.box(x,3.42,z,.98,.04,.3,'#e4dbc0',.9);}
  if(industrial){for(const x of [-21,21]){g.box(x,.03,0,.58,.05,30,'#1f2c31');for(let z=-14;z<=14;z+=.55)g.box(x,.065,z,.6,.035,.12,'#687474');}for(const z of [-12.5,12.5])for(let x=-23;x<23;x+=2)g.box(x,.025,z,1,.015,.11,trim);}
  for(const [i,t] of arena.terrain.entries()){
-  const x=wx(t.x+t.w/2),z=wz(t.y+t.h/2),w=t.w/CELL,d=t.h/CELL,col=colors[t.type];g.material=({ridge:5,sand:5,mud:9,ice:6,oil:8,lava:7,vent:2})[t.type];
+  const x=wx(t.x+t.w/2),z=wz(t.y+t.h/2),w=t.w/CELL,d=t.h/CELL,col=colors[t.type];g.material=({snow:5,brine:8,ridge:5,sand:5,mud:9,ice:6,oil:8,lava:7,vent:2,coolant:6,rubble:5})[t.type];
   if(t.type==='ridge'){const nx=10,nz=8;for(let iz=0;iz<nz;iz++)for(let ix=0;ix<nx;ix++){const point=(a,b)=>{const px=t.x+t.w*a/nx,py=t.y+t.h*b/nz;return [wx(px),terrainAt(arena,px,py).height/CELL+.015,wz(py)];};g.quad(point(ix,iz),point(ix,iz+1),point(ix+1,iz+1),point(ix+1,iz),noise(ix+iz*10)>.3?col:wall);}continue;}
   g.bevel(x,.04,z,w,.06,d,col);
   if(t.type==='vent'){for(let k=-w/2+.2;k<w/2;k+=.35)g.box(x+k,.12,z,.14,.13,d-.12,'#5b6767');for(const zz of [z-d/2,z+d/2])g.box(x,.13,zz,w,.05,.11,'#d8ad57');}
-  if(['sand','mud'].includes(t.type))for(let n=0;n<35;n++){const px=x+(noise(n+i*100)-.5)*(w-.4),pz=z+(noise(n+51+i*100)-.5)*(d-.4);g.box(px,.08,pz,.15+noise(n+8)*.3,.04,.06,wall);}
+  if(['sand','mud','rubble','snow'].includes(t.type))for(let n=0;n<35;n++){const px=x+(noise(n+i*100)-.5)*(w-.4),pz=z+(noise(n+51+i*100)-.5)*(d-.4);g.box(px,.08,pz,.15+noise(n+8)*.3,.04,.06,wall);}
   if(t.type==='oil')for(let n=0;n<8;n++)g.ring(x+(noise(n)-.5)*w*.65,.083,z+(noise(n+10)-.5)*d*.65,.25+noise(n+1)*.5,.05,'#425c60');
+  if(t.type==='brine'){for(let n=0;n<7;n++)g.ring(x+(noise(n+i)-.5)*w*.7,.085,z+(noise(n+i+14)-.5)*d*.7,.18+noise(n+3)*.3,.028,'#a7bfa3',.1);}
+  if(t.type==='coolant'){for(let n=0;n<8;n++)g.box(x-w*.4+n*w*.1,.09,z,w*.06,.02,d*.85,'#91d2b8',.08);}
   if(t.type==='ice')for(let n=0;n<9;n++){const px=x+(noise(n+i*20)-.5)*w*.8;g.cylinder([px,.085,z-d*.35],[px+.5,.085,z+d*.35],.02,'#c2eff3',5,.2);}
   if(t.type==='lava')for(let n=0;n<15;n++)g.box(x+(noise(n)-.5)*w*.9,.085,z+(noise(n+20)-.5)*d*.9,.6,.04,.07,'#f29c40',.65);
  }
