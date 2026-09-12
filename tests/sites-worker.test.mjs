@@ -24,6 +24,7 @@ const call=async(env,url,method,body,token,key)=>{const response=await worker.fe
 
 test('Sites Worker + D1 supports private build vaults and authoritative demo bounty settlement',async t=>{
  const DB=new D1Mock();await DB.migrate();t.after(()=>DB.close());const env={DB,ASSETS:{fetch:()=>new Response('asset')}};
+ const home=await worker.fetch(new Request('https://foundry.example/'),env);assert.equal(home.status,200);assert.match(await home.text(),/WAR MACHINES/);
  const owner=(await call(env,'/api/session','POST',{name:'Owner'})).body,challenger=(await call(env,'/api/session','POST',{name:'Challenger'})).body;
  const blueprint=packChallenge(PRESETS[0],'foundry',0),saved=await call(env,'/api/me/builds','POST',{name:'Owner design',blueprint},owner.token,'save_worker_build_0001');
  assert.equal(saved.status,201,JSON.stringify(saved.body));const builds=await call(env,'/api/me/builds','GET',undefined,owner.token);assert.equal(builds.body.length,1);assert.equal(builds.body[0].name,'Owner design');

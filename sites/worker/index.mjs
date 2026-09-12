@@ -4,6 +4,7 @@ import {engineeringReport} from '../../dist/engineering.mjs';
 import {CLIENT_ENGINE_HASH} from '../../dist/release.mjs';
 import {CREDIT_SCALE,PLATFORM_FEE_BPS,PLATFORM_FEE_POLICY,rewardQuote} from '../../dist/economy.mjs';
 import {PART_GUIDANCE} from '../../dist/part-guidance.mjs';
+import {serveStaticAsset} from './static-assets.mjs';
 
 const json=value=>JSON.stringify(value),now=()=>Date.now(),id=()=>crypto.randomUUID();
 const money=value=>Math.round(Number(value)*CREDIT_SCALE),credits=value=>Number(value)/CREDIT_SCALE;
@@ -106,7 +107,7 @@ async function bodyOf(request){const length=Number(request.headers.get('content-
 export default {async fetch(request,env){
  const url=new URL(request.url),path=url.pathname;
  if(path==='/.well-known/war-machines.json'&&request.method==='GET')return response(discovery);
- if(!path.startsWith('/api/'))return env.ASSETS.fetch(request);
+ if(!path.startsWith('/api/'))return serveStaticAsset(request);
  try{check(env.DB,'D1 storage is unavailable.');const db=env.DB,method=request.method;check(['GET','POST','PATCH','PUT','DELETE'].includes(method),'Method not allowed.',405);if(request.headers.get('origin'))check(new URL(request.headers.get('origin')).origin===url.origin,'Cross-origin API requests are not allowed.',403);const body=['POST','PATCH'].includes(method)?await bodyOf(request):{},auth=await dbAuth(db,request);await expire(db);
   if(path==='/api/rules'&&method==='GET')return response(catalog());if(path==='/api/openapi.json'&&method==='GET')return response(openapi);if(path==='/api/health'&&method==='GET')return response({ok:true,app:'war-machines',mode:'demo',paymentsEnabled:false,engineHash:CLIENT_ENGINE_HASH});
   if(path==='/api/session'&&method==='POST'){fields(body,['name']);const name=text(body.name||'Independent engineer',28,'pilot name'),token=secret(),accountId=id(),created=now();await db.prepare('INSERT INTO accounts (id,token_hash,name,balance,entry_cap,daily_cap,created) VALUES (?,?,?,?,?,?,?)').bind(accountId,await hex(token),name,money(1000),null,null,created).run();await db.prepare('INSERT INTO ledger (id,account,amount,kind,ref,created) VALUES (?,?,?,?,?,?)').bind(id(),accountId,money(1000),'grant',accountId,created).run();return response({token,me:await account(db,accountId)},201);}
