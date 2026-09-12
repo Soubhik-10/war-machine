@@ -11,7 +11,7 @@ The Tempo integration is implemented but disabled by default. It does not deploy
 - Incoming payments: MPP `tempo.charge`, verified by the server
 - Finality: MPP waits for the configured transaction confirmation before accepting the API operation
 
-The application accepts whole-token entry and reward values at its public game API boundary. Every persisted financial operation is stored as an exact base-unit decimal string; no floating-point token math is used.
+The application accepts decimal pathUSD amounts at its public game API boundary, including cent values such as `0.01` and `0.10`. Every persisted financial operation is stored as an exact 6-decimal base-unit string; no floating-point token math is used. A `0.01` pathUSD entry is stored as `10000` base units, and a `1.00` reward pays `0.975` to the winner after the 2.5% fee.
 
 ## Custody and economic policy
 
@@ -44,6 +44,12 @@ WM_MAX_OUTSTANDING_UNITS=10000000
 WM_QUOTE_TTL_SECONDS=180
 WM_PAYMENT_PAUSED=false
 ```
+
+### ChatGPT Sites + D1 deployment
+
+The public Site uses D1 for the database, so it does **not** use `DATABASE_PATH`. Its `drizzle/0001_tempo_mainnet.sql` migration adds wallet sessions, MPP replay storage, payment holds, exact-unit bounties, and a payout queue. Set the same named runtime values in the Site environment, except `DATABASE_PATH`; keep `TEMPO_ESCROW_PRIVATE_KEY` and `MPP_SECRET_KEY` as Site secrets. Set `WM_PUBLIC_ORIGIN` to the exact deployed HTTPS origin.
+
+Before the secrets and the dedicated escrow address are supplied, set `WM_MODE=tempo-mainnet` only if you want the Site to show its payment-activation lock. It will issue no demo credits and reject every economic request with 503. Do not set `WM_MAINNET_ENABLE=tempo-mainnet-real-funds` until the signer, recipients, limits, and live wallet rehearsal are complete.
 
 The private key and MPP secret are server-only secrets. Do not put them in the browser bundle, repository, logs, support tickets, or a shared `.env` file. Use a dedicated, minimally funded signer with an operator-owned backup and rotation procedure. The normal demo database is rejected in paid mode, and financial rows carry the environment, token, unique operation ID, amount, recipient, and independent settlement state.
 

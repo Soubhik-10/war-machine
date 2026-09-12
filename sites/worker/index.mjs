@@ -5,6 +5,7 @@ import {CLIENT_ENGINE_HASH} from '../../dist/release.mjs';
 import {CREDIT_SCALE,PLATFORM_FEE_BPS,PLATFORM_FEE_POLICY,rewardQuote} from '../../dist/economy.mjs';
 import {PART_GUIDANCE} from '../../dist/part-guidance.mjs';
 import {serveStaticAsset} from './static-assets.mjs';
+import {mainnetFetch} from './mainnet.mjs';
 
 const json=value=>JSON.stringify(value),now=()=>Date.now(),id=()=>crypto.randomUUID();
 const money=value=>Math.round(Number(value)*CREDIT_SCALE),credits=value=>Number(value)/CREDIT_SCALE;
@@ -104,7 +105,8 @@ const discovery={name:'War Machines',version:'3.0',mode:'demo',description:'Engi
 const response=(value,status=200)=>new Response(json(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'}});
 async function bodyOf(request){const length=Number(request.headers.get('content-length')||0);check(length<=65536,'Request exceeds 64 KiB.',413);check(request.headers.get('content-type')?.split(';')[0]==='application/json','Use application/json.',415);try{return await request.json();}catch{fail(400,'Invalid JSON.');}}
 
-export default {async fetch(request,env){
+export default {async fetch(request,env,ctx){
+ if(env.WM_MODE==='tempo-mainnet')return mainnetFetch(request,env,ctx,serveStaticAsset);
  const url=new URL(request.url),path=url.pathname;
  if(path==='/.well-known/war-machines.json'&&request.method==='GET')return response(discovery);
  if(!path.startsWith('/api/'))return serveStaticAsset(request);
