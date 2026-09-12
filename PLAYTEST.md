@@ -2,7 +2,7 @@
 
 Current verification supersedes historical notes below. Details: docs/BALANCE-REPORT.md.
 
-- 107 automated tests; portable LF/CRLF release fingerprints; 1,980 factory matches; 224 climate sensitivity matches.
+- 123 automated tests; portable LF/CRLF release fingerprints; 1,980 factory matches; 224 climate sensitivity matches.
 - External engineer dry run: ten candidates, 60 training matches, 4/4 held-out wins with Longbow and no credits spent. Archived-engine mismatch refused correctly.
 - Real CLI validation, bookmark, official climate entry and idempotent retry tested in a separate temporary account/database.
 - Desktop and 390×844 landing/agent/contract views, live Wraith art, colorways and guest API lab checked. Browser error log empty.
@@ -22,7 +22,7 @@ The current build adds a local authoritative Node/SQLite bounty server, demo cre
 - 91 automated tests passed, including actual HTTP worker settlement, concurrent entrants, idempotency, refunds, expiry/restart recovery, caps and new terrain mechanics.
 - 1,080 baseline and 1,440 final factory matches measured the balance changes. See [docs/BALANCE-REPORT.md](docs/BALANCE-REPORT.md) for comparable arena samples, costs, limitations and reproducible scripts.
 - Two browser identities created/shared a custom capped coolant contract. Practice left the balance unchanged. Official victory settled the reward once and closed the bounty.
-- Final-version official trial: Marauder versus Firefly in Coolant Basin, seed 4145459044, victory at 12.5 seconds, 1,144 damage, 93.7% versus 33.9% integrity, +90 net credits. Browser exact replay matched the time/damage/result and could not spend or award credits.
+- Pre-fee legacy official trial: Marauder versus Firefly in Coolant Basin, seed 4145459044, victory at 12.5 seconds, 1,144 damage, 93.7% versus 33.9% integrity, +90 net credits. Browser exact replay matched the time/damage/result and could not spend or award credits. New 2.5%-fee contracts quote the winner payout before entry instead.
 - Tested 390×844 viewport: unlimited quarry creation preserved all uncapped fields, cancellation returned all 100 reserved credits, and focused battle navigation stayed usable without horizontal page overflow. The normal viewport was restored.
 - A new draft named “Draft survives replay” remained intact after replaying an earlier Marauder trial and choosing Refit. The original draft name was restored after testing.
 - Added an in-arena Contract return button and clear verified-replay actions. No errors/warnings appeared in the final browser console check.

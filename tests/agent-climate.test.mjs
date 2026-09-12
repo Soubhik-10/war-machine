@@ -65,21 +65,21 @@ test('new climate hardware fits legal builds and the flechette gun spends one tr
 });
 
 function fixture(t,options={}){const s=new Store(':memory:',{seed:false,...options});t.after(()=>s.close());const owner=s.session({name:'Creator'}),entrant=s.session({name:'Entrant'});return {s,owner,entrant};}
-const creation=(extra={})=>({title:'Creator-defined contract',blueprint:packChallenge(PRESETS[0],'sunscar',0),entry:10,reward:100,hours:24,listed:false,...extra});
+const creation=(extra={})=>({title:'Creator-defined contract',blueprint:packChallenge(PRESETS[0],'sunscar',0),entry:10,reward:100,maxPlatformFeeBps:250,hours:24,listed:false,...extra});
 test('creators can choose zero rewards, fees greater than rewards, and no expiry',t=>{
  let now=1000000000000;const {s,owner,entrant}=fixture(t,{now:()=>now});
  const b=s.create(owner.me.id,creation({entry:100,reward:0,hours:0}),randomUUID());assert.equal(b.expires,null);assert.equal(b.funded,true);
  now+=400*86400000;s.expire();assert.equal(s.bounty(b.id).status,'open');assert.equal(s.me(owner.me.id).balance,1000);
- const a=s.accept(entrant.me.id,b.id,{blueprint:b.blueprint,maxEntry:100},randomUUID()),job=s.claim();
+ const a=s.accept(entrant.me.id,b.id,{blueprint:b.blueprint,maxEntry:100,maxPlatformFeeBps:250},randomUUID()),job=s.claim();
  s.finish(job,{winner:0,time:5,seed:job.seed,integrity:[1,0],damage:[300,0],mode:'auto',reason:'Fixture'});
  assert.equal(s.attempt(a.id).result.net,-100);assert.equal(s.me(entrant.me.id).balance,900);assert.equal(s.bounty(b.id).funded,false);
 });
 test('optional personal caps default to no cap, zero stays free-only, null clears a cap',t=>{
  const {s,owner,entrant}=fixture(t),auth=s.auth(entrant.token);assert.equal(entrant.me.entryCap,null);assert.equal(entrant.me.dailyCap,null);
  s.settings(auth,{entryCap:0,dailyCap:0});const b=s.create(owner.me.id,creation(),randomUUID());
- assert.throws(()=>s.accept(entrant.me.id,b.id,{blueprint:b.blueprint,maxEntry:10},randomUUID()),/cap/);
+ assert.throws(()=>s.accept(entrant.me.id,b.id,{blueprint:b.blueprint,maxEntry:10,maxPlatformFeeBps:250},randomUUID()),/cap/);
  s.settings(auth,{entryCap:null});assert.equal(s.me(entrant.me.id).dailyCap,0);assert.equal(s.me(entrant.me.id).entryCap,null);
- s.settings(auth,{dailyCap:null});assert.ok(s.accept(entrant.me.id,b.id,{blueprint:b.blueprint,maxEntry:10},randomUUID()).id);
+ s.settings(auth,{dailyCap:null});assert.ok(s.accept(entrant.me.id,b.id,{blueprint:b.blueprint,maxEntry:10,maxPlatformFeeBps:250},randomUUID()).id);
 });
 test('saved bounties are account-scoped and idempotent; an agent cannot cancel another owner',t=>{
  const {s,owner,entrant}=fixture(t),b=s.create(owner.me.id,creation(),randomUUID());
@@ -110,7 +110,7 @@ test('guest agent can discover, validate and practice the same engine without an
 test('official queued trials take priority over guest API practice, and stale tokens do not block public reads',async t=>{
  const app=await startServer({port:0,database:':memory:',seed:false,workers:false});t.after(()=>app.close());
  const owner=app.store.session({name:'Owner'}),entrant=app.store.session({name:'Entrant'}),b=app.store.create(owner.me.id,creation(),randomUUID());
- app.store.accept(entrant.me.id,b.id,{blueprint:b.blueprint,maxEntry:10},randomUUID());
+ app.store.accept(entrant.me.id,b.id,{blueprint:b.blueprint,maxEntry:10,maxPlatformFeeBps:250},randomUUID());
  assert.equal((await req(app,'/api/practice','POST',{challenger:b.blueprint,bountyId:b.id})).status,429);
  assert.equal((await req(app,'/api/rules','GET',undefined,'revoked-token')).status,200);
  assert.equal((await req(app,'/api/me','GET',undefined,'revoked-token')).status,401);

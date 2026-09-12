@@ -20,7 +20,7 @@ export async function durablePost(path,body){
 const readJSON=async file=>JSON.parse(await readFile(file,'utf8'));
 const print=value=>console.log(JSON.stringify(value,null,2));
 async function main(){
- const [command,arg,arg2,arg3]=process.argv.slice(2);
+ const [command,arg,arg2,arg3,arg4]=process.argv.slice(2);
  const reads={discover:'/.well-known/war-machines.json',rules:'/api/rules',list:'/api/bounties',me:'/api/me',bookmarks:'/api/me/bookmarks',history:'/api/me/attempts',ledger:'/api/me/ledger'};
  if(reads[command])print(await request(reads[command]));
  else if(command==='inspect'||command==='status'){if(!arg)throw Error('Supply an ID.');print(await request('/api/'+(command==='inspect'?'bounties/':'attempts/')+arg));}
@@ -34,8 +34,8 @@ async function main(){
  }else if(command==='create'){
   if(!arg)throw Error('Usage: create contract-request.json');print(await durablePost('/api/bounties',await readJSON(arg)));
  }else if(command==='submit'){
-  if(!arg||!arg2||!/^\d+$/.test(arg3||''))throw Error('Usage: submit BOUNTY_ID blueprint.json MAX_ENTRY');
-  print(await durablePost('/api/bounties/'+arg+'/attempts',{blueprint:await readJSON(arg2),maxEntry:Number(arg3)}));
+  if(!arg||!arg2||!/^\d+$/.test(arg3||'')||!/^\d+$/.test(arg4||''))throw Error('Usage: submit BOUNTY_ID blueprint.json MAX_ENTRY MAX_PLATFORM_FEE_BPS');
+  print(await durablePost('/api/bounties/'+arg+'/attempts',{blueprint:await readJSON(arg2),maxEntry:Number(arg3),maxPlatformFeeBps:Number(arg4)}));
  }else if(command==='retry'){
   if(!process.env.WAR_MACHINE_TOKEN||!arg)throw Error('Usage: retry REQUEST_FILE; requires WAR_MACHINE_TOKEN');
   const saved=await readJSON(arg);if(saved.base!==base)throw Error('Retry belongs to a different host. Set WAR_MACHINE_URL to its original host.');
@@ -47,8 +47,8 @@ async function main(){
  }else console.log(`War Machines external-agent client — demo credits only
 Guest: discover | rules | list | inspect ID | validate REQUEST.json [NEW_BLUEPRINT.json] | practice REQUEST.json
 Account: me | bookmarks | history | ledger | save ID | unsave ID | cancel ID
-Economic actions: create CONTRACT.json | submit ID BLUEPRINT.json MAX_ENTRY | retry REQUEST_FILE | status ATTEMPT_ID
+Economic actions: create CONTRACT.json | submit ID BLUEPRINT.json MAX_ENTRY MAX_PLATFORM_FEE_BPS | retry REQUEST_FILE | status ATTEMPT_ID
 Set WAR_MACHINE_URL (default localhost:8770), WAR_MACHINE_TOKEN (delegated key).
-No AI service, wallet or payment SDK. Creation/entry saves an idempotent retry record first.`);
+New contracts: 2.5% platform fee on gross winnings (250 basis points); entry separate. Read the quote before authorizing. No AI service, wallet or payment SDK. Creation/entry saves an idempotent retry record first.`);
 }
 if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url)main().catch(e=>{console.error(e.message);process.exitCode=1;});

@@ -1,5 +1,9 @@
-export const BALANCE_VERSION="agent-season-2", ENGINE_VERSION="agent-season-2", TERRAIN_VERSION="climate-3";
+export const BALANCE_VERSION="agent-season-3", ENGINE_VERSION="agent-season-3", TERRAIN_VERSION="climate-3";
 export const VERSION=3, GRID=9, LIMIT=1200, PART_LIMIT=32, MASS_LIMIT=360, WEAPON_LIMIT=8, LEVELS=3, LAYER_HEIGHT=1.65;
+// Two matching weapons retain their normal cycle. Further matching weapons
+// share targeting, ammunition and heat-control bandwidth, so a pure weapon
+// bank remains a deliberate redundancy choice rather than the only answer.
+export const DUPLICATE_WEAPON_FREE=2, DUPLICATE_WEAPON_RELOAD_PENALTY=.18;
 
 export const MAX_MODULES=GRID*GRID*LEVELS;
 export const DEFAULT_RULES=Object.freeze({mode:'standard',credits:1200,parts:32,mass:360,weapons:8,combat:'auto'});
@@ -95,6 +99,10 @@ export function stats(machine){
  s.stability=Math.max(.55,1-s.upperMass/Math.max(s.mass,1)*.24);
  s.speed=s.thrust?Math.min(115,(28+55*s.thrust/Math.max(1,s.mass))*(1+Math.min(2,s.boosters)*.1)):0;
  return s;
+}
+export function weaponReloadFactor(modules,id){
+ const copies=modules.filter(m=>m.id===id&&partSpec(m)?.rate).length;
+ return 1+Math.max(0,copies-DUPLICATE_WEAPON_FREE)*DUPLICATE_WEAPON_RELOAD_PENALTY;
 }
 export function supported(modules){const byCell=new Map(modules.map(m=>[keyOf(m),m])),alive=new Set(modules.filter(m=>!(m.z||0)).map(keyOf));for(let z=1;z<LEVELS;z++)for(const m of modules){if((m.z||0)!==z)continue;const below=byCell.get(m.x+','+m.y+','+(z-1));if(below&&BY_ID[below.id]?.support&&alive.has(keyOf(below)))alive.add(keyOf(m));}return alive;}
 export function connected(modules){const core=modules.find(m=>m.id==='core');if(!core)return new Set();const support=supported(modules),byCell=new Map(modules.map(m=>[keyOf(m),m])),set=new Set([keyOf(core)]),queue=[core];while(queue.length){const a=queue.pop(),z=a.z||0;for(const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]){const k=(a.x+dx)+','+(a.y+dy)+','+(z+dz),m=byCell.get(k);if(m&&!set.has(k)&&support.has(k)){set.add(k);queue.push(m);}}}return set;}

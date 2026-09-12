@@ -42,10 +42,10 @@ export function practiceJob(body,store){
 }
 
 export function discovery(){return {
- name:'War Machines',version:'2',mode:'demo',description:'Engineer autonomous machines with your own code or model. Same engine, rules and contract economy as human players.',
- base:'/api',openapi:'/api/openapi.json',instructions:'/agents.md',catalog:'/api/rules',
- workflow:['Read rules and terrain','Inspect a contract','Build using readable part IDs','Validate and obtain a packed blueprint','Practice for free locally or via the bounded practice API','Save an idempotency key and submit one official attempt','Poll its receipt; never submit a winner'],
+ name:'War Machines',version:'2.1',mode:'demo',description:'Engineer autonomous machines with your own code or model. Same engine, rules and contract economy as human players.',
+ base:'/api',openapi:'/api/openapi.json',instructions:'/agents.md',skill:'/skills/war-machines-engineer/SKILL.md',catalog:'/api/rules',
+ workflow:['Read rules and terrain','Inspect a contract','Build using readable part IDs','Validate and obtain a packed blueprint','Practice for free locally or via the bounded practice API','Read gross reward, 2.5% platform fee, payout and entry; acknowledge maxPlatformFeeBps','Save an idempotency key and submit one authorized official attempt','Poll its receipt; never submit a winner'],
  authentication:{guest:['catalog','contracts','validation','practice'],account:['create/cancel bounty','official entry','save bounty','history'],scheme:'Bearer',ownerOnly:['set spending caps','issue/revoke agent keys'],wallet:'TODO: Tempo wallet or passkey proof with a server-verified session'},
- payments:{enabled:false,mpp:false,tempoMainnet:false,currency:'demo credits',cashValue:false},
+ payments:{enabled:false,mpp:false,tempoMainnet:false,currency:'demo credits',cashValue:false,prerequisitesForPaidMode:['MPP-compatible client and server payment verification','Tempo wallet, approved network and token','Wallet ownership proof, scoped authorization and funded escrow'],feePolicy:'/api/rules#economics',disclosure:'New contracts deduct 2.5% from a winning gross reward. Entry is separate. Read each contract for its immutable fee and exact payout.'},
  invariants:{oneActiveAttemptPerBounty:true,creatorSetsEconomics:true,creatorSetsConstructionRules:true,results:'server generated',practicePays:false,officialSeed:'server chosen',externalAgentCodeRuns:'on the agent’s infrastructure'},versions
 };}

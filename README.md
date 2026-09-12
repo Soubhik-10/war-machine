@@ -20,7 +20,9 @@ Open http://127.0.0.1:8770/ or double-click `play-local.bat`. Keep the terminal 
 
 For the static sandbox only: `python serve.py --open`, then open http://127.0.0.1:8765/. A static upload needs only `dist/`, served with JavaScript MIME types for `.mjs`. It supports the workshop, practice, exported blueprints and ordinary self-contained friend links. It cannot provide official shared balances or bounty verification. Direct `file:` opening is unsupported.
 
-## Agent season 02
+## Agent season 03
+
+The Agents page offers a [downloadable SKILL.md](dist/skills/war-machines-engineer/SKILL.md), fee disclosure, and explicit MPP/Tempo prerequisites for future paid mode. Real payments remain disabled.
 
 The landing page offers human and agent paths, a live machine display, three interface colorways (Forge, Glacier, Ember) and climate previews. Guests can build, save local blueprints, share, validate and practice. Sign in only for bounty actions. Contracts support search, arena/maximum-fee filters and account bookmarks.
 
@@ -31,14 +33,14 @@ node examples/agent-client.mjs discover
 node examples/engineer-loop.mjs --bounty BOUNTY_ID
 ```
 
-The engineer loop tests candidates with multiple seeds and both spawn positions, selects on training results, then checks held-out seeds. It spends nothing by default. `--enter --max-entry INTEGER` plus a delegated key authorizes one official demo attempt. See [the agent API](docs/AGENT-API.md).
+The engineer loop tests candidates with multiple seeds and both spawn positions, selects on training results, then checks held-out seeds. It spends nothing by default. `--enter --max-entry INTEGER --max-platform-fee-bps 250` plus a delegated key authorizes one official demo attempt. See [the agent API](docs/AGENT-API.md).
 
 ## Demo bounty season
 
 1. Open **Contracts** and create a demo profile with 1,000 play credits.
 2. Choose a contract and inspect its actual defender, terrain, price and construction caps. **Refit counter** locks those caps in the workshop.
 3. Practice free. No practice result spends credits or pays a reward.
-4. Enter an official trial. Starter contracts use 10 demo credits entry and a 100-credit reward for +90 net. Creators may choose their own values, including zero or a reward below entry. Loss/draw spends entry. Technical failure refunds it.
+4. Enter an official trial. New contracts default to 10 demo credits entry and 100 gross reward: 2.5 platform fee, 97.5 winner payout, +87.5 net. Older contracts retain their original zero-fee terms. Creators may choose their own values, including zero or a reward below entry. Loss/draw spends entry. Technical failure refunds it.
 5. The server accepts one challenger at a time per contract, chooses the seed and starting side, runs the battle, and stores the result. Watch an exact replay or refit for another trial.
 6. **Create a bounty** snapshots your current workshop build, reserves its reward, and sets custom/unlimited construction limits, terrain, duration and listed/unlisted visibility. Share its stable link. Unlisted links remain accessible to anyone who receives them.
 7. Open your balance to set optional per-entry/daily UTC spending caps (blank removes a cap, zero allows free entries only), read the credit ledger, back up your profile key and issue/revoke restricted external-agent keys.
@@ -61,6 +63,7 @@ See `PLAYTEST.md` for browser matches and verification. Earlier playtest notes a
 
 - **42 components:** cannons, autocannons, railguns, rockets, flamethrowers, EMP, mortars, Prism lasers, Helios plasma, Storm lightning coils, Rupture scatterguns, Cyclone gatlings, Widow minelayers, Frost lances, and support equipment.
 - Each new weapon has a distinct mechanic: instantaneous beams, partial armor bypass, chaining across parts, six-pellet volleys, sustained-fire spin-up, armed rear mines, or a temporary movement slow.
+- The first two copies of a weapon keep their listed reload. Each further matching weapon shares fire-control bandwidth and adds 18% reload time; the Engineering report shows the exact multiplier. Redundancy is useful, but a one-part weapon bank is no longer the default best build.
 - Ceramic plating resists thermal weapons, blast cages resist explosions, hover pods avoid surface damage and poor traction, fusion reactors supply power with explosive risk, and armored radiators manage heat.
 - Reactive armor, bulkheads, interception turrets, repair systems, shields, smoke launchers, afterburners, capacitors, wheels, treads, rams, frames, and decks remain available.
 - Build on a 9×9 grid across **three actual height levels**. Upper modules need direct support. Destroying a support collapses its upper column. Elevated projectiles can clear low armor or cover. Ground-only equipment cannot be stacked.

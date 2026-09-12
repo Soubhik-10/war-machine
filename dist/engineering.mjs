@@ -1,4 +1,4 @@
-import {BY_ID,ARENAS,stats,partSpec,validate,connected,keyOf,terrainAt,environmentProfile} from './data.mjs';
+import {BY_ID,ARENAS,stats,partSpec,validate,connected,keyOf,terrainAt,environmentProfile,weaponReloadFactor,DUPLICATE_WEAPON_FREE} from './data.mjs';
 
 export function engineeringReport(machine,rules,arenaId='foundry'){
  const s=stats(machine),arena=ARENAS.find(a=>a.id===arenaId)||ARENAS[0],notes=validate(machine,rules).map(text=>({level:'error',text,category:text.includes('move')?'Mobility':text.includes('weapon')?'Weapons':'Structure'}));
@@ -9,6 +9,8 @@ export function engineeringReport(machine,rules,arenaId='foundry'){
  if(arena.terrain.some(t=>t.type==='brine'))notes.push({level:s.hovering||s.insulators?'good':'warn',category:'Systems',text:'Brine lanes drain 8 energy/s before insulation. Hovering avoids contact drain; paddle tires or treads reduce the slowdown.'});
  if(demand>1)notes.push({level:'warn',category:'Systems',text:`Energy reserve runs dry in about ${Math.max(1,Math.round(s.capacity/demand))}s of continuous fire. Add generation or reduce weapon demand.`});
  if(heat>1)notes.push({level:'warn',category:'Systems',text:`Continuous fire can overheat in about ${Math.max(1,Math.round(100/heat))}s in ${arena.name}. Add cooling or reduce continuous weapon heat; automatic purges consume power.`});
+ const repeated=[...new Set(machine.modules.filter(m=>partSpec(m)?.rate).map(m=>m.id))].map(id=>({id,copies:machine.modules.filter(m=>m.id===id).length,factor:weaponReloadFactor(machine.modules,id)})).filter(row=>row.copies>DUPLICATE_WEAPON_FREE);
+ for(const row of repeated)notes.push({level:'warn',category:'Weapons',text:`Fire-control saturation: ${row.copies} × ${BY_ID[row.id].name} reload at ${row.factor.toFixed(2)}×. Mix weapon types after two matching guns to restore normal cycles.`});
  const backwards=machine.modules.filter(m=>BY_ID[m.id].rate&&!BY_ID[m.id].arc&&!BY_ID[m.id].mine&&((m.r-(machine.front||0)+4)%4)===2);
  if(backwards.length)notes.push({level:'warn',category:'Weapons',text:`${backwards.length} weapon${backwards.length===1?' faces':'s face'} away from the marked front. Inspect their firing direction before deployment.`});
  const core=machine.modules.find(m=>m.id==='core');

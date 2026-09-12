@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DEFAULT_RULES,normalizeRules,PRESETS,ARENAS,PARTS,clone,packChallenge,unpackChallenge,encodeChallenge,decodeChallenge} from '../dist/data.mjs';
 import {Battle} from '../dist/engine.mjs';
-import {Geometry,VERTEX_STRIDE,workshopScene,battleScene} from '../dist/renderer.mjs';
+import {Geometry,VERTEX_STRIDE,worldLight,workshopScene,battleScene} from '../dist/renderer.mjs';
 
 test('old command challenges become autonomous while preserving budget and machine customization',()=>{
  const m={...clone(PRESETS[0]),finish:'alloy',front:2,accent:'#c5d382',pattern:'hazard'};
@@ -29,6 +29,12 @@ test('material coordinates stay attached to a cached part under rotation and tra
  assert.equal(a.vertices.length,b.vertices.length);assert.equal(a.vertices.length%(VERTEX_STRIDE*3),0);
  for(let i=0;i<a.vertices.length;i+=VERTEX_STRIDE)assert.deepEqual(a.vertices.slice(i+10,i+14),b.vertices.slice(i+10,i+14));
  assert.notDeepEqual(a.vertices.slice(0,3),b.vertices.slice(0,3));
+});
+
+test('directional light stays in world space while the camera follows a battle',()=>{
+ const a=worldLight(),b=worldLight();
+ assert.deepEqual(a.eye,[-36,64,-24]);assert.deepEqual(a.target,[0,0,0]);assert.deepEqual(a,b);
+ assert.notEqual(a.eye,b.eye);assert.notEqual(a.target,b.target);
 });
 
 test('finishes use distinct materials and animation changes tracks and recoil geometry',()=>{

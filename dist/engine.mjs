@@ -1,4 +1,4 @@
-import {BY_ID,ARENAS,stats,partSpec,connected,keyOf,clone,terrainAt,environmentProfile,LAYER_HEIGHT} from './data.mjs';
+import {BY_ID,ARENAS,stats,partSpec,connected,keyOf,clone,terrainAt,environmentProfile,LAYER_HEIGHT,weaponReloadFactor} from './data.mjs';
 export const CELL=23,WIDTH=1200,HEIGHT=800,DT=1/60;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),TAU=Math.PI*2,wrap=a=>((a+Math.PI)%TAU+TAU)%TAU-Math.PI;
 export const ABILITIES={boost:{name:'Boost',key:'1',cost:25,cooldown:14,desc:'Burst of speed · 25 energy'},vent:{name:'Coolant purge',key:'2',cost:20,cooldown:18,desc:'Shed 45 heat; guns pause 1.2s · 20 energy'},brace:{name:'Brace',key:'3',cost:30,cooldown:16,desc:'45% damage reduction for 3s; slower movement · 30 energy'},smoke:{name:'Smoke screen',key:'4',cost:20,cooldown:20,desc:'Break tracking for 5s · requires Veil launcher'}};
@@ -37,11 +37,12 @@ export class Battle{
   if(v.overheated||v.vent>0)for(const m of active)if(partSpec(m).rate)m.heatWait=(m.heatWait||0)+dt;if(v.overheated||v.vent>0||v.holdFire||enemy.dead)return;const target=this.chooseTarget(v,enemy);if(!target)return;const smoked=this.smoke.some(s=>s.life>0&&Math.hypot(enemy.x-s.x,enemy.y-s.y)<s.r);
   for(const m of active){
    const p=partSpec(m);if(!p.rate||m.cd>0)continue;if(v.energy<p.energy){m.powerWait=(m.powerWait||0)+dt;continue;}
-   if(p.mine){if(dist>p.range||this.mines.filter(n=>n.owner===m.uid&&n.life>0).length>=3)continue;const a=v.a+(v.front||0)*Math.PI/2+Math.PI/2,x=v.x+Math.cos(a)*(v.radius+18),y=v.y+Math.sin(a)*(v.radius+18);this.mines.push({x,y,h:0,side:v.side,owner:m.uid,sourceUid:m.uid,age:0,life:18,damage:p.damage,splash:p.splash,kind:'mine'});v.energy-=p.energy;v.heat+=p.heat;m.cd=p.rate;v.shots++;m.fired=(m.fired||0)+1;continue;}
+   const reload=weaponReloadFactor(active,p.id);
+   if(p.mine){if(dist>p.range||this.mines.filter(n=>n.owner===m.uid&&n.life>0).length>=3)continue;const a=v.a+(v.front||0)*Math.PI/2+Math.PI/2,x=v.x+Math.cos(a)*(v.radius+18),y=v.y+Math.sin(a)*(v.radius+18);this.mines.push({x,y,h:0,side:v.side,owner:m.uid,sourceUid:m.uid,age:0,life:18,damage:p.damage,splash:p.splash,kind:'mine'});v.energy-=p.energy;v.heat+=p.heat;m.cd=p.rate*reload;v.shots++;m.fired=(m.fired||0)+1;continue;}
    const pos=world(v,m),lead=p.beam?0:Math.hypot(target.pos.x-pos.x,target.pos.y-pos.y)/p.speed*(p.arc?.9:.75),aim={x:target.pos.x+enemy.vx*lead,y:target.pos.y+enemy.vy*lead},d=Math.hypot(aim.x-pos.x,aim.y-pos.y),angle=Math.atan2(aim.y-pos.y,aim.x-pos.x),mount=v.a+(m.r||0)*Math.PI/2-Math.PI/2;
    if(d>p.range||(!p.arc&&Math.abs(wrap(angle-mount))>Math.PI*.51))continue;
    m.aim=angle+Math.PI/2-v.a;const baseAngle=angle+(this.random()-.5)*(p.spread+(smoked?.32:0))*2;
-   v.energy-=p.energy;v.heat+=p.heat;if(p.id==='gatling')m.spool=Math.min(1,(m.spool||0)+.15);m.cd=p.rate*(p.id==='gatling'?2.5-m.spool*1.5:1);m.recoil=1;v.shots+=p.pellets||1;m.fired=(m.fired||0)+(p.pellets||1);
+   v.energy-=p.energy;v.heat+=p.heat;if(p.id==='gatling')m.spool=Math.min(1,(m.spool||0)+.15);m.cd=p.rate*(p.id==='gatling'?2.5-m.spool*1.5:1)*reload;m.recoil=1;v.shots+=p.pellets||1;m.fired=(m.fired||0)+(p.pellets||1);
    const h=pos.h+(p.arc?35:22),flight=Math.max(.001,d/p.speed),vh=(target.pos.h+18-h)/flight+(p.arc?75*flight:0);
    for(let pellet=0;pellet<(p.pellets||1);pellet++){const a=p.pellets?angle+(pellet/(p.pellets-1)-.5)*p.spread*2+(this.random()-.5)*.04:baseAngle;
     this.projectiles.push({x:pos.x+Math.cos(a)*15,y:pos.y+Math.sin(a)*15,h,a,vh,gravity:p.arc?150:0,vx:Math.cos(a)*p.speed,vy:Math.sin(a)*p.speed,speed:p.speed,range:p.range,life:p.arc?flight+.8:p.range/p.speed,side:v.side,sourceUid:m.uid,targetUid:target.m.uid,kind:p.id,damage:p.damage,pierce:p.pierce||0,splash:p.splash||(p.id==='cannon'?23:0),emp:!!p.emp,burn:!!p.burn,chill:!!p.chill,thermal:!!p.thermal,armorPierce:p.armorPierce||0,chain:p.chain||0,beam:!!p.beam,hitIds:[]});

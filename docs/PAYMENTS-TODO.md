@@ -4,7 +4,7 @@ Updated 12 September 2026. **Demo bounty gameplay is implemented. Payments, wall
 
 **Hosting constraint:** do not publish/redeploy on OpenAI Sites or enable paid hosting, API billing, purchases or automatic overages without a new explicit user instruction. The game runs locally with no OpenAI model calls. The earlier owner-private Site remains a separate hosted artifact. See HOSTING.md for the status check and limitations; account invoices were not accessible.
 
-Source baseline: Soubhik-10/war-machine, commit `9953540bae6e1e6d98c82fbcbf3d9c5b2df5afde`. This update adds the backend/UI and changes game balance. It has not been publicly deployed.
+Source: [Soubhik-10/war-machine](https://github.com/Soubhik-10/war-machine). This local/demo release adds the bounty backend/UI, climate balance work and the disclosed platform-fee flow. It has not been publicly deployed.
 
 ## 1. Delivered gameplay
 
@@ -51,17 +51,17 @@ Use `docs/AGENT-API.md` for the exact implemented request/response contract. Sta
 
 ## 3. Economics and authorization
 
-Demo only: 1,000 starting credits; default entry 10, reward 100, net win +90. Win closes the single reward. Loss/draw consumes entry and reopens if eligible. Technical failure refunds entry. Cancellation/expiry returns the unused reserve, but must wait for an accepted attempt to settle. Account owners cannot claim their own contract; this is not protection from multi-account abuse.
+Demo only: 1,000 starting credits; default entry 10, gross reward 100, platform fee 2.5, winner payout 97.5, net win +87.5. New contracts snapshot a 2.5% (250 basis point) winning-reward fee; legacy contracts retain zero fee. Win closes the single reward. Loss/draw consumes entry and reopens if eligible. Technical failure refunds entry. Cancellation/expiry returns the unused reserve, but must wait for an accepted attempt to settle. Account owners cannot claim their own contract; this is not protection from multi-account abuse.
 
 Entry/reward independently 0–1,000,000,000 whole demo credits; no required ratio; duration 0–8,760 hours, with 0 meaning no expiry; 20 active contracts per account. New personal caps default to null (no cap); owners can choose either cap, and zero means free entries only. Refunds adjust the day of their original attempt. All agent keys share account caps and balance. Agent keys can fund bounties, but cannot increase entry caps or mint/revoke keys; they can close their account’s idle contracts. Reward reservations are separate from daily entry caps and bounded by available balance.
 
-Construction Standard remains 1,200 credits / 32 parts / 360 t / 8 weapons. Custom can remove caps individually; Unlimited removes all four. Physical 243-socket, support, connected-core and ground-only rules always apply. The backend revalidates the challenger's build under the defender's immutable caps. Money-like numbers are checked as integers, never clamped or accepted from client balances.
+Construction Standard remains 1,200 credits / 32 parts / 360 t / 8 weapons. Custom can remove caps individually; Unlimited removes all four. Physical 243-socket, support, connected-core and ground-only rules always apply. The backend revalidates the challenger's build under the defender's immutable caps. Entry and gross reward inputs are checked as integers. SQLite balances and ledger amounts are integer thousandths of a credit; API balances and payouts use up to three decimal places. Fees use integer base-unit arithmetic with downward rounding. Balances are never accepted from clients.
 
 Creation and entry require persisted idempotency keys. Clients save uncertain requests and retry with the same key/body/path. Server lookup happens before rechecking busy/closed state so a retry returns the accepted attempt. Credit entries, attempt creation and bounty lock commit together; results and ledger changes also commit together. Worker results never arrive through a public endpoint.
 
 ## 4. Verification and balance
 
-Verification is recorded in BALANCE-REPORT.md and PLAYTEST.md; the current suite contains 107 tests. Run `node --test tests/*.test.mjs`. Tests cover win/loss/draw/refund, double-submit, two-client race, old worker fencing, expiry while active, restart persistence, cap enforcement, key revocation, malformed/over-limit builds, wrong-origin writes and real worker/browser-engine agreement. Terrain-on/off fixtures prove coolant cooling and wheel-speed changes, tread advantage on rubble, and low-shot blockage by a ridge. Rendering randomness is isolated from gameplay.
+Verification is recorded in BALANCE-REPORT.md and PLAYTEST.md; the current suite contains 125 tests. Run `node --test tests/*.test.mjs`. Tests cover win/loss/draw/refund, double-submit, two-client race, old worker fencing, expiry while active, restart persistence, cap enforcement, key revocation, malformed/over-limit builds, wrong-origin writes, real worker/browser-engine agreement, exact fee arithmetic, policy acknowledgement, atomic payout splitting, rollback, and legacy-ledger migration. Terrain-on/off fixtures prove coolant cooling and wheel-speed changes, tread advantage on rubble, low-shot blockage by a ridge, and disclosed diminishing returns for repeated weapon banks. Rendering randomness is isolated from gameplay.
 
 The accompanying BALANCE-REPORT.md records baseline/rerun samples, changed costs and observed weaknesses. Factory designs spend different budgets; two seeds per pairing are screening evidence only. Do not advertise a universally fair cash competition from these results. Random physical starting sides reduce systematic entrant-slot advantage but do not establish perfect map or first-hit symmetry.
 
@@ -82,6 +82,25 @@ The accompanying BALANCE-REPORT.md records baseline/rerun samples, changed costs
 Everything below is future payment work. Do not convert demo credits to real funds or add a wallet SDK as a shortcut.
 
 ## 6. Detailed MPP / Tempo / mainnet TODO
+
+### 6.0 Approved fee policy and settlement handoff
+
+- [x] Owner approved **2.5% of gross winning reward**, with no minimum fee. Winner receives 97.5% before separate entry costs. Snapshot fee basis points on creation; never retroactively modify existing contracts.
+- [x] Show gross reward, exact fee, winner payout, entry and net before creation/entry, on board cards, in receipts and agent documentation. Require explicit `maxPlatformFeeBps` for new economic requests.
+- [x] Atomically split a verified win into winner payout and a separate platform-fee treasury. Loss, draw, refund, cancellation and expiry do not collect a payout fee. Entry fees remain separately accounted in the arena treasury.
+- [x] Migrate old balances/ledger amounts once to integer thousandths while preserving value, history and legacy zero-fee terms. Keep physics/version hashes unchanged.
+- [x] Publish downloadable `/skills/war-machines-engineer/SKILL.md`, with MPP and Tempo as paid-mode prerequisites, mode detection and spending boundaries.
+- [ ] Implement MPP-compatible client/server handling and Tempo wallet authorization; prerequisites do not mean an integration is present. Current discovery truthfully advertises payments disabled.
+- [ ] Replace the demo treasury with an explicitly configured, validated platform recipient and separately controlled escrow. The repository contains no payout wallet or mainnet recipient.
+- [ ] Compute `feeUnits = grossUnits * 250 / 10000` with integer division rounding down; `winnerUnits = grossUnits - feeUnits`. Use the selected token’s verified decimals. For 6-decimal currency: $1 = 1,000,000 units → fee 25,000, winner 975,000. Never round to whole cents or add a minimum fee.
+- [ ] Bind gross, fee basis points, fee policy version, exact fee, payout, entry, network cost and recipients to the immutable quote/operation and signed authorization. Display separate network costs before consent; do not deduct an undisclosed extra fee.
+- [ ] Resolve the paid entry-fee recipient policy before launch; the demo currently routes entry to a separate arena treasury. The 2.5% reward fee is additional to entry, not a replacement for it.
+- [ ] Design atomic on-chain split or durable paired transfers with reconciliation. A failed winner transfer must never be shown as a completed payout while the platform keeps an unreconciled fee. No double payout/fee after restart, worker retry, duplicate webhook or uncertain RPC response.
+- [ ] Test conservation, smallest supported reward, token rounding, zero-fee legacy terms, all non-win outcomes, revoked authority, insufficient funds and payout failure/recovery on an isolated test network.
+- [ ] Do not convert demo balances or migrate demo grants to real money. No mainnet, paid hosting, automatic funding or fee sponsorship without explicit owner authorization.
+
+Protocol references: [MPP challenge / credential / receipt flow](https://mpp.dev/blog/sessions-improved), [MPP credential verification](https://mpp.dev/sdk/typescript/server/Mppx.verifyCredential), [Tempo accounts](https://docs.tempo.xyz/guide/use-accounts). Verify SDK and chain configuration at integration time; do not blindly install unpinned packages.
+
 
 ### 6.1 Decisions to record before integration
 
