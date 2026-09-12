@@ -4,7 +4,8 @@ param(
     [switch]$Broadcast,
     [switch]$BrowserWallet,
     [string]$ConfigPath,
-    [string]$DeployerAddress
+    [string]$DeployerAddress,
+    [string]$KeystorePath
 )
 
 Set-StrictMode -Version Latest
@@ -35,6 +36,12 @@ if (-not (Test-Path -LiteralPath $forge)) {
 }
 if (-not (Test-Path -LiteralPath $ConfigPath)) {
     throw "Missing $ConfigPath. Run: .\scripts\deploy-tempo-escrow.ps1 -Initialize"
+}
+if ($BrowserWallet -and $KeystorePath) {
+    throw 'Choose either -BrowserWallet or -KeystorePath, never both.'
+}
+if ($KeystorePath -and -not (Test-Path -LiteralPath $KeystorePath)) {
+    throw "Keystore was not found: $KeystorePath"
 }
 
 function Import-PublicEnv([string]$Path) {
@@ -100,6 +107,8 @@ $forgeArgs = @(
 if ($Broadcast) {
     $signerPrompt = if ($BrowserWallet) {
         'Type DEPLOY to connect Foundry to your browser wallet and broadcast to Tempo Mainnet'
+    } elseif ($KeystorePath) {
+        'Type DEPLOY to unlock the encrypted local deployer keystore and broadcast to Tempo Mainnet'
     } else {
         'Type DEPLOY to open the hidden burner-key prompt and broadcast to Tempo Mainnet'
     }
@@ -110,6 +119,8 @@ if ($Broadcast) {
     }
     if ($BrowserWallet) {
         $forgeArgs += '--browser'
+    } elseif ($KeystorePath) {
+        $forgeArgs += @('--keystore', $KeystorePath)
     } else {
         $forgeArgs += @('--interactives', '1')
     }

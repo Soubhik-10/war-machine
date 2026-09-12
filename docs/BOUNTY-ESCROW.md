@@ -154,6 +154,30 @@ private key stays in that wallet.
 .\scripts\deploy-tempo-escrow.ps1 -DeployerAddress <your wallet address> -Broadcast -BrowserWallet
 ```
 
+### Local encrypted Foundry deployer
+
+Some Tempo browser or passkey accounts intentionally do not expose a raw private key. Do not try
+to extract one. To use Foundry without a browser-wallet bridge, create a separate local encrypted
+deployer instead:
+
+```powershell
+.\scripts\create-tempo-deployer.ps1
+```
+
+It stores a new key only as an encrypted keystore in `%LOCALAPPDATA%\WarMachines\deployer` and
+prints its public address. Transfer a small pathUSD fee balance to that public address, then use
+the same deployer with its keystore:
+
+```powershell
+.\scripts\deploy-tempo-escrow.ps1 `
+  -DeployerAddress <printed public address> `
+  -KeystorePath "$env:LOCALAPPDATA\WarMachines\deployer\war-machines-tempo-deployer" `
+  -Broadcast
+```
+
+Foundry asks locally for the keystore password. Neither the password nor the raw key belongs in
+chat, a Site environment setting, or the repository.
+
 ### Creating the two result signers
 
 They are not funded wallets and do not pay transaction fees. They are two local, encrypted
