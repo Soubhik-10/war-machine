@@ -2,6 +2,7 @@ node_modules/
 *.zip
 *.log
 .env*
+contracts/deployments/tempo-mainnet.local.env
 __pycache__/
 .openai/*
 !.openai/hosting.json
@@ -12,3 +13,4 @@ var/
 work/
 contracts/out/
 contracts/cache/
+contracts/broadcast/

@@ -117,3 +117,31 @@ repository or to ChatGPT. Use this only after the mainnet deployment gate above 
 
 Do not send `pathUSD` directly to the deployed address. The contract only accepts funds through
 `createBounty` and `enterBounty`, after a wallet approves the exact token amount.
+
+## Desktop Foundry launcher
+
+`scripts/deploy-tempo-escrow.ps1` is prepared for a burner deployer. It only reads public
+configuration values and asks Foundry for the burner key in the desktop terminal when
+`-Broadcast` is explicitly supplied. The key is never written to the project or a Site setting.
+
+```powershell
+cd C:\Users\soubh\Documents\Codex\2026-09-12\hey\work\github-war-machine
+.\scripts\deploy-tempo-escrow.ps1 -Initialize
+```
+
+Edit the created, ignored file at
+`contracts/deployments/tempo-mainnet.local.env`: enter a dedicated pause guardian plus two
+independently controlled settlement signer addresses. Then preview the immutable settings:
+
+```powershell
+.\scripts\deploy-tempo-escrow.ps1 -DeployerAddress <your burner address>
+```
+
+When the preview is correct, broadcast from the terminal:
+
+```powershell
+.\scripts\deploy-tempo-escrow.ps1 -DeployerAddress <your burner address> -Broadcast
+```
+
+The launcher first requires the literal confirmation `DEPLOY`, then Foundry prompts for the
+burner key locally. Never paste that key into chat, a Site setting, `.env`, or a repository file.
