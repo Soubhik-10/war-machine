@@ -44,6 +44,7 @@ function Get-ResultSignerAddress([string]$Name) {
 }
 
 try {
+    $guardian = Get-ResultSignerAddress 'war-machines-pause-guardian'
     $signerOne = Get-ResultSignerAddress 'war-machines-result-signer-1'
     $signerTwo = Get-ResultSignerAddress 'war-machines-result-signer-2'
 } catch {
@@ -51,20 +52,23 @@ try {
     throw
 }
 
-if ($signerOne -ieq $signerTwo) {
-    throw 'Signer addresses unexpectedly matched; no deployment configuration was changed.'
+if ($guardian -ieq $signerOne -or $guardian -ieq $signerTwo -or $signerOne -ieq $signerTwo) {
+    throw 'Guardian and signer addresses unexpectedly matched; no deployment configuration was changed.'
 }
 
 $config = Get-Content -LiteralPath $ConfigPath -Raw
-if ($config -notmatch '(?m)^WM_ESCROW_SIGNER_1=0x0000000000000000000000000000000000000000$' -or
+if ($config -notmatch '(?m)^WM_ESCROW_PAUSE_GUARDIAN=0x0000000000000000000000000000000000000000$' -or
+    $config -notmatch '(?m)^WM_ESCROW_SIGNER_1=0x0000000000000000000000000000000000000000$' -or
     $config -notmatch '(?m)^WM_ESCROW_SIGNER_2=0x0000000000000000000000000000000000000000$') {
-    throw "Signer placeholders in $ConfigPath were already changed. Public addresses are in $publicAddressFile; update the configuration manually."
+    throw "Guardian or signer placeholders in $ConfigPath were already changed. Public addresses are in $publicAddressFile; update the configuration manually."
 }
+$config = $config -replace '(?m)^WM_ESCROW_PAUSE_GUARDIAN=.*$', "WM_ESCROW_PAUSE_GUARDIAN=$guardian"
 $config = $config -replace '(?m)^WM_ESCROW_SIGNER_1=.*$', "WM_ESCROW_SIGNER_1=$signerOne"
 $config = $config -replace '(?m)^WM_ESCROW_SIGNER_2=.*$', "WM_ESCROW_SIGNER_2=$signerTwo"
 Set-Content -LiteralPath $ConfigPath -Value $config -NoNewline
 @(
     'War Machines settlement signer public addresses',
+    "pause_guardian=$guardian",
     "signer_1=$signerOne",
     "signer_2=$signerTwo",
     'These addresses have no funds and cannot move escrow funds alone.',
@@ -72,9 +76,10 @@ Set-Content -LiteralPath $ConfigPath -Value $config -NoNewline
 ) | Set-Content -LiteralPath $publicAddressFile
 
 Write-Host ''
-Write-Host 'Two encrypted, zero-balance signer identities were created.'
+Write-Host 'One encrypted, zero-balance pause guardian and two result signer identities were created.'
+Write-Host "Guardian: $guardian"
 Write-Host "Signer 1: $signerOne"
 Write-Host "Signer 2: $signerTwo"
 Write-Host "Public addresses were written to $publicAddressFile"
 Write-Host "Deployment configuration was updated at $ConfigPath"
-Write-Host 'Next, choose a third public address as the pause guardian, then run the preview command.'
+Write-Host 'Next, run the preview command with your one funded burner deployer address.'

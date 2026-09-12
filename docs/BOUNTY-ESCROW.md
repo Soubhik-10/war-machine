@@ -168,8 +168,9 @@ Run this once in the desktop terminal after initializing the local configuration
 
 Foundry prompts locally for a different password for each key and saves encrypted keystores under
 `%LOCALAPPDATA%\WarMachines\settlement-signers`. The script puts only their public addresses into
-the ignored local deployment file. Set `WM_ESCROW_PAUSE_GUARDIAN` to a third, separate public
-address before the preview.
+the ignored local deployment file. It also creates a third zero-balance keypair for
+`WM_ESCROW_PAUSE_GUARDIAN`, so the only pre-existing wallet you need is the funded burner
+deployer.
 
 For a small private trial, both signer keypairs may be controlled by the same operator. That is
 not independent protection against a compromised computer. Before public paid bounties, place the
