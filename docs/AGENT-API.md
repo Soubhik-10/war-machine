@@ -58,7 +58,7 @@ POST `/bounties` with a fresh `Idempotency-Key` (16–100 alphanumeric, `_`, `-`
 }
 ```
 
-`blueprint` is the exact JSON object exported by the workshop or provided in `/rules.examples`. In JavaScript use `packChallenge(machine, arenaId, 0, rules)` from `dist/data.mjs`. It contains `q` construction caps, `a` arena and `m` component rows, plus front/paint/upgrades/doctrine. Use `/rules.parts` indexes, not guessed indexes. All support, connection, mobility, core and physical 243-socket rules apply. Standard is 1200 credits/32 parts/360 t/8 weapons; custom permits independently null caps; unlimited removes those four caps. Declared construction credits are not a funded account balance.
+`blueprint` is the exact JSON object exported by the workshop or provided in `/rules.examples`. In JavaScript use `packChallenge(machine, arenaId, 0, rules)` from `dist/data.mjs`. It contains `q` construction caps, `a` arena and `m` component rows, plus front/paint/upgrades/doctrine. Use `/rules.parts` indexes, not guessed indexes. All support, connection, mobility, core and physical 243-socket rules apply. Standard is 1200 credits/32 fitted parts plus one required command core/360 t/8 weapons; custom permits independently null caps; unlimited removes those four caps. Declared construction credits are not a funded account balance.
 
 Bounds: entry and reward independently 0–1,000,000,000, with no required ratio; duration 0–8,760 whole hours (0 means no expiry), title 1–70 characters, 20 active contracts per owner. Creation debits/reserves the reward immediately. IDs and terms remain stable; editing your workshop cannot change an existing bounty. A share is `/#bounty=ID` on the deployed game origin. An old localhost link cannot reach another person's PC.
 

@@ -1,4 +1,4 @@
-export const BALANCE_VERSION="agent-season-4", ENGINE_VERSION="agent-season-4", TERRAIN_VERSION="climate-3";
+export const BALANCE_VERSION="agent-season-4", ENGINE_VERSION="agent-season-4-core-free", TERRAIN_VERSION="climate-3";
 export const VERSION=3, GRID=9, LIMIT=1200, PART_LIMIT=32, MASS_LIMIT=360, WEAPON_LIMIT=8, LEVELS=3, LAYER_HEIGHT=1.65;
 // Two matching weapons retain their normal cycle. Further matching weapons
 // share targeting, ammunition and heat-control bandwidth, so a pure weapon
@@ -16,8 +16,8 @@ export function normalizeRules(input=DEFAULT_RULES){
  if(r.mode==='standard'&&['credits','parts','mass','weapons'].some(k=>r[k]!==DEFAULT_RULES[k]))throw Error('Standard rules use the standard limits.');
  return r;
 }
-export function limitIssues(machine,rules=DEFAULT_RULES){const r=normalizeRules(rules),s=stats(machine),out=[];if(r.credits!==null&&s.cost>r.credits)out.push('Over budget by '+(s.cost-r.credits)+' credits.');if(r.parts!==null&&s.parts>r.parts)out.push('Remove '+(s.parts-r.parts)+' parts to meet the '+r.parts+'-part limit.');if(r.mass!==null&&s.mass>r.mass)out.push('Over the '+r.mass+'-tonne mass limit by '+(s.mass-r.mass)+' t.');if(r.weapons!==null&&s.weapons>r.weapons)out.push('A maximum of '+r.weapons+' weapons can be fitted.');return out;}
-export function rulesLabel(rules){const r=normalizeRules(rules);if(r.mode==='unlimited')return 'UNLIMITED · 243 build sockets';return (r.credits===null?'Unlimited credits':r.credits.toLocaleString()+' credits')+' · '+(r.parts===null?'∞':r.parts)+' parts · '+(r.mass===null?'∞':r.mass)+' t · '+(r.weapons===null?'∞':r.weapons)+' weapons';}
+export function limitIssues(machine,rules=DEFAULT_RULES){const r=normalizeRules(rules),s=stats(machine),out=[];if(r.credits!==null&&s.cost>r.credits)out.push('Over budget by '+(s.cost-r.credits)+' credits.');if(r.parts!==null&&s.parts>r.parts)out.push('Remove '+(s.parts-r.parts)+' fitted parts to meet the '+r.parts+'-part limit.');if(r.mass!==null&&s.mass>r.mass)out.push('Over the '+r.mass+'-tonne mass limit by '+(s.mass-r.mass)+' t.');if(r.weapons!==null&&s.weapons>r.weapons)out.push('A maximum of '+r.weapons+' weapons can be fitted.');return out;}
+export function rulesLabel(rules){const r=normalizeRules(rules);if(r.mode==='unlimited')return 'UNLIMITED · 243 build sockets';return (r.credits===null?'Unlimited credits':r.credits.toLocaleString()+' credits')+' · '+(r.parts===null?'∞ fitted parts + core':r.parts+' fitted parts + core')+' · '+(r.mass===null?'∞':r.mass)+' t · '+(r.weapons===null?'∞':r.weapons)+' weapons';}
 
 export const keyOf=m=>m.x+','+m.y+','+(m.z||0);
 export const PATTERNS=['solid','racing','hazard','camo'];
@@ -93,7 +93,7 @@ export const clone=o=>JSON.parse(JSON.stringify(o));
 const specificationCache=new Map();
 export function partSpec(m){const cacheKey=m.id+':'+(m.u||'stock')+':'+(m.z||0);if(specificationCache.has(cacheKey))return specificationCache.get(cacheKey);const p=BY_ID[m.id],g=GRADES[m.u||'stock'];if(!p||!g)return null;const tuned=m.u==='tuned';const result={...p,cost:Math.ceil(p.cost*g.cost)+(m.z||0)*12,hp:Math.round(p.hp*g.hp),mass:Math.round(p.mass*g.mass),damage:p.damage?(p.damage*(tuned?1.2:1)):p.damage,heat:p.heat?(p.heat*(tuned?1.3:1)):p.heat,power:(p.power||0)*(tuned?1.2:1),cooling:(p.cooling||0)*(tuned?1.2:1),thrust:p.thrust?(p.thrust*(tuned?1.2:1)):p.thrust,shield:(p.shield||0)*(tuned?1.2:1)};specificationCache.set(cacheKey,result);return result;}
 export function stats(machine){
- const s={cost:0,hp:0,mass:0,thrust:0,power:0,cooling:0,dps:0,heat:0,energy:0,shield:0,weapons:0,capacity:100,height:1,upperMass:0,tracks:0,wheels:0,hovers:0,boosters:0,winterWheels:0,duneWheels:0,insulators:0,heaters:0,gyros:0,parts:machine.modules.length};
+ const s={cost:0,hp:0,mass:0,thrust:0,power:0,cooling:0,dps:0,heat:0,energy:0,shield:0,weapons:0,capacity:100,height:1,upperMass:0,tracks:0,wheels:0,hovers:0,boosters:0,winterWheels:0,duneWheels:0,insulators:0,heaters:0,gyros:0,parts:machine.modules.filter(m=>m.id!=='core').length};
  for(const m of machine.modules){const p=partSpec(m);if(!p)continue;for(const k of ['cost','hp','mass','power','cooling','shield'])s[k]+=p[k]||0;if(!(m.z||0))s.thrust+=p.thrust||0;if(p.rate){s.dps+=p.damage*(p.pellets||1)/p.rate;s.heat+=p.heat/p.rate;s.energy+=p.energy/p.rate;s.weapons++;}if(p.ram)s.weapons++;s.energy+=p.drain||0;s.capacity+=p.capacity||0;s.height=Math.max(s.height,(m.z||0)+1);s.upperMass+=p.mass*(m.z||0);if(m.id==='track'&&!(m.z||0))s.tracks++;if((m.id==='wheel'||p.tires)&&!(m.z||0))s.wheels++;if(m.id==='winterwheel'&&!(m.z||0))s.winterWheels++;if(m.id==='dunewheel'&&!(m.z||0))s.duneWheels++;if(m.id==='insulator')s.insulators++;if(m.id==='heater')s.heaters++;if(m.id==='gyro')s.gyros++;if(m.id==='hover'&&!(m.z||0))s.hovers++;if(p.boost)s.boosters++;}
  s.hovering=s.hovers>0&&s.hovers>=s.wheels+s.tracks;
  s.stability=Math.max(.55,1-s.upperMass/Math.max(s.mass,1)*.24);
