@@ -1,4 +1,4 @@
-export const BALANCE_VERSION="agent-season-3", ENGINE_VERSION="agent-season-3", TERRAIN_VERSION="climate-3";
+export const BALANCE_VERSION="agent-season-4", ENGINE_VERSION="agent-season-4", TERRAIN_VERSION="climate-3";
 export const VERSION=3, GRID=9, LIMIT=1200, PART_LIMIT=32, MASS_LIMIT=360, WEAPON_LIMIT=8, LEVELS=3, LAYER_HEIGHT=1.65;
 // Two matching weapons retain their normal cycle. Further matching weapons
 // share targeting, ammunition and heat-control bandwidth, so a pure weapon
@@ -31,7 +31,7 @@ export const PARTS=[
  {id:'track',name:'Siege tread',cat:'Mobility',cost:55,hp:240,mass:12,thrust:40,armor:0.15,desc:'Slower turning, stronger grip, and enough armor to survive frontline combat.'},
  {id:'battery',name:'Volt battery',cat:'Systems',cost:45,hp:85,mass:5,power:22,explosive:85,desc:'Adds 22 power per second. Explodes when destroyed, damaging adjacent modules. Protect it.'},
  {id:'cooler',name:'Vortex cooler',cat:'Systems',cost:40,hp:110,mass:6,cooling:19,desc:'Dissipates 19 heat per second. Overheating locks every weapon until the machine cools.'},
- {id:'cannon',name:'Hammer cannon',cat:'Weapons',cost:95,hp:145,mass:13,damage:61,rate:1.5,range:430,heat:16,energy:17,speed:470,spread:0.035,desc:'A reliable shell with a small blast radius. Best at medium range. Front firing arc: 180°.'},
+ {id:'cannon',name:'Hammer cannon',cat:'Weapons',cost:95,hp:145,mass:13,damage:61,rate:1.5,range:400,heat:16,energy:17,speed:470,spread:0.035,desc:'A reliable shell with a small blast radius. Best at medium range. Front firing arc: 180°.'},
  {id:'machinegun',name:'Viper autocannon',cat:'Weapons',cost:75,hp:115,mass:8,damage:10,rate:0.2,range:310,heat:3,energy:3,speed:740,spread:0.10,desc:'Rapid suppression. Excellent at shredding exposed systems; struggles against heavy armor.'},
  {id:'railgun',name:'Lance railgun',cat:'Weapons',cost:155,hp:95,mass:16,damage:82,rate:3,range:550,heat:34,energy:32,speed:1200,spread:0.008,pierce:2,desc:'Extreme range and two-module penetration. High heat and power demand. Protect its fragile mount.'},
  {id:'rocket',name:'Hydra rockets',cat:'Weapons',cost:115,hp:110,mass:11,damage:48,rate:1.7,range:530,heat:20,energy:19,speed:330,spread:0.08,splash:42,desc:'Guided rockets curve toward the target. Wide explosions punish tightly packed batteries.'},

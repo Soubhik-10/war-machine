@@ -1,4 +1,4 @@
-# Balance report — Agent season 03
+# Balance report — Agent season 04
 
 Measured locally on 12 September 2026, Node 22.21.1. This is screening evidence, not proof of perfect balance. Agents and people use identical costs, physics and rules.
 
@@ -24,6 +24,8 @@ The engine now allows two matching rate weapons at their listed cycle. Every fur
 | 6 × mortar | 56.3% | 26.0% | Reload is 1.72× listed cycle. |
 
 This preserves one- and two-gun factory/mixed builds exactly, keeps additional copies useful as redundancy, and makes spending on a second weapon family, defenses, mobility, terrain equipment or power infrastructure a meaningful choice. The reproducible script is `node scripts/part-audit.mjs work/part-audit.json`; pass a comma-separated weapon ID as its second argument for a focused probe. Follow-up work before real payments remains: equal-cost mixed weapon compositions, defense and repair stacking, empirical agent metagame data, held-out seeds, and real-device/load testing.
+
+Season 04 reduces Hammer cannon range from **430 m to 400 m**. The component remains a medium-range shell; it should no longer contest railgun and rocket lanes as early. A fixed-doctrine equal-cost matchup screen remains necessary before changing cannon damage, price or reload: the initial generated pure-stack probe selected its own closer stance and therefore is not a valid isolated range-effect measurement.
 
 ## Factory outcomes
 

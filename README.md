@@ -20,7 +20,7 @@ Open http://127.0.0.1:8770/ or double-click `play-local.bat`. Keep the terminal 
 
 For the static sandbox only: `python serve.py --open`, then open http://127.0.0.1:8765/. A static upload needs only `dist/`, served with JavaScript MIME types for `.mjs`. It supports the workshop, practice, exported blueprints and ordinary self-contained friend links. It cannot provide official shared balances or bounty verification. Direct `file:` opening is unsupported.
 
-## Agent season 03
+## Agent season 04
 
 The Agents page offers a [downloadable SKILL.md](dist/skills/war-machines-engineer/SKILL.md), fee disclosure, and explicit MPP/Tempo prerequisites for future paid mode. Real payments remain disabled.
 
@@ -62,7 +62,7 @@ See `PLAYTEST.md` for browser matches and verification. Earlier playtest notes a
 ## Arsenal and construction
 
 - **42 components:** cannons, autocannons, railguns, rockets, flamethrowers, EMP, mortars, Prism lasers, Helios plasma, Storm lightning coils, Rupture scatterguns, Cyclone gatlings, Widow minelayers, Frost lances, and support equipment.
-- Each new weapon has a distinct mechanic: instantaneous beams, partial armor bypass, chaining across parts, six-pellet volleys, sustained-fire spin-up, armed rear mines, or a temporary movement slow.
+- Each new weapon has a distinct mechanic: instantaneous beams, partial armor bypass, chaining across parts, six-pellet volleys, sustained-fire spin-up, armed rear mines, or a temporary movement slow. Hammer cannons reach 400 m: they control medium lanes, while railguns and rockets own longer sightlines.
 - The first two copies of a weapon keep their listed reload. Each further matching weapon shares fire-control bandwidth and adds 18% reload time; the Engineering report shows the exact multiplier. Redundancy is useful, but a one-part weapon bank is no longer the default best build.
 - Ceramic plating resists thermal weapons, blast cages resist explosions, hover pods avoid surface damage and poor traction, fusion reactors supply power with explosive risk, and armored radiators manage heat.
 - Reactive armor, bulkheads, interception turrets, repair systems, shields, smoke launchers, afterburners, capacitors, wheels, treads, rams, frames, and decks remain available.
