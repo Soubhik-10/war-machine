@@ -23,21 +23,33 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
 }
 New-Item -ItemType Directory -Force -Path $signerDirectory | Out-Null
 
+function Invoke-FoundryWallet([string[]]$Arguments) {
+    # Foundry reports ordinary keystore status on stderr. Capture it while temporarily allowing
+    # native stderr so PowerShell does not mistake a successful key creation for a terminating error.
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & $forgeCast @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
+    $lines = @($output | ForEach-Object { $_.ToString() })
+    if ($exitCode -ne 0) {
+        throw "Foundry wallet command failed (exit $exitCode): $($lines -join [Environment]::NewLine)"
+    }
+    return $lines
+}
+
 function Get-ResultSignerAddress([string]$Name) {
     $path = Join-Path $signerDirectory $Name
     if (Test-Path -LiteralPath $path) {
         Write-Host "Reusing existing $Name. Foundry will ask for its password to read the public address."
-        $output = & $forgeCast wallet address --keystore $path 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            throw "Foundry could not read $Name (exit $LASTEXITCODE): $($output | Out-String)"
-        }
+        $output = Invoke-FoundryWallet @('wallet', 'address', '--keystore', $path)
     } else {
         Write-Host "Creating $Name. Foundry will ask for a password locally."
         Write-Host 'Use a strong, unique password and store it in your password manager.'
-        $output = & $forgeCast wallet new $signerDirectory $Name 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            throw "Foundry could not create $Name (exit $LASTEXITCODE): $($output | Out-String)"
-        }
+        $output = Invoke-FoundryWallet @('wallet', 'new', $signerDirectory, $Name)
     }
     $output | ForEach-Object { Write-Host $_ }
     $addressLine = $output | Where-Object { $_ -match '(0x[0-9a-fA-F]{40})' } | Select-Object -Last 1
