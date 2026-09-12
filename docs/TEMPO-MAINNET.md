@@ -1,5 +1,11 @@
 # Tempo mainnet operations
 
+> **Custody safety change, 12 September 2026:** the former MPP charge plus server-signer payout
+> path is permanently disabled in `sites/worker/mainnet.mjs`. Setting its old environment values
+> cannot enable it. `contracts/WarMachineBountyEscrow.sol` is the planned non-custodial replacement,
+> but it is not deployed or connected to the browser/backend yet. The public Site accepts no Tempo
+> funds until the contract deployment gate in [BOUNTY-ESCROW.md](BOUNTY-ESCROW.md) is complete.
+
 The Tempo integration is implemented but disabled by default. It does not deploy, fund, host, or transact merely by installing dependencies or starting the normal demo server.
 
 ## Network and asset

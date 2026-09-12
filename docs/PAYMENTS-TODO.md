@@ -1,6 +1,6 @@
 # War Machines — implementation and payment handoff
 
-Updated 12 September 2026. **The Tempo mainnet code path is implemented and fail-closed; deployment, legal review, production operations, and live-funds verification remain open.** Demo mode is still the default and its credits never convert to tokens. See [TEMPO-MAINNET.md](TEMPO-MAINNET.md).
+Updated 12 September 2026. **The former server-custody Tempo mainnet path is permanently disabled.** A non-custodial bounty contract now exists in `contracts/`, but deployment, browser integration, result-signing quorum, legal review, production operations, and live-funds verification remain open. Demo mode is still the default and its credits never convert to tokens. See [TEMPO-MAINNET.md](TEMPO-MAINNET.md) and [BOUNTY-ESCROW.md](BOUNTY-ESCROW.md).
 
 > **Release gate:** a checked item means code exists and passed local checks. It does not mean real-money activity is approved, safely hosted, or live-network verified. Do not enable Tempo mainnet until every unchecked payment, custody, host, monitoring and legal item is complete.
 

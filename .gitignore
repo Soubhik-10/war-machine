@@ -10,3 +10,5 @@ var/
 *.sqlite-wal
 *.sqlite-shm
 work/
+contracts/out/
+contracts/cache/

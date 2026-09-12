@@ -5,7 +5,6 @@ import {DatabaseSync} from 'node:sqlite';
 import worker from '../sites/worker/index.mjs';
 import {packChallenge,PRESETS} from '../dist/data.mjs';
 import {pathUsdToUnits,payoutQuote,unitsToPathUsd} from '../sites/worker/pathusd.mjs';
-import {privateKeyToAccount} from 'viem/accounts';
 
 class Statement {
  constructor(statement){this.statement=statement;this.args=[];}
@@ -23,7 +22,6 @@ class D1Mock {
 }
 const json=(url,method='GET',body,token,key)=>new Request('https://foundry.example'+url,{method,headers:{...(body?{'content-type':'application/json'}:{}),...(token?{authorization:'Bearer '+token}:{}),...(key?{'idempotency-key':key}:{})},...(body?{body:JSON.stringify(body)}:{})});
 const call=async(env,url,method,body,token,key)=>{const response=await worker.fetch(json(url,method,body,token,key),env);return {status:response.status,body:await response.json()};};
-const sha256=async value=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
 
 test('pathUSD uses exact base units for cents and preserves the 2.5% fee quote',()=>{
  assert.equal(pathUsdToUnits('0.01',{allowZero:false}).toString(),'10000');
@@ -39,17 +37,15 @@ test('pathUSD uses exact base units for cents and preserves the 2.5% fee quote',
 test('Tempo mode is fail-closed and never falls back to demo credits',async t=>{
  const DB=new D1Mock();await DB.migrate();t.after(()=>DB.close());const env={DB,WM_MODE:'tempo-mainnet'};
  const health=await call(env,'/api/health');assert.equal(health.status,200);assert.equal(health.body.mode,'tempo-mainnet');assert.equal(health.body.paymentsEnabled,false);
- const session=await call(env,'/api/session','POST',{name:'No demo'});assert.equal(session.status,503);assert.match(session.body.error,/activation/i);
+ const session=await call(env,'/api/session','POST',{name:'No demo'});assert.equal(session.status,503);assert.match(session.body.error,/on-chain bounty escrow|legacy custodial/i);
  const rules=await call(env,'/api/rules');assert.equal(rules.status,200);assert.equal(rules.body.startingCredits,0);assert.equal(rules.body.mpp,'locked');
 });
 
-test('enabled Tempo mode issues an MPP payment challenge before a cent-denominated bounty is funded',async t=>{
- const DB=new D1Mock();await DB.migrate();t.after(()=>DB.close());const key='0x'+'11'.repeat(32),escrow=privateKeyToAccount(key).address,token='test-wallet-session',account='11111111-1111-4111-8111-111111111111';
- DB.sqlite.prepare('INSERT INTO accounts (id,token_hash,name,balance,entry_cap,daily_cap,created,payout_address) VALUES (?,?,?,?,?,?,?,?)').run(account,'wallet:'+account,'Test engineer',0,null,null,Date.now(),escrow);
- DB.sqlite.prepare('INSERT INTO sessions (id,token_hash,account,expires,created) VALUES (?,?,?,?,?)').run('22222222-2222-4222-8222-222222222222',await sha256(token),account,Date.now()+60000,Date.now());
+test('a fully populated legacy custody configuration still cannot issue a payment challenge or hold funds',async t=>{
+ const DB=new D1Mock();await DB.migrate();t.after(()=>DB.close());const key='0x'+'11'.repeat(32),escrow='0x1111111111111111111111111111111111111111';
  const env={DB,WM_MODE:'tempo-mainnet',WM_MAINNET_ENABLE:'tempo-mainnet-real-funds',WM_PAYMENT_PAUSED:'false',WM_LEGAL_REVIEWED:'true',WM_PUBLIC_ORIGIN:'https://foundry.example',WM_LEDGER_NAMESPACE:'tempo-mainnet:4217:0x20c0000000000000000000000000000000000000',TEMPO_ESCROW_RECIPIENT:escrow,TEMPO_ENTRY_RECIPIENT:escrow,TEMPO_PLATFORM_RECIPIENT:'0xc20131e9132888993de6519D486E5558A5DbCb7A',TEMPO_ESCROW_PRIVATE_KEY:key,MPP_SECRET_KEY:'m'.repeat(32),WM_MAX_OPERATION_UNITS:'100000000',WM_MAX_OUTSTANDING_UNITS:'1000000000'};
- const blueprint=packChallenge(PRESETS[0],'foundry',0),request=new Request('https://foundry.example/api/bounties',{method:'POST',headers:{'content-type':'application/json','idempotency-key':'tempo_cent_bounty_0001','cookie':'wm_session='+token},body:JSON.stringify({title:'Cent payment',blueprint,entry:'0.01',reward:'1.00',maxPlatformFeeBps:250,hours:1,listed:true})}),res=await worker.fetch(request,env),raw=await res.text();
- assert.equal(res.status,402,raw);assert.match(res.headers.get('www-authenticate')||'',/method="tempo"/);assert.match(res.headers.get('www-authenticate')||'',/Payment-Authorization/);assert.equal(DB.sqlite.prepare('SELECT amount_units FROM payment_holds').get().amount_units,'1000000');
+ const blueprint=packChallenge(PRESETS[0],'foundry',0),request=new Request('https://foundry.example/api/bounties',{method:'POST',headers:{'content-type':'application/json','idempotency-key':'tempo_cent_bounty_0001'},body:JSON.stringify({title:'Cent payment',blueprint,entry:'0.01',reward:'1.00',maxPlatformFeeBps:250,hours:1,listed:true})}),res=await worker.fetch(request,env),raw=await res.text();
+ assert.equal(res.status,503,raw);assert.match(raw,/legacy custodial payment route is disabled/i);assert.equal(res.headers.get('www-authenticate'),null);assert.equal(DB.sqlite.prepare('SELECT COUNT(*) AS total FROM payment_holds').get().total,0);
 });
 
 test('Sites Worker + D1 supports private build vaults and authoritative demo bounty settlement',async t=>{

@@ -34,27 +34,10 @@ function canonicalBlueprint(input,locked){
 
 export function runtimeConfig(env,origin){
  if(env.WM_MODE!=='tempo-mainnet')return {mode:'demo',enabled:false};
- const missing=[];
- if(env.WM_MAINNET_ENABLE!=='tempo-mainnet-real-funds')missing.push('real-funds switch');
- if(env.WM_PAYMENT_PAUSED==='true')missing.push('payment pause must be off');
- if(env.WM_LEGAL_REVIEWED!=='true')missing.push('operator approval');
- if(env.WM_PUBLIC_ORIGIN!==origin)missing.push('canonical public origin');
- if(env.WM_LEDGER_NAMESPACE!==`tempo-mainnet:${TEMPO_MAINNET_CHAIN_ID}:${PATH_USD_TOKEN.toLowerCase()}`)missing.push('ledger namespace');
- if(!env.TEMPO_ESCROW_RECIPIENT)missing.push('escrow recipient');
- if(!env.TEMPO_ENTRY_RECIPIENT)missing.push('entry recipient');
- if(!env.TEMPO_ESCROW_PRIVATE_KEY)missing.push('escrow signer');
- if(typeof env.MPP_SECRET_KEY!=='string'||new TextEncoder().encode(env.MPP_SECRET_KEY).byteLength<32)missing.push('MPP secret');
- if(!env.WM_MAX_OPERATION_UNITS||!env.WM_MAX_OUTSTANDING_UNITS)missing.push('operation ceilings');
- if(missing.length)return {mode:'tempo-mainnet',enabled:false,reason:'Mainnet payment activation is incomplete. The operator must configure the escrow signer, MPP secret, and reviewed limits before any funds can be accepted.'};
- try{
-  const escrowRecipient=getAddress(env.TEMPO_ESCROW_RECIPIENT),entryRecipient=getAddress(env.TEMPO_ENTRY_RECIPIENT),platformRecipient=getAddress(env.TEMPO_PLATFORM_RECIPIENT||PLATFORM_FEE_RECIPIENT),signer=privateKeyToAccount(env.TEMPO_ESCROW_PRIVATE_KEY),maxOperationUnits=BigInt(env.WM_MAX_OPERATION_UNITS),maxOutstandingUnits=BigInt(env.WM_MAX_OUTSTANDING_UNITS);
-  check(escrowRecipient!==platformRecipient,'Escrow and platform fee recipients must be different.',500);
-  check(entryRecipient===escrowRecipient,'Entry fees must enter the controlled escrow recipient.',500);
-  check(platformRecipient===getAddress(PLATFORM_FEE_RECIPIENT),'The platform recipient does not match the disclosed 2.5% fee address.',500);
-  check(getAddress(signer.address)===escrowRecipient,'The configured signer does not control the escrow recipient.',500);
-  check(maxOperationUnits>0n&&maxOutstandingUnits>0n,'Mainnet operation ceilings must be positive.',500);
-  return {mode:'tempo-mainnet',enabled:true,origin,token:PATH_USD_TOKEN,decimals:PATH_USD_DECIMALS,chainId:TEMPO_MAINNET_CHAIN_ID,rpcUrl:env.TEMPO_RPC_URL||'https://rpc.tempo.xyz',escrowRecipient,entryRecipient,platformRecipient,signer,mppSecret:env.MPP_SECRET_KEY,maxOperationUnits,maxOutstandingUnits,quoteTtlMs:Math.min(600000,Math.max(30000,Number(env.WM_QUOTE_TTL_SECONDS||180)*1000))};
- }catch(error){return {mode:'tempo-mainnet',enabled:false,reason:'Mainnet payment configuration is invalid. No payments are accepted until the operator corrects it.'};}
+ // Do not permit the former server-custody flow to be switched on by configuration. A real-money
+ // bounty must call the reviewed on-chain escrow directly; that browser and verifier adapter is
+ // intentionally a separate, unfinished release gate.
+ return {mode:'tempo-mainnet',enabled:false,reason:'On-chain bounty escrow deployment and direct contract integration are required. The legacy custodial payment route is disabled, so this Site cannot accept Tempo funds.'};
 }
 
 function catalog(config){const paid=config.enabled;return {mode:'tempo-mainnet',apiVersion:'3.1-sites-mainnet',discovery:'/.well-known/war-machines.json',openapi:'/api/openapi.json',terrainInfo:Object.fromEntries(ARENAS.flatMap(arena=>arena.terrain).map(terrain=>[terrain.type,terrain])),economics:{platformFee:PLATFORM_FEE_POLICY,creditScale:10**PATH_USD_DECIMALS,amountUnit:'pathUSD',network:{chainId:TEMPO_MAINNET_CHAIN_ID,token:PATH_USD_TOKEN,decimals:PATH_USD_DECIMALS,explorer:'https://explore.tempo.xyz'},maxInteger:1000000000,entryMin:'0.01',rewardMin:'0.01',rewardMustExceedEntry:false,personalCapsDefault:null,hours:{min:0,max:8760,zero:'No expiry'}},guest:['build','save local blueprints','share machines','browse','validate','practice'],loginRequired:['create bounty','enter official trial','save bounty','save account builds','account history'],walletAuth:paid?{enabled:true,siwe:'/api/auth/challenge',verify:'/api/auth/verify'}:'locked',mpp:paid?{enabled:true,method:'tempo',intent:'charge',credentialHeader:'Payment-Authorization'}:'locked',activation:paid?undefined:{ready:false,reason:config.reason},versions:{hash:CLIENT_ENGINE_HASH},startingCredits:0,parts:PARTS.map(part=>({...part,...PART_GUIDANCE[part.id]})),arenas:ARENAS,defaultRules:DEFAULT_RULES,examples:PRESETS.map(machine=>packChallenge(machine,'foundry',0)),rules:{oneActiveAttempt:true,combat:'auto',timeLimitSeconds:100,drawIntegrityThreshold:.025,entryRefund:'Technical failure only',spending:'Entry cap and daily account budget',payments:paid?'Tempo mainnet pathUSD payments through MPP. The winner receives 97.5% of the gross reward; 2.5% goes to the disclosed platform recipient. Payout and refund status are independently reconciled.':'Payments are unavailable until escrow configuration is complete. No demo credits are issued.'}};}
