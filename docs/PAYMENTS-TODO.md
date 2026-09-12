@@ -1,18 +1,20 @@
 # War Machines — implementation and payment handoff
 
-Updated 12 September 2026. **Demo bounty gameplay is implemented. Payments, wallets, MPP, Tempo and mainnet are not.** This document distinguishes the delivered local implementation from the next developer's TODOs.
+Updated 12 September 2026. **The Tempo mainnet code path is implemented and fail-closed; deployment, legal review, production operations, and live-funds verification remain open.** Demo mode is still the default and its credits never convert to tokens. See [TEMPO-MAINNET.md](TEMPO-MAINNET.md).
 
-**Hosting constraint:** do not publish/redeploy on OpenAI Sites or enable paid hosting, API billing, purchases or automatic overages without a new explicit user instruction. The game runs locally with no OpenAI model calls. The earlier owner-private Site remains a separate hosted artifact. See HOSTING.md for the status check and limitations; account invoices were not accessible.
+> **Release gate:** a checked item means code exists and passed local checks. It does not mean real-money activity is approved, safely hosted, or live-network verified. Do not enable Tempo mainnet until every unchecked payment, custody, host, monitoring and legal item is complete.
 
-Source: [Soubhik-10/war-machine](https://github.com/Soubhik-10/war-machine). This local/demo release adds the bounty backend/UI, climate balance work and the disclosed platform-fee flow. It has not been publicly deployed.
+**Hosting constraint:** an owner-private ChatGPT Sites deployment is authorized, but this Node/SQLite backend cannot run there unchanged. Do not expose paid bounties until the Worker/D1 port, durable job queue, secret handling and live-network rehearsal are complete. The game runs with no OpenAI model calls. See HOSTING.md for the runtime boundary.
+
+Source: [Soubhik-10/war-machine](https://github.com/Soubhik-10/war-machine). This local/demo release adds the bounty backend/UI, climate balance work and the disclosed platform-fee flow. It has not been publicly deployed as a complete server-backed game.
 
 ## 1. Delivered gameplay
 
 - [x] Keep the 42-part workshop, 9×9×3 grid, front direction, doctrine, upgrades, paint, normal friend links, free simulation and cameras.
 - [x] Create a bounty from the current machine with title, entry, reward, duration, arena and standard/custom/unlimited construction caps.
 - [x] Reserve the full reward before listing; immutable accepted defender, rules, arena and engine/balance/terrain hash.
-- [x] Stable `/#bounty=ID` sharing; listed/unlisted board, live contract state, closed receipts. Unlisted is not private.
-- [x] Free practice and counter editing with locked contract limits; signup from a shared link returns to that contract.
+- [x] Stable `/#bounty=ID` sharing; listed/unlisted board, live bounty state, closed receipts. Unlisted is not private.
+- [x] Free practice and counter editing with locked bounty limits; signup from a shared link returns to that bounty.
 - [x] One official active attempt per bounty, enforced by SQLite transaction and partial unique index.
 - [x] Backend revalidates builds, applies account caps, generates seed/starting side, simulates and records win/loss/draw. No human referee and no client-result submission endpoint.
 - [x] Duplicate-request protection; queued/running recovery with fencing tokens; bounded CPU/memory/ticks; one payout or refund only.
@@ -28,14 +30,14 @@ Source: [Soubhik-10/war-machine](https://github.com/Soubhik-10/war-machine). Thi
 
 ## 2. Run and maintain
 
-Run `node server.mjs` or `play-local.bat`, then open `http://127.0.0.1:8770/`. Tested runtime: Node 22.21.1, built-in `node:sqlite`, worker threads. No npm install. Use a compatible runtime; Node 22 prints an experimental SQLite warning. `serve.py` remains available for static-only sandbox play.
+Run `npm ci`, then `node server.mjs` or `play-local.bat`, and open `http://127.0.0.1:8770/`. Tested runtime: Node 22.21.1, built-in `node:sqlite`, worker threads. Node 22 prints an experimental SQLite warning. `serve.py` remains available for static-only sandbox play.
 
 | File | Responsibility |
 | --- | --- |
 | `dist/data.mjs` | Shared parts/rules/validation/codecs, arena metadata and balance versions |
 | `dist/engine.mjs` | Deterministic headless/browser simulation; no model calls |
 | `dist/bounties.mjs`, `bounties.css` | Board, creation, terms, accounts, ledger, attempts and replay entry |
-| `dist/app.mjs` | Workshop/practice/replay integration and contract context |
+| `dist/app.mjs` | Workshop/practice/replay integration and bounty context |
 | `server/store.mjs` | SQLite schema, transactions, authorization, canonical input, caps, ledger and lifecycle |
 | `server/battle-worker.mjs` | Runs the pinned engine in a bounded worker |
 | `server.mjs` | Same-origin static/API server, request limits and durable queue processing |
@@ -45,13 +47,13 @@ Run `node server.mjs` or `play-local.bat`, then open `http://127.0.0.1:8770/`. T
 
 One server instance per SQLite database is the supported deployment shape. At most 16 queued/running trials globally; one worker at a time. Jobs have a 6002-tick bound, 30-second wall timeout, 192 MiB old-generation heap limit and 45-second recoverable lease. Lease identity is a fresh UUID plus persisted attempt count; stale completion is rejected. Three abandoned leases cause a refund. No browser tab or in-memory lock is the source of bounty ownership.
 
-Restart through an intentional release, not by changing live simulation files. Worker startup verifies the engine content hash. Incompatible idle contracts are archived and reserves returned; accepted incompatible work is refunded. This release retains historical receipts, but does **not** bundle a multi-version engine registry: old exact replay needs that release restored. Do not silently replay under different physics.
+Restart through an intentional release, not by changing live simulation files. Worker startup verifies the engine content hash. Incompatible idle bounties are archived and reserves returned; accepted incompatible work is refunded. This release retains historical receipts, but does **not** bundle a multi-version engine registry: old exact replay needs that release restored. Do not silently replay under different physics.
 
 Use `docs/AGENT-API.md` for the exact implemented request/response contract. State names: bounty `open/busy/claimed/expired/cancelled/archived`; attempt `queued/running/settled/refunded`, with win/loss/draw in the settled receipt. Engine winner 0 means challenger, 1 defender, -1 draw regardless of the randomly assigned physical starting side.
 
 ## 3. Economics and authorization
 
-Demo only: 1,000 starting credits; default entry 10, gross reward 100, platform fee 2.5, winner payout 97.5, net win +87.5. New contracts snapshot a 2.5% (250 basis point) winning-reward fee; legacy contracts retain zero fee. Win closes the single reward. Loss/draw consumes entry and reopens if eligible. Technical failure refunds entry. Cancellation/expiry returns the unused reserve, but must wait for an accepted attempt to settle. Account owners cannot claim their own contract; this is not protection from multi-account abuse.
+Demo only: 1,000 starting credits; default entry 10, gross reward 100, platform fee 2.5, winner payout 97.5, net win +87.5. New bounties snapshot a 2.5% (250 basis point) winning-reward fee; legacy bounties retain zero fee. Win closes the single reward. Loss/draw consumes entry and reopens if eligible. Technical failure refunds entry. Cancellation/expiry returns the unused reserve, but must wait for an accepted attempt to settle. Account owners cannot claim their own bounty; this is not protection from multi-account abuse.
 
 Entry/reward independently 0–1,000,000,000 whole demo credits; no required ratio; duration 0–8,760 hours, with 0 meaning no expiry; 20 active contracts per account. New personal caps default to null (no cap); owners can choose either cap, and zero means free entries only. Refunds adjust the day of their original attempt. All agent keys share account caps and balance. Agent keys can fund bounties, but cannot increase entry caps or mint/revoke keys; they can close their account’s idle contracts. Reward reservations are separate from daily entry caps and bounded by available balance.
 
@@ -61,7 +63,7 @@ Creation and entry require persisted idempotency keys. Clients save uncertain re
 
 ## 4. Verification and balance
 
-Verification is recorded in BALANCE-REPORT.md and PLAYTEST.md; the current suite contains 125 tests. Run `node --test tests/*.test.mjs`. Tests cover win/loss/draw/refund, double-submit, two-client race, old worker fencing, expiry while active, restart persistence, cap enforcement, key revocation, malformed/over-limit builds, wrong-origin writes, real worker/browser-engine agreement, exact fee arithmetic, policy acknowledgement, atomic payout splitting, rollback, and legacy-ledger migration. Terrain-on/off fixtures prove coolant cooling and wheel-speed changes, tread advantage on rubble, low-shot blockage by a ridge, and disclosed diminishing returns for repeated weapon banks. Rendering randomness is isolated from gameplay.
+Verification is recorded in BALANCE-REPORT.md and PLAYTEST.md; the current suite contains 133 tests. Run `npm test`. Tests cover win/loss/draw/refund, double-submit, two-client race, old worker fencing, expiry while active, restart persistence, cap enforcement, key revocation, malformed/over-limit builds, wrong-origin writes, real worker/browser-engine agreement, exact fee arithmetic, policy acknowledgement, atomic payout splitting, rollback, legacy-ledger migration, mainnet fail-closed configuration, identity challenge, paid holds, late refunds, settlement ordering and scoped paid agents. Terrain-on/off fixtures prove coolant cooling and wheel-speed changes, tread advantage on rubble, low-shot blockage by a ridge, and disclosed diminishing returns for repeated weapon banks. Rendering randomness is isolated from gameplay.
 
 The accompanying BALANCE-REPORT.md records baseline/rerun samples, changed costs and observed weaknesses. Factory designs spend different budgets; two seeds per pairing are screening evidence only. Do not advertise a universally fair cash competition from these results. Random physical starting sides reduce systematic entrant-slot advantage but do not establish perfect map or first-hit symmetry.
 
@@ -70,16 +72,16 @@ The accompanying BALANCE-REPORT.md records baseline/rerun samples, changed costs
 - [ ] Broader equal-budget weapon fixtures and held-out seeds for all 42 parts; adversarial optimization, mirrored matchups, EMP uptime, shield/repair stacking and passive integrity scoring.
 - [ ] Mobile hardware performance and maximum-size battle load tests on the eventual deployment host; local timings are not cloud CPU allowances.
 - [x] Search, arena/maximum-entry filters, Available/My contracts/Saved/Closed views and account bookmarks.
-- [ ] Server cursor pagination, exact class filters and scalable search beyond the latest 100 contracts.
+- [ ] Server cursor pagination, exact class filters and scalable search beyond the latest 100 bounties.
 - [ ] Optional maximum attempt count per bounty; currently expiry/claim/cancel bound its life.
-- [ ] Separate per-agent reward-funding allowance and narrower scopes if agents should only enter; currently keys share account funds with disclosed limits.
+- [x] Separate per-agent reward-funding allowance, scopes, optional contract restrictions, expiry, per-entry cap, cumulative spend cap and revocation.
 - [ ] Durable account recovery/authentication, signup abuse controls, administrator tools, DB backups/restore drills, metrics and alerts before a public launch. Demo anonymous grants are intentionally farmable.
 - [ ] If scaling horizontally, replace the local worker/SQLite adapter with a durable cloud queue and transactional DB while preserving the lifecycle invariants.
 - [ ] Retained version registry for exact replay across releases. Current safe policy archives/refunds incompatible live work and keeps historical receipts.
 - [ ] Optional terrain-footprint sampling and dynamic rubble from destroyed cover. Current effects sample the core location consistently; rubble patches are fixed map features.
-- [ ] Choose a host only under the no-paid-hosting constraint in HOSTING.md. No host, billing plan or automatic deployment is provisioned by this update.
+- [ ] Port Node/SQLite and worker-thread services to the chosen durable production runtime before hosting verified bounties. An owner-private Sites release may host static/demo assets only until then.
 
-Everything below is future payment work. Do not convert demo credits to real funds or add a wallet SDK as a shortcut.
+The implementation items below are checked only where code and local tests now exist. Unchecked launch/operations items remain mandatory before accepting funds.
 
 ## 6. Detailed MPP / Tempo / mainnet TODO
 
@@ -90,12 +92,12 @@ Everything below is future payment work. Do not convert demo credits to real fun
 - [x] Atomically split a verified win into winner payout and a separate platform-fee treasury. Loss, draw, refund, cancellation and expiry do not collect a payout fee. Entry fees remain separately accounted in the arena treasury.
 - [x] Migrate old balances/ledger amounts once to integer thousandths while preserving value, history and legacy zero-fee terms. Keep physics/version hashes unchanged.
 - [x] Publish downloadable `/skills/war-machines-engineer/SKILL.md`, with MPP and Tempo as paid-mode prerequisites, mode detection and spending boundaries.
-- [ ] Implement MPP-compatible client/server handling and Tempo wallet authorization; prerequisites do not mean an integration is present. Current discovery truthfully advertises payments disabled.
-- [ ] Replace the demo treasury with an explicitly configured, validated platform recipient and separately controlled escrow. The repository contains no payout wallet or mainnet recipient.
-- [ ] Compute `feeUnits = grossUnits * 250 / 10000` with integer division rounding down; `winnerUnits = grossUnits - feeUnits`. Use the selected token’s verified decimals. For 6-decimal currency: $1 = 1,000,000 units → fee 25,000, winner 975,000. Never round to whole cents or add a minimum fee.
-- [ ] Bind gross, fee basis points, fee policy version, exact fee, payout, entry, network cost and recipients to the immutable quote/operation and signed authorization. Display separate network costs before consent; do not deduct an undisclosed extra fee.
-- [ ] Resolve the paid entry-fee recipient policy before launch; the demo currently routes entry to a separate arena treasury. The 2.5% reward fee is additional to entry, not a replacement for it.
-- [ ] Design atomic on-chain split or durable paired transfers with reconciliation. A failed winner transfer must never be shown as a completed payout while the platform keeps an unreconciled fee. No double payout/fee after restart, worker retry, duplicate webhook or uncertain RPC response.
+- [x] Implement MPP-compatible client/server handling and Tempo wallet/passkey authorization. Discovery advertises payments only in paid mode.
+- [x] Require explicitly configured and validated platform and escrow recipients; reject paid startup when they are missing, equal, malformed, or inconsistent with the signer.
+- [x] Compute fee and winner amounts with integer arithmetic, then persist exact 6-decimal token base-unit strings.
+- [x] Bind gross, fee basis points, fee policy version, exact fee, payout, entry, network cost and recipients to the immutable MPP metadata/application operation. Display network costs separately before consent.
+- [x] Resolve paid entry policy: entry goes to arena escrow, remains there on loss/draw, and is refunded only for technical/late-payment failure. It is separate from the winning-reward fee.
+- [x] Implement durable ordered winner/platform transfers and reconciliation. Platform submission depends on confirmed winner payout; ambiguous sends stop in `failed-needs-reconciliation` without blind retry.
 - [ ] Test conservation, smallest supported reward, token rounding, zero-fee legacy terms, all non-win outcomes, revoked authority, insufficient funds and payout failure/recovery on an isolated test network.
 - [ ] Do not convert demo balances or migrate demo grants to real money. No mainnet, paid hosting, automatic funding or fee sponsorship without explicit owner authorization.
 
@@ -104,76 +106,76 @@ Protocol references: [MPP challenge / credential / receipt flow](https://mpp.dev
 
 ### 6.1 Decisions to record before integration
 
-- [ ] Choose the payment provider/method and verify compatibility with the final host's runtime and terms. General Sites backend support does not establish support for every payment method, contract, or long-running job.
-- [ ] Record chain ID, RPC endpoints, token address, decimals, finality policy and explorer from current official network/token documentation. Do not copy testnet addresses or infer decimals from a currency label.
-- [ ] Choose a funding/custody model: a payment provider or a separately designed escrow contract. A request-payment SDK is not automatically a bounty escrow/payout system.
-- [ ] Decide who receives entry fees, whether any fee is refunded for a draw, who pays network fees, and what happens to unused rewards. The implemented rules must match the UI and terms before anyone pays.
+- [x] Choose MPP `tempo.charge` with pinned official SDK versions. Final-host runtime/terms review is still a launch gate.
+- [x] Record chain ID, RPC, token address, decimals, confirmation policy and explorer in [TEMPO-MAINNET.md](TEMPO-MAINNET.md).
+- [x] Choose server-controlled custodial escrow with a dedicated signer and document that it is not a trustless contract.
+- [x] Decide entry/refund/network-fee/unused-reward policy and reflect it in paid UI, receipts and operations documentation.
 - [ ] Review the proposed paid-entry/prize activity for the launch jurisdictions and provider rules before enabling actual funds.
 - [ ] Document operational ownership, refund support, incident handling and key recovery. Never depend on a developer's personal wallet remaining online.
 
 ### 6.2 Separate money from gameplay
 
-- [ ] Introduce a funding adapter with quote, verify incoming funds, reserve/release reward, settle win/loss, request refund and reconcile operations. Preserve the demo adapter for tests.
-- [ ] Use integers/decimal strings in token base units. Never use floating-point dollars or silently convert demo credits to real tokens.
-- [ ] Separate demo, testnet and mainnet databases/ledgers, credentials, endpoints and UI modes. Environment/currency are required fields on every financial operation.
-- [ ] Use append-only accounting with unique operation identifiers. Establish conservation invariants for available funds, reserves, fees, refunds and payouts.
-- [ ] Ledger state and on-chain/provider state are separate. An accepted API request is not evidence of final settlement.
+- [x] Introduce MPP funding/verification and payout reconciliation adapters while preserving demo behavior and tests.
+- [x] Use exact decimal strings in token base units for every financial operation; demo balances are never converted.
+- [x] Require a dedicated mainnet database/ledger and record environment/currency on financial operations; paid and demo UI/discovery are distinct.
+- [x] Use append-only financial operations with unique identities and idempotent reward, fee and refund allocation.
+- [x] Keep accepted gameplay state distinct from requested/submitted/confirmed on-chain settlement state.
 
 ### 6.3 Wallet identity and spending authority
 
 See [TEMPO-AUTH-TODO.md](TEMPO-AUTH-TODO.md) for the implementation sequence, proposed endpoints, wallet/passkey verification, guest boundary, migration, scoped agents and acceptance tests. Wallet connection, verified application login and payment authority are separate.
 
-- [ ] Prove wallet control with a domain-bound nonce challenge containing expiry, intended chain and purpose. Prevent replay. Explicitly bind it to the account/agent and intended payout address.
-- [ ] Keep participant private keys on their own infrastructure or approved signer. Do not ask users to paste wallet keys into our game, logs or support chat.
+- [x] Prove wallet control with the official domain-bound Accounts challenge/session handler, short-lived atomic nonces and intended chain; verified wallet identity is the payout address.
+- [x] Keep participant private keys in their wallet. The game accepts signatures and MPP credentials, never participant keys or seed phrases.
 - [ ] Keep payout credentials in a server secret/signer, with minimal authority, rotation and documented backup/recovery.
-- [ ] Enforce owner-approved maximum fee, total spend, expiry and credential revocation independently of MPP transport.
-- [ ] Authenticate the agent's account separately from verifying a payment. A payment alone need not establish which account may edit a bounty or change its payout address.
+- [x] Enforce maximum fee, per-entry/reward/cumulative spend, credential expiry and revocation independently of MPP transport.
+- [x] Authenticate account/agent authority separately from MPP proof; payment alone grants no account mutation rights.
 
 ### 6.4 MPP request charging
 
-- [ ] Publish API docs and machine-readable discovery with supported payment methods, currencies and fee policy.
-- [ ] Return an MPP `402 Payment Required` challenge for an eligible unpaid official-attempt request; keep rules, public browsing and local practice free.
-- [ ] Bind the quote to bounty/revision, validated blueprint hash, owner/agent, amount, currency, network, recipient, operation ID and expiry using the selected SDK/protocol's supported binding mechanism plus an application record where needed.
-- [ ] Verify payment server-side with the supported SDK/provider. Never trust an arbitrary transaction hash, a client “paid” boolean or a receipt from a different operation.
-- [ ] Reject wrong recipient, token, amount, network, expired quote, replayed receipt and mismatched submitted blueprint.
-- [ ] Make a retried paid request resolve to the same official attempt. Retain proof/receipt references and a unique payment-to-operation mapping.
-- [ ] Return a job/status URL after acceptance; polling an existing job must not charge again.
+- [x] Publish OpenAPI and machine-readable discovery with the active payment method, chain, token, decimals, recipients and fee policy.
+- [x] Return an SDK-produced MPP `402 Payment Required` challenge only for reward funding and eligible official entries; browsing, rules and practice stay free.
+- [x] Bind quotes to the operation, account, immutable blueprint/contract terms, exact amounts, currency, network, recipient and expiry.
+- [x] Verify payments server-side with `mppx`; arbitrary hashes, booleans and unbound client receipts are not accepted.
+- [x] Reject wrong recipient/token/network/amount, expired/replayed credentials and mismatched blueprints through fixed server configuration, SDK verification and application digests.
+- [x] Resolve paid retries to the same bounty/attempt and retain proof references plus unique financial/payment operation mappings.
+- [x] Return attempt IDs/status links after acceptance; polling does not invoke a charge.
 
 ### 6.5 Payment latency versus single active attempt
 
 Payment integration adds a race that the demo-credit transaction does not have. Specify it deliberately:
 
-- [ ] Before asking a user to pay, atomically hold the available bounty for a short-lived quote. Display busy to other entrants; do not charge losers of that race.
-- [ ] Rate-limit/limit unpaid quote holds to prevent an agent monopolizing a bounty for free.
-- [ ] When timely valid payment is verified, atomically convert the hold into the existing accepted attempt. The same hold cannot start two battles.
-- [ ] If payment arrives late, the quote has expired, or the bounty is no longer available, record and refund/credit it exactly once under the published policy. Do not drop received funds or take a reward already promised elsewhere.
-- [ ] Account for eventual finality, delayed notifications and provider/RPC outages. A status timeout is not proof that no payment occurred.
-- [ ] Test the full sequence with two agents, delays, duplicate requests, expired holds and worker crashes.
+- [x] Atomically hold the bounty before issuing an entry challenge so a losing racer is not asked to pay.
+- [x] Limit each account to one live short-lived payment hold and apply API/auth rate limits.
+- [x] Atomically convert one timely verified hold into one accepted attempt.
+- [x] Record late/unusable confirmed payments and allocate one idempotent refund operation.
+- [x] Preserve separate payment states for delayed finality/RPC outage; timeouts are not treated as proof of nonpayment.
+- [x] Cover concurrent holds, duplicate acceptance, late refund and existing worker recovery with local automated tests.
 
 ### 6.6 Bounty funding and rewards
 
-- [ ] Require confirmed reward funding/reservation before a real bounty is listed as claimable.
-- [ ] Keep accepted-attempt reserves protected through expiry and crash recovery.
-- [ ] Implement payout states such as requested/submitted/confirmed/failed-needs-reconciliation. A pending payout is not displayed as received cash.
-- [ ] Allocate a unique payout/refund identity. Before retrying after an ambiguous response, reconcile the previous transfer; do not blindly send another one.
-- [ ] Persist payout destination, amount, currency and network at the appropriate immutable acceptance point. Any later address change requires explicit ownership verification and must not rewrite settled history.
+- [x] Require verified reward funding before a real bounty is listed.
+- [x] Keep accepted-attempt reward reserves protected through expiry and crash recovery.
+- [x] Implement requested/submitted/confirmed/failed-needs-reconciliation payout states and expose them separately from the battle result.
+- [x] Allocate unique payout/refund identities and stop ambiguous transfers for reconciliation instead of retrying blindly.
+- [x] Persist payout destination, amount, currency and network on immutable financial operations derived from verified identity.
 - [ ] Maintain a reconciliation job comparing ledger obligations with provider/chain events. Alert on stuck jobs, missing confirmations, unexpected transfers and reserve shortfalls.
 - [ ] If using a custom escrow contract, separately specify and review creator funding, winner authorization, cancellation, deadlines, dispute/admin powers, pause behavior and upgradeability. MPP does not decide the winner or implement this contract for us.
 
 ### 6.7 Supply-chain and production readiness
 
-- [ ] Prefer the official maintained SDK for the selected language and payment method; pin exact versions and commit the dependency lockfile.
+- [x] Use pinned official `mppx`, `accounts`, and `viem` versions with a committed lockfile.
 - [ ] Review package provenance, transitive dependencies, install scripts, licenses and vulnerability reports. Do not add an unrelated wallet/UI framework merely to obtain one payment helper.
-- [ ] Keep dependencies and credentials off the static client unless they are intentionally public/client-safe.
+- [x] Bundle only public client code; MPP verification secret and escrow signer stay server-side.
 - [ ] Start integration tests on an isolated test network. Exercise wrong chain/token/recipient, insufficient funds, reverted/delayed transactions, receipt replay, duplicate payouts, server restarts and rate limits.
 - [ ] Benchmark the real host with maximum legal bounty builds and bounded concurrency. Local Node timings do not establish Sites/Appwrite CPU allowances.
-- [ ] Keep money operations disabled by default. Require explicit production configuration and reviewed destinations before enabling mainnet.
-- [ ] Launch with small per-operation and total outstanding-funds ceilings, monitoring and a documented stop switch. Do not automatically promote a testnet deployment to mainnet.
-- [ ] Publish final economic rules, exact fees, payout timing and failure/refund behavior before taking actual funds.
+- [x] Keep money operations disabled by default and require an explicit enable phrase, legal-review gate, HTTPS origin, dedicated database and reviewed destinations.
+- [x] Enforce configurable per-operation/outstanding ceilings and document a payment stop switch. Production monitoring remains a launch task.
+- [x] Publish the implemented economic, timing and failure/refund policy in [TEMPO-MAINNET.md](TEMPO-MAINNET.md).
 
 ## 7. Primary integration references
 
-These describe protocol/provider capabilities, not an already implemented payment flow in this game. Recheck versions and network configuration when implementation starts.
+These are the implementation's primary protocol/provider references. Recheck versions and network configuration before deployment.
 
 - [Machine Payments Protocol overview and source](https://github.com/tempoxyz/mpp): request payments through HTTP 402 and official SDK links.
 - [MPP TypeScript SDK (`mppx`)](https://github.com/wevm/mppx): server verification, client handling, charge/session examples and receipts.
@@ -184,7 +186,7 @@ These describe protocol/provider capabilities, not an already implemented paymen
 
 ## 8. Done means
 
-The demo release is complete when two separate clients or external agents can create/share a funded demo bounty, obey its exact build/economic caps, contend safely for its one attempt slot, receive a backend-produced result, and see a consistent single reward/refund outcome after reload and restart. Terrain must measurably affect the battle and the balance report must disclose its actual test coverage. Mainnet remains disabled until the payment TODOs are implemented and verified separately.
+The demo release satisfies the original completion criteria. The mainnet code remains disabled until every unchecked legal, operational, host, wallet-device and live-network verification task is completed by the operator.
 
 ## Releasing simulation changes
 

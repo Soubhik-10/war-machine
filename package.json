@@ -1,0 +1,14 @@
+{
+  "scripts": {
+    "build:tempo-client": "node scripts/build-tempo-client.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "accounts": "0.16.0",
+    "mppx": "0.9.1",
+    "viem": "2.55.13"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
