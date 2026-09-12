@@ -21,7 +21,9 @@ export function workshopScene(machine,{hover=null,selected='cannon',rotation=0,e
 }
 function environment(arena){
  if(sceneCache.has(arena.id))return sceneCache.get(arena.id);const g=new Geometry(),[floor,wall,trim]=arena.palette,industrial=['foundry','furnace','scrapyard'].includes(arena.id);g.material=industrial||arena.id==='permafrost'?4:arena.id==='glacier'?6:5;
- g.box(0,-.3,0,57,.6,40,'#202b30');g.box(0,-.04,0,52.2,.08,34.8,floor);
+ // Keep the arena skin above its dark foundation. Coplanar surfaces here cause
+ // z-fighting that reads as a rapidly flickering, diagonal ground shadow.
+ g.box(0,-.3,0,57,.6,40,'#202b30');g.box(0,-.02,0,52.2,.08,34.8,floor);
  for(let z=-17;z<17;z+=4.35)for(let x=-26;x<26;x+=4.35){if(industrial){g.box(x+2.16,.005,z+2.16,4.28,.01,4.28,noise(x*30+z)>.5?floor:wall);g.box(x+2.16,.013,z+2.16,4.18,.008,4.18,floor);for(const dx of [.15,4.15])for(const dz of [.15,4.15])g.cylinder([x+dx,.019,z+dz],[x+dx,.024,z+dz],.035,'#778382',6);}else{for(let k=0;k<3;k++){const n=x*70+z*5+k;g.box(x+noise(n)*4.1,.009,z+noise(n+1)*4.1,.4+noise(n+2),.01,.028,wall);}}}
  for(const x of [-26.3,26.3]){g.bevel(x,.26,0,.55,.52,36,wall);g.box(x,.55,0,.14,.07,35,trim);}
  for(const z of [-17.6,17.6]){g.bevel(0,.26,z,53,.52,.55,wall);g.box(0,.55,z,52,.07,.14,trim);}
