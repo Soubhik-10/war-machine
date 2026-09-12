@@ -28,12 +28,16 @@ function Get-ResultSignerAddress([string]$Name) {
     if (Test-Path -LiteralPath $path) {
         Write-Host "Reusing existing $Name. Foundry will ask for its password to read the public address."
         $output = & $forgeCast wallet address --keystore $path 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "Foundry could not read $Name" }
+        if ($LASTEXITCODE -ne 0) {
+            throw "Foundry could not read $Name (exit $LASTEXITCODE): $($output | Out-String)"
+        }
     } else {
         Write-Host "Creating $Name. Foundry will ask for a password locally."
         Write-Host 'Use a strong, unique password and store it in your password manager.'
         $output = & $forgeCast wallet new $signerDirectory $Name 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "Foundry could not create $Name" }
+        if ($LASTEXITCODE -ne 0) {
+            throw "Foundry could not create $Name (exit $LASTEXITCODE): $($output | Out-String)"
+        }
     }
     $output | ForEach-Object { Write-Host $_ }
     $addressLine = $output | Where-Object { $_ -match '(0x[0-9a-fA-F]{40})' } | Select-Object -Last 1
@@ -48,7 +52,8 @@ try {
     $signerOne = Get-ResultSignerAddress 'war-machines-result-signer-1'
     $signerTwo = Get-ResultSignerAddress 'war-machines-result-signer-2'
 } catch {
-    Write-Error 'Signer creation stopped. Do not delete any existing keystore; it may be the only copy of that signer.'
+    Write-Error "Signer setup stopped: $($_.Exception.Message)"
+    Write-Host 'Do not delete an existing keystore. Rerun this command to resume; it will reuse it.'
     throw
 }
 
