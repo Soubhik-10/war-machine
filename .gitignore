@@ -3,7 +3,8 @@ node_modules/
 *.log
 .env*
 __pycache__/
-.openai/
+.openai/*
+!.openai/hosting.json
 var/
 *.sqlite
 *.sqlite-wal
