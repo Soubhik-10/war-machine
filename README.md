@@ -1,8 +1,8 @@
 # WAR MACHINES — THE FOUNDRY
 
-A modular engineering battle game for desktop and mobile browsers. Build a machine, set its doctrine, scout a defender and design a counter. Battles run automatically. The workshop and ordinary machine links work on a static host; **demo-credit bounties use the included authoritative Node/SQLite server**.
+A modular engineering battle game for desktop and mobile browsers. Build a machine, set its doctrine, scout a defender and design a counter. Battles run automatically. The workshop and ordinary machine links work on a static host; **bounties use the included authoritative Node/SQLite server**.
 
-Zero npm dependencies, install scripts, hosted AI calls, external fonts, asset CDNs or analytics. Every machine, texture and arena is generated locally. No wallets, MPP, Tempo or real payments are enabled.
+No hosted AI calls, external fonts, asset CDNs or analytics. Every machine, texture and arena is generated locally. Demo mode is the default. The optional Tempo mainnet path uses pinned `accounts`, `mppx`, and `viem` packages and remains fail-closed until explicit production configuration is supplied.
 
 ## Hosting and cost
 
@@ -10,9 +10,10 @@ Zero npm dependencies, install scripts, hosted AI calls, external fonts, asset C
 
 ## Play locally — complete game
 
-Install/use Node 22.21.1 or a compatible newer runtime with built-in SQLite and worker threads. No npm install is needed.
+Install/use Node 22.21.1 or a compatible newer runtime with built-in SQLite and worker threads, then install the pinned dependencies.
 
 ~~~sh
+npm ci
 node server.mjs
 ~~~
 
@@ -22,7 +23,7 @@ For the static sandbox only: `python serve.py --open`, then open http://127.0.0.
 
 ## Agent season 04
 
-The Agents page offers a [downloadable SKILL.md](dist/skills/war-machines-engineer/SKILL.md), fee disclosure, and explicit MPP/Tempo prerequisites for future paid mode. Real payments remain disabled.
+The Agents page offers a [downloadable SKILL.md](dist/skills/war-machines-engineer/SKILL.md), fee disclosure, and MPP/Tempo discovery. Real payments remain disabled in the default mode; see [Tempo mainnet operations](docs/TEMPO-MAINNET.md) for the fail-closed configuration and launch gates.
 
 The landing page offers human and agent paths, a live machine display, three interface colorways (Forge, Glacier, Ember) and climate previews. Guests can build, save local blueprints, share, validate and practice. Sign in only for bounty actions. Contracts support search, arena/maximum-fee filters and account bookmarks.
 
@@ -74,7 +75,7 @@ New equipment: Frostbite stud tires, Dune paddle tires, Storm insulation, Therma
 
 Creator economics are independent: entry/reward 0–1,000,000,000 whole demo credits, duration 0–8,760 hours (0 means no deadline). Rewards must be funded from available balance. These integer bounds and service capacity limits are technical limits, not a required fee/reward ratio. Build credits are separate from account credits.
 
-Wallet/passkey auth is planned in [TEMPO-AUTH-TODO.md](docs/TEMPO-AUTH-TODO.md); MPP and real payments remain disabled.
+Wallet/passkey auth and MPP charging are implemented for the opt-in paid mode described in [Tempo mainnet operations](docs/TEMPO-MAINNET.md). Demo mode and its balances remain isolated and cannot be converted to tokens.
 
 ## Your match rules
 

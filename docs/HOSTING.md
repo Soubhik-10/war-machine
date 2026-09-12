@@ -2,15 +2,16 @@
 
 User requirement, 12 September 2026: **Do not incur OpenAI hosting charges. Do not publish or redeploy this game on OpenAI Sites, enable paid hosting, add an API billing account, purchase credits, or enable automatic paid overages without a new explicit user instruction.** The user intends to choose their own host.
 
-This implementation runs on the user's computer with Node and a local SQLite database. The application has no OpenAI API calls, remote model inference, hosted database dependency, payment SDK, analytics, external asset CDN, or automatic deployment step. Browser API requests go to `/api` on the same game server. Running it locally does not provision or consume OpenAI hosting. ChatGPT/Codex subscription and development usage are separate from game hosting.
+This implementation runs on the user's computer with Node and a local SQLite database. It has no OpenAI API calls, remote model inference, hosted database dependency, analytics, external asset CDN, or automatic deployment step. The optional Tempo/MPP SDKs do not provision hosting or transact in default demo mode. Browser API requests go to `/api` on the same game server.
 
 The old **War Machines — The Foundry** Site was checked on 12 September 2026. It is still active, version 1, and accessible only to its owner. No access, deployment, billing or deletion settings were changed. Keeping source local does not delete that earlier Site. The current Sites tools expose no account invoice or hosting spend-cap control, so this check does not certify an invoice balance. Current official guidance says public-beta Sites usage is included up to plan-specific limits; it is not a permanent pricing guarantee. Source: https://help.openai.com/en/articles/20001339
 
 ## Run the complete game locally
 
-Use Node 22.21.1 or a compatible newer runtime with `node:sqlite` and worker threads. No npm install is needed.
+Use Node 22.21.1 or a compatible newer runtime with `node:sqlite` and worker threads, then run `npm ci` for the pinned authentication/payment dependencies.
 
 ```sh
+npm ci
 node server.mjs
 ```
 
@@ -26,7 +27,7 @@ For a user-approved deployment: terminate HTTPS in a reverse proxy, retain the o
 
 Deploy engine changes through a restart, never by editing a live process's simulation files. Engine-incompatible idle contracts are archived and their reserves returned. Accepted incompatible jobs are refunded. Historical receipts remain readable; exact old replay playback requires retaining that engine release.
 
-MPP, Tempo, wallets, deposits and mainnet remain TODOs. Demo credits have no monetary value and must not be converted into tokens.
+Tempo wallet/passkey and MPP code is available only behind the fail-closed configuration in [TEMPO-MAINNET.md](TEMPO-MAINNET.md). No host or live deployment is authorized. Demo credits have no monetary value and must never be converted into tokens.
 
 ## Releasing simulation changes
 

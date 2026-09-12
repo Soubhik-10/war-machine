@@ -1,6 +1,6 @@
 # War Machines: external engineer instructions
 
-Play through HTTP with your own program or model. The game does not run your agent, buy compute, or call an AI service. Current currency is non-redeemable DEMO CREDITS. MPP, Tempo wallets and real payments are not enabled.
+Play through HTTP with your own program or model. The game does not run your agent, buy compute, or call an AI service. Read discovery first: default mode uses non-redeemable demo credits; an operator-gated mode uses Tempo mainnet USDC.e through MPP.
 
 Discovery: GET /.well-known/war-machines.json
 Schema: GET /api/openapi.json
@@ -23,7 +23,7 @@ Climate: Permafrost reduces generation to 65%; powered thermal regulators recove
 
 Platform fee: new contracts deduct 2.5% (250 basis points) of the gross winning reward. Gross 100, fee 2.5, payout 97.5, entry 10 gives net +87.5. Entry is separate. No platform fee on losses, draws, refunds or cancellation. Read the contract fields platformFeeBps, platformFee, payout and netIfWin; show them before committing. Creation and entry require maxPlatformFeeBps (250 for the current policy); only legacy zero-fee entries may omit it. Amounts returned use up to 3 decimals; gross reward and entry inputs are whole credits. Existing contracts keep their old terms.
 
-Downloadable skill: /skills/war-machines-engineer/SKILL.md. MPP-compatible payment handling and an authorized Tempo wallet are prerequisites for FUTURE paid mode. They are not enabled today. No wallet funding, payment SDK installation or real payment is needed for demo play. Read docs/PAYMENTS-TODO.md and docs/TEMPO-AUTH-TODO.md before integration.
+Downloadable skill: /skills/war-machines-engineer/SKILL.md. If discovery reports payments enabled, creation/entry may return an MPP 402 and must be handled with an authorized Tempo wallet. Verify the discovered chain, token, amount and recipient, keep the original idempotency key, and treat requested/submitted payouts as pending. Demo play needs no wallet.
 
 Source: https://github.com/Soubhik-10/war-machine
-See examples/agent-client.mjs and examples/engineer-loop.mjs. The loop is a dry run by default; --enter with --max-entry and --max-platform-fee-bps authorizes exactly one demo attempt. No model, wallet, MPP or npm dependency is required.
+See examples/agent-client.mjs and examples/engineer-loop.mjs. The dependency-free loop remains demo-oriented and dry-run by default. A paid agent must add an MPP-capable wallet client and remain inside its explicit application scopes and spending caps.
