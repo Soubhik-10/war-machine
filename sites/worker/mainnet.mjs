@@ -2980,7 +2980,7 @@ async function confirmDirectControl(db, auth, intentId, hash, config) {
         .bind(json(result), hash, updated, attempt.id),
       db
         .prepare(
-          "UPDATE bounties SET status='completed',active_attempt=NULL,escrow_attempt_deadline=NULL,updated=? WHERE id=?",
+          "UPDATE bounties SET status='open',active_attempt=NULL,escrow_attempt_deadline=NULL,updated=? WHERE id=?",
         )
         .bind(updated, row.id),
       db
@@ -3234,7 +3234,9 @@ async function confirmSettlement(db, attemptId, hash, config) {
     };
   const updated = now(),
     attemptStatus = outcome === 2 ? "refunded" : "settled",
-    bountyStatus = outcome === 0 ? "claimed" : "completed";
+    // The V3 escrow reopens after a loss or draw. Keep D1 in the same state:
+    // a winning challenger is the only result that claims the reward.
+    bountyStatus = outcome === 0 ? "claimed" : "open";
   await db.batch([
     db
       .prepare(
@@ -3472,14 +3474,14 @@ async function finalizeExpiredV3Builds(db) {
   }
 }
 
-// V3 used to reopen a reward after a defended or timed-out trial. Bounties
-// now represent one official challenge: keep the untouched reward reserved
-// for its creator to return, but remove the resolved target from active play.
-export async function completeResolvedBounties(db) {
+// Repair records written by the short-lived server lifecycle that incorrectly
+// marked a defended V3 bounty completed. V3 itself is authoritative: a loss
+// or draw keeps the reward funded and reopens the target for another entry.
+export async function reopenDefendedBounties(db) {
   const rows = (
     await db
       .prepare(
-        "SELECT b.id,a.result FROM bounties b JOIN attempts a ON a.bounty=b.id WHERE b.status='open' AND b.active_attempt IS NULL AND a.status='settled' AND a.escrow_settlement_tx IS NOT NULL",
+        "SELECT b.id,a.result FROM bounties b JOIN attempts a ON a.bounty=b.id WHERE b.status='completed' AND b.active_attempt IS NULL AND b.fee_policy_version='pathusd-direct-escrow-v3' AND a.status='settled' AND a.escrow_settlement_tx IS NOT NULL",
       )
       .all()
   ).results;
@@ -3497,7 +3499,7 @@ export async function completeResolvedBounties(db) {
       continue;
     await db
       .prepare(
-        "UPDATE bounties SET status='completed',updated=? WHERE id=? AND status='open' AND active_attempt IS NULL",
+        "UPDATE bounties SET status='open',updated=? WHERE id=? AND status='completed' AND active_attempt IS NULL",
       )
       .bind(now(), row.id)
       .run();
@@ -3509,7 +3511,7 @@ export async function runAutomaticSettlement(env) {
   if (!config.enabled || !config.automaticSettlementReady || !env.DB) return;
   try {
     v3SettlementAccount(env);
-    await completeResolvedBounties(env.DB);
+    await reopenDefendedBounties(env.DB);
     await finalizeExpiredV3Builds(env.DB);
     const jobs = (
       await env.DB.prepare(

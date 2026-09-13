@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { privateKeyToAccount } from "viem/accounts";
 import worker from "../sites/worker/index.mjs";
 import {
-  completeResolvedBounties,
+  reopenDefendedBounties,
   validateEscrowAttestation,
 } from "../sites/worker/mainnet.mjs";
 import { packChallenge, PRESETS } from "../dist/data.mjs";
@@ -208,7 +208,7 @@ test("Tempo mode is fail-closed and never falls back to sandbox credits", async 
   assert.equal(rules.body.mpp.enabled, false);
 });
 
-test("a settled defense completes the bounty and preserves its returnable reward", async (t) => {
+test("a settled defense reopens the bounty and keeps its reward funded", async (t) => {
   const DB = new D1Mock();
   await DB.migrate();
   t.after(() => DB.close());
@@ -228,7 +228,7 @@ test("a settled defense completes the bounty and preserves its returnable reward
       "INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,entry_units,reward_units,reserve_units) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )
     .run(
-      "completed-bounty",
+      "reopened-bounty",
       "creator",
       "Resolved target",
       "{}",
@@ -247,8 +247,8 @@ test("a settled defense completes the bounty and preserves its returnable reward
       "INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,created,updated,escrow_settlement_tx) VALUES (?,?,?,?,?,?,?,?,?,?)",
     )
     .run(
-      "completed-attempt",
-      "completed-bounty",
+      "reopened-attempt",
+      "reopened-bounty",
       "challenger",
       "{}",
       1,
@@ -258,12 +258,17 @@ test("a settled defense completes the bounty and preserves its returnable reward
       stamp,
       "0x" + "ab".repeat(32),
     );
-  await completeResolvedBounties(DB);
-  const completed = DB.sqlite
+  DB.sqlite
+    .prepare(
+      "UPDATE bounties SET status='completed',fee_policy_version='pathusd-direct-escrow-v3' WHERE id=?",
+    )
+    .run("reopened-bounty");
+  await reopenDefendedBounties(DB);
+  const reopened = DB.sqlite
     .prepare("SELECT status,reserve_units FROM bounties WHERE id=?")
-    .get("completed-bounty");
-  assert.equal(completed.status, "completed");
-  assert.equal(completed.reserve_units, "1000000");
+    .get("reopened-bounty");
+  assert.equal(reopened.status, "open");
+  assert.equal(reopened.reserve_units, "1000000");
 });
 
 test("the V3 board reset removes only retired V2 bounty records", async (t) => {

@@ -75,6 +75,11 @@ contract WarMachineBountyEscrowV3Test {
 
         _eq(token.balanceOf(CREATOR), 9_100_000, "loss paid the entry twice");
         _eq(token.balanceOf(address(escrow)), 1_000_000, "loss released the reward");
+        _eq(
+            uint256(escrow.getBounty(bountyId).status),
+            uint256(WarMachineBountyEscrowV3.BountyStatus.Open),
+            "a defended bounty must reopen"
+        );
     }
 
     function testTechnicalRefundIsNotAnEntryRefundPath() public {
