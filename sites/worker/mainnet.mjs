@@ -422,7 +422,7 @@ function catalog(config) {
       paidReveal:
         "Public scouts expose only cost, mass, part count, weapon count, arena and limits. A confirmed entry reveals the exact defender to that challenger only.",
       timeout:
-        "Missing the counter-build deadline is a loss. The entry was paid to the bounty creator when you entered; the reward reopens for the next challenger.",
+        "Missing the counter-build deadline is a loss. The entry was paid to the bounty creator when you entered; this one-trial bounty completes and its unused reward remains returnable only by its creator.",
       payments: paid
         ? acceptingNewBounties
           ? "Direct Tempo mainnet pathUSD escrow. Agents may separately use MPP only for explicitly priced API work; MPP never funds or enters a bounty."
