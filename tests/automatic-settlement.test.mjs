@@ -40,7 +40,7 @@ test('independent replay verifies win, loss and draw with exact integer payouts'
   const loss=evaluate(record({challenger:r.defender,defender:r.challenger}),now);assert.equal(loss.result.outcome,'loss');assert.equal(loss.amounts.winnerPayout,'0');
   const passive=clone(PRESETS[0]);passive.modules=[{id:'core',x:4,y:4,z:0,r:0},{id:'hover',x:3,y:4,z:0,r:0},{id:'ram',x:5,y:4,z:0,r:2}];passive.tactic='kite';passive.range=600;
   const blueprint=packChallenge(passive,'foundry',0);
-  const draw=evaluate(record({challenger:blueprint,defender:blueprint}),now);assert.equal(draw.result.outcome,'draw');assert.equal(draw.payload.outcome,1);assert.equal(draw.amounts.creatorEntry,'10000');
+  const draw=evaluate(record({challenger:blueprint,defender:blueprint}),now);assert.equal(draw.result.outcome,'draw');assert.equal(draw.payload.outcome,1);assert.equal(draw.amounts.creatorEntry,'0');
 });
 test('invalid payload, bad result hash, expired signature and duplicate authorities are rejected',async()=>{
   const r=record(),{payload}=evaluate(r,now),one=privateKeyToAccount(generatePrivateKey()),two=privateKeyToAccount(generatePrivateKey());

@@ -4,7 +4,7 @@ import { unpackChallenge } from '../dist/data.mjs';
 import { CLIENT_ENGINE_HASH } from '../dist/release.mjs';
 
 export const CHAIN_ID = 4217;
-export const ESCROW = '0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e';
+export const ESCROW = '0xb14a3aA99C9349094612143089F55aE5372DeB24';
 export const ABI = parseAbi([
   'function getBounty(uint256) view returns ((address creator,address challenger,uint128 reward,uint128 entry,uint64 expiresAt,uint64 attemptDeadline,uint64 attemptNonce,uint8 status,bytes32 termsHash))',
   'function isSettlementSigner(address) view returns (bool)',
@@ -23,7 +23,7 @@ export function canonical(value) {
 }
 export const digest = value => sha256(stringToHex(canonical(value)));
 export function typedData(payload) {
-  return { domain: { name: 'War Machines Bounty Escrow', version: '2', chainId: CHAIN_ID, verifyingContract: ESCROW },
+  return { domain: { name: 'War Machines Bounty Escrow', version: '3', chainId: CHAIN_ID, verifyingContract: ESCROW },
     primaryType: 'Settlement', types: { Settlement: [
       {name:'bountyId',type:'uint256'}, {name:'attemptNonce',type:'uint64'}, {name:'outcome',type:'uint8'},
       {name:'resultHash',type:'bytes32'}, {name:'validUntil',type:'uint64'},
@@ -49,7 +49,9 @@ export function evaluate(record, time = Date.now()) {
   }
   const outcome = result.winner === 0 ? 0 : 1;
   const fee = outcome === 0 ? BigInt(record.reward) * 250n / 10000n : 0n;
-  const amounts = { winnerPayout: outcome === 0 ? (BigInt(record.reward)-fee).toString() : '0', platformFee: fee.toString(), creatorEntry: record.entry };
+  // V3 transfers entry directly from challenger to creator at entry time. Its
+  // settlement holds and distributes only the reward reserve.
+  const amounts = { winnerPayout: outcome === 0 ? (BigInt(record.reward)-fee).toString() : '0', platformFee: fee.toString(), creatorEntry: '0' };
   const payload = { bountyId: record.bountyId, attemptNonce: record.attemptNonce, outcome,
     resultHash: digest({ protocol:'war-machines-auto-v1', record, result, amounts }), validUntil: record.deadline - 1 };
   // Recovery only for results committed before migration 0005. The on-chain

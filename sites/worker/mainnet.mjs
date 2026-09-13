@@ -1,15 +1,17 @@
 import { evaluate, canonical as canonicalSettlement } from '../../settlement/protocol.mjs';
-import { configured, materializeResult, ready as settlementReady, internalRoute, tick as settlementTick } from '../../settlement/coordinator.mjs';
 import * as Mppx from "../../node_modules/mppx/dist/server/Mppx.js";
-import { tempo } from "../../node_modules/mppx/dist/tempo/server/Methods.js";
+import { tempo as tempoMpp } from "../../node_modules/mppx/dist/tempo/server/Methods.js";
 import { createClient, http } from "viem/tempo";
 import {
+  createWalletClient,
   encodeFunctionData,
   getAddress,
   parseAbi,
   recoverMessageAddress,
   recoverTypedDataAddress,
 } from "viem";
+import { tempo } from "viem/chains";
+import { privateKeyToAccount } from "viem/accounts";
 import {
   ARENAS,
   DEFAULT_RULES,
@@ -222,9 +224,9 @@ function canonicalBlueprint(input, locked) {
 
 export function runtimeConfig(env, origin) {
   if (env.WM_MODE !== "tempo-mainnet") return { mode: "demo", enabled: false };
-  // Funds never pass through this Worker. The address is pinned to the verified, immutable
-  // V2 deployment rather than accepting an operator-substituted token or custodial recipient.
-  const escrow = "0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e";
+  // V3 holds the reward only. The entry is transferred directly to the bounty
+  // creator by the entrant's Tempo Wallet.
+  const escrow = "0xb14a3aA99C9349094612143089F55aE5372DeB24";
   if (
     String(env.WM_BOUNTY_ESCROW_ADDRESS || "").toLowerCase() !==
     escrow.toLowerCase()
@@ -235,6 +237,16 @@ export function runtimeConfig(env, origin) {
       reason:
         "Set WM_BOUNTY_ESCROW_ADDRESS to the verified War Machines Tempo escrow before enabling direct bounty transactions.",
     };
+  const settlementKey = String(env.WM_SETTLEMENT_PRIVATE_KEY || "");
+  let automaticSettlementReady = false;
+  try {
+    automaticSettlementReady =
+      /^0x[0-9a-fA-F]{64}$/.test(settlementKey) &&
+      getAddress(privateKeyToAccount(settlementKey).address) ===
+        ESCROW_SETTLEMENT_SIGNERS[0] &&
+      env.WM_RESULT_SIGNING_READY === "true" &&
+      env.WM_EMERGENCY_PAUSE !== "true";
+  } catch {}
   const mppRecipient = String(env.WM_AGENT_MPP_RECIPIENT || ""),
     mppPrice = String(env.WM_AGENT_MPP_PRICE || "");
   let mppPriceUnits = null;
@@ -264,9 +276,10 @@ export function runtimeConfig(env, origin) {
     agentMppRecipient: agentMppEnabled ? getAddress(mppRecipient) : null,
     agentMppPriceUnits: mppPriceUnits,
     mppSecret: agentMppEnabled ? env.MPP_SECRET_KEY : null,
-    acceptingNewBounties: env.WM_RESULT_SIGNING_READY === "true" && configured(env) && env.WM_EMERGENCY_PAUSE !== "true",
+    acceptingNewBounties: automaticSettlementReady,
+    automaticSettlementReady,
     settlementReason:
-      "New paid bounties are paused until the two independent result signers are online.",
+      "Automatic payouts are paused until the server-side V3 settlement key is configured.",
     reason: null,
   };
 }
@@ -399,7 +412,7 @@ function catalog(config) {
       paidReveal:
         "Public scouts expose only cost, mass, part count, weapon count, arena and limits. A confirmed entry reveals the exact defender to that challenger only.",
       timeout:
-        "Missing the counter-build deadline is a loss. The signed escrow settlement sends the entry to the bounty creator and reopens the bounty.",
+        "Missing the counter-build deadline is a loss. The entry was paid to the bounty creator when you entered; the reward reopens for the next challenger.",
       payments: paid
         ? acceptingNewBounties
           ? "Direct Tempo mainnet pathUSD escrow. Agents may separately use MPP only for explicitly priced API work; MPP never funds or enters a bounty."
@@ -851,7 +864,7 @@ function mppStore(db) {
   };
 }
 function gateway(db, config) {
-  const method = tempo.charge({
+  const method = tempoMpp.charge({
     currency: config.token,
     decimals: config.decimals,
     chainId: config.chainId,
@@ -1882,8 +1895,7 @@ const ESCROW_EVENTS = {
   settled: "0xf1bd0b9955d3af8c0f3ef37ea58ba05a0df5b81798cb73c84f62c093fa013e66",
 };
 const ESCROW_SETTLEMENT_SIGNERS = [
-  "0x39Af67Ee9700C62aAa5d87cCc34F937c47e6150a",
-  "0x9fD9719d8DE2f92F49a00068dFEA59006f6FD902",
+  "0xCA57cA8E21670fCaD76aD6485223fc231fd020D5",
 ].map(getAddress);
 const ESCROW_SETTLEMENT_TYPES = {
   Settlement: [
@@ -1942,7 +1954,7 @@ const settlementMessage = (payload) => ({
 const settlementTypedData = (config, payload) => ({
   domain: {
     name: "War Machines Bounty Escrow",
-    version: "2",
+    version: "3",
     chainId: config.chainId,
     verifyingContract: config.escrowAddress,
   },
@@ -2093,7 +2105,7 @@ async function directCreateIntent(db, auth, body, key, config) {
       : 0,
     expires = expiresAt ? expiresAt * 1000 : null,
     terms = {
-      version: "war-machines-direct-escrow-v2",
+      version: "war-machines-direct-escrow-v3",
       engineHash: CLIENT_ENGINE_HASH,
       creator: accountAddress,
       title,
@@ -2325,7 +2337,7 @@ async function confirmDirectIntent(db, auth, intentId, hash, config) {
           saved.reward,
           saved.reward,
           PLATFORM_FEE_BPS,
-          "pathusd-direct-escrow-v2",
+          "pathusd-direct-escrow-v3",
           PLATFORM_FEE_RECIPIENT,
           escrowBountyId,
           saved.termsHash,
@@ -2441,7 +2453,7 @@ async function confirmDirectIntent(db, auth, intentId, hash, config) {
 
 async function immutableRecord(db, attempt, bounty, challenger, reason, committedAt) {
   return { version: 1, engineHash: CLIENT_ENGINE_HASH, chainId: TEMPO_MAINNET_CHAIN_ID,
-    escrow: '0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e', attemptId: attempt.id,
+    escrow: '0xb14a3aA99C9349094612143089F55aE5372DeB24', attemptId: attempt.id,
     bountyId: String(bounty.escrow_bounty_id), attemptNonce: String(bounty.escrow_attempt_nonce),
     creator: await payoutAddress(db, bounty.owner), challengerAddress: await payoutAddress(db, attempt.account),
     title: bounty.title, listed: !!bounty.listed, expiresAt: Math.floor(Number(bounty.expires || 0)/1000),
@@ -2496,7 +2508,7 @@ async function deployCounter(db, auth, attemptId, body, key) {
     .bind(json(challenger),json(record),updated,attempt.id).run();
   check(applied.meta.changes === 1, 'This counter was already deployed in another request.', 409);
   // Compute only from the committed database record. A crash here is recovered by the polling worker.
-  try { await materializeResult(db,attempt.id); } catch { /* worker retries; no synthetic refund */ }
+  try { await materializeV3Result(db,attempt.id); } catch { /* worker retries; no synthetic refund */ }
   await remember(
     db,
     auth.account,
@@ -2545,14 +2557,14 @@ async function forfeitExpiredEngineeringAttempt(db, auth, attemptId, key) {
   );
   check(
     settlementDeadline > Math.floor(now() / 1000),
-    "The escrow attestation window has elapsed. This immutable escrow can no longer transfer the entry to the creator.",
+    "The automatic settlement window elapsed. Your entry was already paid directly to the bounty creator when you entered.",
     409,
   );
   const record = await immutableRecord(db, attempt, bounty, null, 'counter-build-timeout', now());
   const applied = await db.prepare("UPDATE attempts SET status='queued',match_record=?,updated=? WHERE id=? AND status='engineering'")
     .bind(json(record),now(),attempt.id).run();
   check(applied.meta.changes === 1, 'This timed-out attempt was already finalized.', 409);
-  try { await materializeResult(db,attempt.id); } catch { /* recover through the durable job */ }
+  try { await materializeV3Result(db,attempt.id); } catch { /* recover through the durable job */ }
   await remember(db, auth.account, key, "forfeit:" + attemptId, {}, attempt.id);
   return attemptView(db, attempt.id, auth.account);
 }
@@ -2863,8 +2875,8 @@ async function settlementRecord(db, attemptId) {
 }
 function settlementPlan(config, payload) {
   check(
-    Array.isArray(payload.signatures) && payload.signatures.length === 2,
-    "Both independent result signatures are required before settlement.",
+    Array.isArray(payload.signatures) && payload.signatures.length === 1,
+    "The automatic V3 result signature is not ready yet.",
     409,
   );
   const call = encodeFunctionData({
@@ -2892,7 +2904,7 @@ async function settlementInfo(db, attemptId, config) {
       signatures: payload.signatures || [],
     },
     typedData: settlementWire(config, payload),
-    signing: { quorum: 2, signers: ESCROW_SETTLEMENT_SIGNERS },
+    signing: { quorum: 1, signers: ESCROW_SETTLEMENT_SIGNERS },
   };
 }
 export async function validateEscrowAttestation(
@@ -2902,8 +2914,8 @@ export async function validateEscrowAttestation(
   approvedSigners = ESCROW_SETTLEMENT_SIGNERS,
 ) {
   check(
-    Array.isArray(signatures) && signatures.length === 2,
-    "Submit exactly two result signatures.",
+    Array.isArray(signatures) && signatures.length === 1,
+    "Submit exactly one V3 result signature.",
     400,
   );
   const approved = new Set(
@@ -2937,11 +2949,6 @@ export async function validateEscrowAttestation(
   }
   recovered.sort((left, right) =>
     left.signer.toLowerCase().localeCompare(right.signer.toLowerCase()),
-  );
-  check(
-    recovered[0].signer.toLowerCase() !== recovered[1].signer.toLowerCase(),
-    "Result signatures must come from two different approved signers.",
-    409,
   );
   return recovered;
 }
@@ -2978,7 +2985,7 @@ async function confirmSettlement(db, attemptId, hash, config) {
   const { attempt, payload, bounty } = await settlementRecord(db, attemptId);
   check(
     attempt.status === "ready-to-settle",
-    "Both signatures must be accepted before the settlement transaction can be confirmed.",
+    "The automatic result signature must be accepted before settlement can be confirmed.",
     409,
   );
   const receiptValue = await receipt(config, hash),
@@ -3006,7 +3013,7 @@ async function confirmSettlement(db, attemptId, hash, config) {
     outcome = Number(payload.outcome),
     expectedPayout = outcome === 0 ? BigInt(quote.payoutUnits) : 0n,
     expectedFee = outcome === 0 ? BigInt(quote.platformFeeUnits) : 0n,
-    expectedCreatorEntry = outcome < 2 ? BigInt(bounty.entry_units) : 0n;
+    expectedCreatorEntry = 0n;
   check(
     word(log.data, 2) === expectedPayout &&
       word(log.data, 3) === expectedFee &&
@@ -3088,26 +3095,193 @@ async function adoptLegacySettlements(env) {
   }
 }
 
-export async function runAutomaticSettlement(env) {
-  const config=runtimeConfig(env,'https://service.internal');
-  if(!config.enabled) return;
-  await settlementTick(env,{
-    adoptLegacy:()=>adoptLegacySettlements(env),
-    attest:(attempt,signatures)=>attestSettlement(env.DB,attempt,{signatures},config),
-    confirm:(attempt,hash)=>confirmSettlement(env.DB,attempt,hash,config),
-    forfeit:attempt=>forfeitExpiredEngineeringAttempt(env.DB,{role:'owner',account:attempt.account},attempt.id,'auto-forfeit-'+attempt.id),
+async function materializeV3Result(db, attemptId, time = now()) {
+  const attempt = await db
+    .prepare("SELECT * FROM attempts WHERE id=?")
+    .bind(attemptId)
+    .first();
+  check(attempt?.match_record, "Automatic settlement record is missing.", 409);
+  if (attempt.settlement_payload) return;
+  const verified = evaluate(parse(attempt.match_record), time);
+  const payload = { ...verified.payload, signatures: [] };
+  await db
+    .prepare(
+      "UPDATE attempts SET result=?,settlement_payload=?,status='awaiting-signatures',updated=? WHERE id=? AND settlement_payload IS NULL",
+    )
+    .bind(json({ ...verified.result, settlement: payload }), json(payload), time, attemptId)
+    .run();
+}
+
+function v3SettlementAccount(env) {
+  const key = String(env.WM_SETTLEMENT_PRIVATE_KEY || "");
+  check(/^0x[0-9a-fA-F]{64}$/.test(key), "Automatic settlement is not configured.", 503);
+  const account = privateKeyToAccount(key);
+  check(
+    getAddress(account.address) === ESCROW_SETTLEMENT_SIGNERS[0],
+    "The configured settlement key does not match the V3 escrow signer.",
+    503,
+  );
+  return account;
+}
+
+async function sendV3Settlement(env, config, attempt, payload) {
+  const account = v3SettlementAccount(env);
+  check(
+    Number(payload.validUntil) > Math.floor(now() / 1000),
+    "The automatic settlement window elapsed before broadcast.",
+    409,
+  );
+  const signature = await account.signTypedData(settlementTypedData(config, payload));
+  payload.signatures = [signature];
+  payload.attestedAt = now();
+  await env.DB
+    .prepare(
+      "UPDATE attempts SET status='ready-to-settle',settlement_payload=?,updated=? WHERE id=? AND status='awaiting-signatures'",
+    )
+    .bind(json(payload), now(), attempt.id)
+    .run();
+  const call = encodeFunctionData({
+    abi: ESCROW_ABI,
+    functionName: "settleAttempt",
+    args: [settlementMessage(payload), payload.signatures],
   });
+  const lane = BigInt("0x" + (await hex("v3-settlement:" + attempt.id)).slice(0, 48));
+  const wallet = createWalletClient({
+    account,
+    chain: tempo,
+    transport: http(config.rpcUrl, { timeout: 15_000, retryCount: 0 }),
+  });
+  const prepared = await wallet.prepareTransactionRequest({
+    account,
+    to: config.escrowAddress,
+    data: call,
+    value: 0n,
+    nonce: 0,
+    nonceKey: lane,
+    feeToken: config.token,
+    validBefore: Number(payload.validUntil),
+  });
+  const raw = await wallet.signTransaction({
+    chainId: config.chainId,
+    type: "tempo",
+    to: config.escrowAddress,
+    data: call,
+    value: 0n,
+    nonce: 0,
+    nonceKey: lane,
+    feeToken: prepared.feeToken,
+    validBefore: Number(payload.validUntil),
+    gas: prepared.gas,
+    maxFeePerGas: prepared.maxFeePerGas,
+    maxPriorityFeePerGas: prepared.maxPriorityFeePerGas,
+  });
+  return await createClient({
+    account,
+    feeToken: config.token,
+    transport: http(config.rpcUrl, { timeout: 15_000, retryCount: 0 }),
+  }).sendRawTransaction({ serializedTransaction: raw });
+}
+
+async function finalizeExpiredV3Builds(db) {
+  const expired = (
+    await db
+      .prepare(
+        "SELECT id FROM attempts WHERE status='engineering' AND build_deadline<=? ORDER BY build_deadline LIMIT 10",
+      )
+      .bind(now())
+      .all()
+  ).results;
+  for (const row of expired) {
+    const attempt = await db
+      .prepare("SELECT * FROM attempts WHERE id=?")
+      .bind(row.id)
+      .first();
+    if (!attempt || attempt.status !== "engineering") continue;
+    const bounty = await bountyRow(db, attempt.bounty);
+    const deadline = Math.floor(Number(bounty.escrow_attempt_deadline || 0) / 1000);
+    if (deadline <= Math.floor(now() / 1000)) continue;
+    const record = await immutableRecord(
+      db,
+      attempt,
+      bounty,
+      null,
+      "counter-build-timeout",
+      now(),
+    );
+    const updated = await db
+      .prepare(
+        "UPDATE attempts SET status='queued',match_record=?,updated=? WHERE id=? AND status='engineering'",
+      )
+      .bind(json(record), now(), attempt.id)
+      .run();
+    if (updated.meta.changes === 1) await materializeV3Result(db, attempt.id);
+  }
+}
+
+export async function runAutomaticSettlement(env) {
+  const config = runtimeConfig(env, "https://service.internal");
+  if (!config.enabled || !config.automaticSettlementReady || !env.DB) return;
+  try {
+    v3SettlementAccount(env);
+    await finalizeExpiredV3Builds(env.DB);
+    const jobs = (
+      await env.DB
+        .prepare(
+          "SELECT * FROM settlement_jobs WHERE state!='complete' AND next_run<=? AND lease_until<=? ORDER BY next_run,created LIMIT 10",
+        )
+        .bind(now(), now())
+        .all()
+    ).results;
+    for (const job of jobs) {
+      const lease = id();
+      const locked = await env.DB
+        .prepare(
+          "UPDATE settlement_jobs SET lease=?,lease_until=?,tries=tries+1 WHERE attempt=? AND lease_until<=? AND state!='complete'",
+        )
+        .bind(lease, now() + 120_000, job.attempt, now())
+        .run();
+      if (locked.meta.changes !== 1) continue;
+      const finish = async (state, hash, error, delay = 0) =>
+        env.DB
+          .prepare(
+            "UPDATE settlement_jobs SET state=?,tx_hash=COALESCE(?,tx_hash),error_code=?,next_run=?,lease=NULL,lease_until=0,updated=? WHERE attempt=? AND lease=?",
+          )
+          .bind(state, hash, error, now() + delay, now(), job.attempt, lease)
+          .run();
+      try {
+        await materializeV3Result(env.DB, job.attempt);
+        const record = await settlementRecord(env.DB, job.attempt);
+        let hash = job.tx_hash;
+        if (hash) {
+          try {
+            await confirmSettlement(env.DB, job.attempt, hash, config);
+            await finish("complete", hash, null);
+            continue;
+          } catch (error) {
+            if (Number(record.payload.validUntil) <= Math.floor(now() / 1000)) {
+              await finish("expired", hash, "SETTLEMENT_WINDOW_ELAPSED", 60_000);
+              continue;
+            }
+          }
+        }
+        hash = await sendV3Settlement(env, config, record.attempt, record.payload);
+        await finish("confirming", hash, null, 3_000);
+      } catch (error) {
+        const message = String(error?.message || "AUTOMATIC_SETTLEMENT_FAILED")
+          .slice(0, 160);
+        await finish("retry", null, message, 5_000);
+      }
+    }
+  } catch (error) {
+    console.error("War Machines V3 automatic settlement:", error);
+  }
 }
 
 export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
   const url = new URL(request.url),
     path = url.pathname,
     config = runtimeConfig(env, url.origin);
-  if (path.startsWith('/api/internal/settlement/')) {
-    try { return await internalRoute(request,env,()=>runAutomaticSettlement(env)); }
-    catch { return response({error:'Settlement service request rejected.'},503); }
-  }
-  if(config.enabled) config.acceptingNewBounties = config.acceptingNewBounties && await settlementReady(env);
+  if (config.automaticSettlementReady) ctx.waitUntil(runAutomaticSettlement(env));
   if (path === "/.well-known/war-machines.json" && request.method === "GET")
     return response(discovery(config));
   if (!path.startsWith("/api/")) return serveStaticAsset(request);
