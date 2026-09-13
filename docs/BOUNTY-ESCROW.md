@@ -1,10 +1,10 @@
 # War Machines bounty escrow
 
-`contracts/src/WarMachineBountyEscrow.sol` is the source for **Bounty Escrow v2**, a standalone, non-upgradeable pathUSD escrow for paid War Machines bounties on Tempo mainnet. It is ready to deploy, but has no address until the deployment script is broadcast and verified.
+`contracts/src/WarMachineBountyEscrow.sol` is the source for **Bounty Escrow v2**, a standalone, non-upgradeable pathUSD escrow for paid War Machines bounties on Tempo mainnet. It is deployed at [`0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e`](https://explore.tempo.xyz/address/0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e); its Sourcify verification job is [in progress](https://contracts.tempo.xyz/verify-ui/jobs/c14fe4d2-651b-4adc-9670-19b5e726ffb8).
 
 The retired v1 escrow remains immutable at [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494). Its historical record remains in [`contracts/deployments/tempo-mainnet.json`](../contracts/deployments/tempo-mainnet.json); do not send it new bounty funds.
 
-The public application prepares direct wallet calls to this escrow and verifies the emitted events. It does not custody player funds or contain settlement private keys. The current tiny-amount trial uses local encrypted result signers; the Site remains paused until those signers are independently operated and the v2 address is pinned.
+The public application prepares direct wallet calls to this escrow and verifies the emitted events. It does not custody player funds or contain settlement private keys. The current tiny-amount trial uses local encrypted result signers; the Site remains paused until those signers are independently operated.
 
 ## Live immutable configuration
 

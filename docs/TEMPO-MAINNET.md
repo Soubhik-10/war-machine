@@ -6,7 +6,7 @@ War Machines uses a non-upgradeable pathUSD bounty escrow on Tempo Mainnet. The 
 | ------------ | ------------------------------------------------------------------------------ |
 | Chain        | Tempo Mainnet `4217`                                                           |
 | Token        | pathUSD `0x20C0000000000000000000000000000000000000` (6 decimals)              |
-| Escrow       | Bounty Escrow v2 — address pending deployment and source verification          |
+| Escrow       | [Bounty Escrow v2](https://explore.tempo.xyz/address/0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e) — Sourcify verification in progress |
 | Fee          | 2.5% of a winning gross reward to `0xc20131e9132888993de6519D486E5558A5DbCb7A` |
 | Settlement   | Two fixed EIP-712 result signatures within a 600-second attempt window         |
 | Verification | Must be completed after the v2 deployment                                      |
@@ -52,7 +52,7 @@ Set only the pinned public escrow address to enable wallet bounty calls:
 
 ```text
 WM_MODE=tempo-mainnet
-WM_BOUNTY_ESCROW_ADDRESS=<verified Bounty Escrow v2 address>
+WM_BOUNTY_ESCROW_ADDRESS=0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e
 ```
 
 The Worker fails closed when the address differs. `WM_TEMPO_RPC_URL` is optional and defaults to `https://rpc.tempo.xyz`.

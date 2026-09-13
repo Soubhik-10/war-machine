@@ -6,7 +6,7 @@ War Machines uses direct pathUSD escrow on Tempo mainnet.
 
 - Chain: Tempo Mainnet `4217`
 - pathUSD: `0x20C0000000000000000000000000000000000000` (6 decimals)
-- Escrow: Bounty Escrow v2 address pending deployment and verification
+- Escrow: [Bounty Escrow v2](https://explore.tempo.xyz/address/0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e) (Sourcify verification in progress)
 - Platform fee: 2.5% of the gross winning reward to `0xc20131e9132888993de6519D486E5558A5DbCb7A`
 
 The browser prepares the exact approval and escrow calls. The Worker verifies receipts only against the pinned escrow, binds the locked rules and builds to the result, and records the attestation state. It never holds a wallet private key, pathUSD balance, or payout authority.

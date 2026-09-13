@@ -1,0 +1,30 @@
+{
+  "chainId": 4217,
+  "network": "Tempo Mainnet",
+  "contract": "WarMachineBountyEscrow",
+  "version": 2,
+  "address": "0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e",
+  "deploymentTransaction": "0x7fa067cead9051465ad7f8a36d6b300c5c41ef4885245cc6517da749772aad67",
+  "deploymentBlock": 39307749,
+  "verificationUrl": "https://contracts.tempo.xyz/verify-ui/jobs/c14fe4d2-651b-4adc-9670-19b5e726ffb8",
+  "sourceVerified": false,
+  "token": {
+    "symbol": "pathUSD",
+    "address": "0x20C0000000000000000000000000000000000000",
+    "decimals": 6
+  },
+  "platformFee": {
+    "basisPoints": 250,
+    "recipient": "0xc20131e9132888993de6519D486E5558A5DbCb7A"
+  },
+  "pauseGuardian": "0xD95CBf3A061eB26d0BA641703c66a40f07C44Dc5",
+  "attemptWindowSeconds": 600,
+  "settlement": {
+    "quorum": 2,
+    "signers": [
+      "0x39Af67Ee9700C62aAa5d87cCc34F937c47e6150a",
+      "0x9fD9719d8DE2f92F49a00068dFEA59006f6FD902"
+    ]
+  },
+  "applicationStatus": "The public Site pins this escrow address but accepts no paid bounty funds until independently operated result signers are ready."
+}
