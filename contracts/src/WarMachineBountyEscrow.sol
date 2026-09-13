@@ -18,7 +18,10 @@ contract WarMachineBountyEscrow {
     uint16 public constant BPS_DENOMINATOR = 10_000;
     uint8 public constant MIN_SETTLEMENT_QUORUM = 2;
     uint8 public constant MAX_SETTLEMENT_SIGNERS = 5;
-    uint64 public constant MIN_ATTEMPT_WINDOW = 60;
+    // A paid build needs three to five minutes plus time for the two result
+    // attestations to be relayed. Shorter windows turn signer latency into a
+    // player loss, so deployments cannot opt into one accidentally.
+    uint64 public constant MIN_ATTEMPT_WINDOW = 8 minutes;
     uint64 public constant MAX_ATTEMPT_WINDOW = 1 hours;
     /// @notice The disclosed 2.5% reward-fee recipient. It is part of the deployed bytecode,
     ///         not a deploy-time setting that could be accidentally substituted.
@@ -31,7 +34,7 @@ contract WarMachineBountyEscrow {
         "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
     );
     bytes32 private constant NAME_HASH = keccak256("War Machines Bounty Escrow");
-    bytes32 private constant VERSION_HASH = keccak256("1");
+    bytes32 private constant VERSION_HASH = keccak256("2");
     // secp256k1n / 2. Rejecting high-s signatures prevents signature malleability.
     uint256 private constant SECP256K1N_HALF =
         0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0;
@@ -78,7 +81,6 @@ contract WarMachineBountyEscrow {
     error BountyUnavailableAfterExpiry();
     error BountyNotOpen();
     error CallerIsCreator();
-    error CallerNotChallenger();
     error CallerNotCreator();
     error DirectNativeCurrencyRejected();
     error ExpiryRequired();
@@ -125,10 +127,11 @@ contract WarMachineBountyEscrow {
     );
     event BountyCancelled(uint256 indexed bountyId, address indexed creator, uint128 reward);
     event BountyExpired(uint256 indexed bountyId, address indexed creator, uint128 reward);
-    event TimedOutAttemptRefunded(
+    event TimedOutAttemptForfeited(
         uint256 indexed bountyId,
         uint64 indexed attemptNonce,
         address indexed challenger,
+        address creator,
         uint128 entry
     );
     event NewBountiesPauseSet(bool paused);
@@ -251,12 +254,20 @@ contract WarMachineBountyEscrow {
         external
         nonReentrant
     {
-        if (settlement.validUntil < block.timestamp) revert SignatureExpired();
-
         Bounty storage bounty = bounties[settlement.bountyId];
         if (bounty.status != BountyStatus.Active) revert InvalidStatus();
         if (settlement.attemptNonce != bounty.attemptNonce) revert InvalidStatus();
         if (uint8(settlement.outcome) > uint8(Outcome.TechnicalRefund)) revert InvalidOutcome();
+        if (settlement.validUntil < block.timestamp) revert SignatureExpired();
+        // No result can be manufactured after the active-attempt deadline.
+        // The public timeout finalizer below settles that liveness failure as
+        // a disclosed loss to the bounty creator instead.
+        if (
+            block.timestamp >= bounty.attemptDeadline
+                || settlement.validUntil > bounty.attemptDeadline
+        ) {
+            revert InvalidTime();
+        }
 
         _verifyQuorum(settlement, signatures);
 
@@ -318,22 +329,23 @@ contract WarMachineBountyEscrow {
         );
     }
 
-    /// @notice Lets a challenger recover an entry if the result oracle becomes unavailable.
-    ///         It does not require administrator permission and leaves the reward in place.
-    function refundTimedOutAttempt(uint256 bountyId) external nonReentrant {
+    /// @notice Finalizes an unsigned active attempt after its immutable deadline.
+    ///         Anybody may call it; it never pays the caller. The entry follows the
+    ///         disclosed loss/draw route to the bounty creator and the reward stays funded.
+    function forfeitTimedOutAttempt(uint256 bountyId) external nonReentrant {
         Bounty storage bounty = bounties[bountyId];
         if (bounty.status != BountyStatus.Active) revert InvalidStatus();
-        if (msg.sender != bounty.challenger) revert CallerNotChallenger();
         if (block.timestamp < bounty.attemptDeadline) revert AttemptNotTimedOut();
 
         uint128 entry = bounty.entry;
         address challenger = bounty.challenger;
+        address creator = bounty.creator;
         uint64 attemptNonce = bounty.attemptNonce;
         bounty.challenger = address(0);
         bounty.attemptDeadline = 0;
         bounty.status = BountyStatus.Open;
-        if (entry != 0) _pushExact(challenger, entry);
-        emit TimedOutAttemptRefunded(bountyId, attemptNonce, challenger, entry);
+        if (entry != 0) _pushExact(creator, entry);
+        emit TimedOutAttemptForfeited(bountyId, attemptNonce, challenger, creator, entry);
     }
 
     /// @notice Cancels an open bounty. A creator may never pull reserves while a challenger is active.
@@ -346,29 +358,22 @@ contract WarMachineBountyEscrow {
         emit BountyCancelled(bountyId, bounty.creator, bounty.reward);
     }
 
-    /// @notice Expiry returns the reserve. For an active attempt it also returns the entry,
-    ///         but only after the attempt window so a current valid signed verdict cannot be raced.
+    /// @notice Expiry returns an idle bounty's unused reward reserve. An active bounty must
+    ///         first settle or reach the public timeout finalizer, so expiry can never refund
+    ///         an active challenger's entry.
     function expireBounty(uint256 bountyId) external nonReentrant {
         Bounty storage bounty = bounties[bountyId];
-        if (bounty.status != BountyStatus.Open && bounty.status != BountyStatus.Active) {
-            revert InvalidStatus();
-        }
+        if (bounty.status != BountyStatus.Open) revert InvalidStatus();
         if (bounty.expiresAt == 0 || block.timestamp < bounty.expiresAt) revert ExpiryRequired();
-        if (bounty.status == BountyStatus.Active && block.timestamp < bounty.attemptDeadline) {
-            revert AttemptNotTimedOut();
-        }
 
-        address challenger = bounty.challenger;
-        uint128 entry = bounty.entry;
         bounty.challenger = address(0);
         bounty.attemptDeadline = 0;
         bounty.status = BountyStatus.Expired;
-        if (challenger != address(0) && entry != 0) _pushExact(challenger, entry);
         _pushExact(bounty.creator, bounty.reward);
         emit BountyExpired(bountyId, bounty.creator, bounty.reward);
     }
 
-    /// @notice Stops new funding only. It cannot freeze settlements, cancellations, expiries, or refunds.
+    /// @notice Stops new funding only. It cannot freeze settlements, cancellation, expiry, or timeout finalization.
     function setNewBountiesPaused(bool paused) external onlyPauseGuardian {
         newBountiesPaused = paused;
         emit NewBountiesPauseSet(paused);

@@ -2,14 +2,14 @@
 
 War Machines uses a non-upgradeable pathUSD bounty escrow on Tempo Mainnet. The game worker prepares an exact wallet transaction, verifies the resulting contract event, and stores immutable game terms. It never receives player pathUSD or holds a payout key.
 
-| Item         | Value                                                                                                                        |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| Chain        | Tempo Mainnet `4217`                                                                                                         |
-| Token        | pathUSD `0x20C0000000000000000000000000000000000000` (6 decimals)                                                            |
-| Escrow       | [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494) |
-| Fee          | 2.5% of a winning gross reward to `0xc20131e9132888993de6519D486E5558A5DbCb7A`                                               |
-| Settlement   | Two fixed EIP-712 result signatures within 300 seconds                                                                       |
-| Verification | [Tempo source verification](https://contracts.tempo.xyz/verify-ui/jobs/bad196c7-ed62-47b3-863b-5adb3d682f5b)                 |
+| Item         | Value                                                                          |
+| ------------ | ------------------------------------------------------------------------------ |
+| Chain        | Tempo Mainnet `4217`                                                           |
+| Token        | pathUSD `0x20C0000000000000000000000000000000000000` (6 decimals)              |
+| Escrow       | Bounty Escrow v2 — address pending deployment and source verification          |
+| Fee          | 2.5% of a winning gross reward to `0xc20131e9132888993de6519D486E5558A5DbCb7A` |
+| Settlement   | Two fixed EIP-712 result signatures within a 600-second attempt window         |
+| Verification | Must be completed after the v2 deployment                                      |
 
 ## Bounty flow
 
@@ -17,7 +17,7 @@ War Machines uses a non-upgradeable pathUSD bounty escrow on Tempo Mainnet. The 
 2. A challenger approves the exact entry and calls `enterBounty` directly from their wallet. That confirmed entry reveals the defender only to the challenger; public routes retain a cost, mass, part-count, weapon-count, terrain and limit summary.
 3. The challenger gets the current three-minute construction window, can practice for free against the revealed defender, then deploys one counter. The worker records the deterministic replay and its hash.
 4. Two result keystores sign the escrow's exact EIP-712 settlement payload. Anyone can relay `settleAttempt`; the escrow verifies both signatures and sends the winner payout, platform fee, and entry recipient payment itself.
-5. A creator can cancel an idle bounty. A loss, draw, or missed counter-build deadline pays the entry to the bounty creator once two result signatures attest it. Anyone can expire a bounty after its published expiry.
+5. A creator can cancel an idle bounty. A loss or draw pays the entry to the bounty creator once two result signatures attest it. A missed clock or unsigned timeout can be finalized onchain by anyone; it also pays the entry to the creator. Only idle bounties can expire and return their unused reward.
 
 ## Local result signing
 
@@ -29,7 +29,7 @@ After an attempt reaches **awaiting signatures**, run this from the desktop repo
 .\scripts\attest-escrow-result.ps1 -AttemptId <attempt UUID> -Origin https://your-site.example
 ```
 
-Then the browser shows **Settle onchain**, which submits the verified contract call from a wallet. The signer service must attest before the escrow deadline; a missed counter-build clock records a loss and sends the entry to the bounty creator.
+Then the browser shows **Settle onchain**, which submits the verified contract call from a wallet. The signer service must attest before the escrow deadline. When it does not, `forfeitTimedOutAttempt` is the public onchain finalizer and sends the entry to the bounty creator.
 
 This manual operation is acceptable only for an extremely small private rehearsal. A public release needs separate signer operators, a reviewed replay/attestation service, monitoring, and an independent Solidity/security review.
 
@@ -52,7 +52,7 @@ Set only the pinned public escrow address to enable wallet bounty calls:
 
 ```text
 WM_MODE=tempo-mainnet
-WM_BOUNTY_ESCROW_ADDRESS=0x461eefD1c4bcbE76C470487cF18b892fCD76d494
+WM_BOUNTY_ESCROW_ADDRESS=<verified Bounty Escrow v2 address>
 ```
 
 The Worker fails closed when the address differs. `WM_TEMPO_RPC_URL` is optional and defaults to `https://rpc.tempo.xyz`.

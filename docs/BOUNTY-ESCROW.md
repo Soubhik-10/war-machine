@@ -1,8 +1,10 @@
 # War Machines bounty escrow
 
-`contracts/src/WarMachineBountyEscrow.sol` is a standalone, non-upgradeable pathUSD escrow for paid War Machines bounties on Tempo mainnet. It is live at [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494), deployed in [transaction `0x90df…45d1`](https://explore.tempo.xyz/tx/0x90df3b99bbfa4b7f806b05dd15c379bbd79523dfa7f7478d271fd96e3b5445d1) at block `39272885`. Its source was verified with Tempo's contract verifier ([verification record](https://contracts.tempo.xyz/verify-ui/jobs/bad196c7-ed62-47b3-863b-5adb3d682f5b)). The complete public deployment record is [`contracts/deployments/tempo-mainnet.json`](../contracts/deployments/tempo-mainnet.json).
+`contracts/src/WarMachineBountyEscrow.sol` is the source for **Bounty Escrow v2**, a standalone, non-upgradeable pathUSD escrow for paid War Machines bounties on Tempo mainnet. It is ready to deploy, but has no address until the deployment script is broadcast and verified.
 
-The public application prepares direct wallet calls to this escrow, verifies the emitted events, and supports cancellation, expiry and timeout refunds. It does not custody player funds or contain settlement private keys. The current tiny-amount trial uses local encrypted result signers; the Site is not ready for an unattended public-money launch until those signers are independently operated and the system has had an independent review.
+The retired v1 escrow remains immutable at [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494). Its historical record remains in [`contracts/deployments/tempo-mainnet.json`](../contracts/deployments/tempo-mainnet.json); do not send it new bounty funds.
+
+The public application prepares direct wallet calls to this escrow and verifies the emitted events. It does not custody player funds or contain settlement private keys. The current tiny-amount trial uses local encrypted result signers; the Site remains paused until those signers are independently operated and the v2 address is pinned.
 
 ## Live immutable configuration
 
@@ -11,7 +13,7 @@ The public application prepares direct wallet calls to this escrow, verifies the
 | Chain          | Tempo Mainnet (`4217`)                                                   |
 | Token          | pathUSD, `0x20C0000000000000000000000000000000000000` (6 decimals)       |
 | Platform fee   | 2.5% (`250` bps), recipient `0xc20131e9132888993de6519D486E5558A5DbCb7A` |
-| Attempt window | 300 seconds                                                              |
+| Attempt window | 600 seconds: 3–5 minutes to build plus signer/relay reserve              |
 | Pause guardian | `0xD95CBf3A061eB26d0BA641703c66a40f07C44Dc5`                             |
 | Settlement     | Both listed signers must provide an EIP-712 result signature             |
 
@@ -24,7 +26,7 @@ The settings above were read from the deployed contract after verification. The 
 - The 2.5% reward fee and its recipient (`0xc20131e9132888993de6519D486E5558A5DbCb7A`) are immutable bytecode constants.
 - The payout recipient is always the active challenger. A result signer cannot substitute a wallet, a fee rate, a token, a reward, or an entry amount.
 - The creator receives the separately disclosed entry amount after a completed non-technical attempt. The platform receives no hidden entry fee.
-- A creator cannot cancel while an attempt is active. A challenger can refund their entry after the attempt window if the result service is unavailable. Bounty expiry refunds both the reserve and any timed-out active entry.
+- A creator cannot cancel or expire while an attempt is active. If no signed result settles before the immutable deadline, anyone can finalize the timeout and the entry goes to the bounty creator. Expiry only returns an idle bounty's unused reward reserve.
 - The pause guardian can stop new bounties and entries, but cannot block settlement, cancellation, expiry, or player refunds. There is no owner withdrawal, upgrade function, proxy, rescue method, or arbitrary transfer function.
 - A battle outcome needs a fixed quorum of distinct EIP-712 signatures. The constructor permanently fixes the signer set and quorum. Use two independently controlled signers for a public release.
 - Exact token balance checks reject fee-on-transfer or non-conforming token behavior. All value fields are integer token base units; pathUSD uses six decimals.
@@ -43,10 +45,9 @@ stateDiagram-v2
     Open --> Active: challenger escrows entry
     Active --> Claimed: signed challenger win
     Active --> Open: signed loss/draw or technical refund
-    Active --> Open: challenger timeout refund
+    Active --> Open: public timeout finalizer sends entry to creator
     Open --> Cancelled: creator cancels
     Open --> Expired: expiry
-    Active --> Expired: expiry after attempt window
 ```
 
 The UI must show the gross reward, 2.5% fee, winner payout, entry amount, entry recipient, expiry, active-attempt deadline, token, chain, contract address, signer quorum, result hash, and every contract event before a wallet asks the user to sign or approve a transfer.
@@ -57,7 +58,7 @@ The defender blueprint is committed by the bounty's immutable `termsHash`, but i
 
 That paid challenger gets a server-recorded build deadline, may practice without another payment, then submits one valid counter with `POST /api/attempts/:id/deploy`. The Worker commits the defender, challenger, arena, seed, engine hash and simulation result to `resultHash` before the two signers attest it. Other users cannot obtain the defender from bounty, validation, practice, attempt or replay routes.
 
-This escrow's 300-second attempt window reserves two minutes for the signer quorum, leaving about three minutes to build. The Worker is ready to scale construction time from three to five minutes by defender cost when a future reviewed escrow has a longer attempt window. Do not point the public Worker at another escrow until its address, immutable fee constants, signer set and source verification have been reviewed and pinned in `runtimeConfig`.
+This escrow's 600-second attempt window gives the Worker a cost-scaled three-to-five-minute construction phase and leaves at least five minutes for the signer quorum and wallet relay. Once the deadline passes, settlement is rejected and the public timeout finalizer sends the entry to the creator. Do not point the public Worker at this escrow until its address, immutable fee constants, signer set, source verification, and signer service have been reviewed and pinned in `runtimeConfig`.
 
 ## Development checks
 
@@ -69,7 +70,7 @@ cd contracts
 ..\work\tooling\foundry\forge.exe test -vvv
 ```
 
-The tests cover payout accounting, fixed fees, loss/draw reserve retention, active-attempt cancellation protection, oracle timeout refunds, expiry refunds, invalid signatures, replay resistance, and pause powers.
+The tests cover payout accounting, fixed fees, loss/draw reserve retention, active-attempt cancellation protection, creator timeout forfeiture, active-expiry protection, invalid signatures, replay resistance, and pause powers.
 
 ## Public-money activation gate
 
@@ -78,7 +79,7 @@ Do not take a payment through the Site until all of these are true:
 1. Have an independent Solidity reviewer inspect the exact deployed bytecode and source.
 2. Rehearse with two independently controlled settlement keys, the pause guardian, expiry, cancellation, incorrect signatures, signer outage, wrong token, and wallet rejection.
 3. Replace the local manual signer process with a separately operated replay/attestation service. The retired custodial payout queue must remain disabled.
-4. Rehearse direct wallet calls for `approve`, `createBounty`, `enterBounty`, settlement, timeout refunds, cancellation and expiry. MPP charge receipts cannot substitute for an on-chain bounty deposit.
+4. Rehearse direct wallet calls for `approve`, `createBounty`, `enterBounty`, settlement, timeout forfeiture, cancellation and expiry. MPP charge receipts cannot substitute for an on-chain bounty deposit.
 5. Display this contract address, token, gross reward, 2.5% fee, winner payout, entry amount, expiry, attempt deadline, signer quorum, result hash, and relevant events before every signing request.
 6. Test first with a deliberately low real-money cap and no fee sponsorship. Paid-entry prize rules, tax, sanctions, consumer protection, and payment-provider requirements still need an operator review.
 
@@ -122,7 +123,7 @@ repository or to ChatGPT. Use this only after the mainnet deployment gate above 
    ```text
    token:              0x20C0000000000000000000000000000000000000
    pauseGuardian:      <dedicated public guardian address>
-   attemptWindow:      300
+   attemptWindow:      600
    settlementSigners:  [<signer 1 address>, <signer 2 address>]
    settlementQuorum:   2
    ```
@@ -132,7 +133,7 @@ repository or to ChatGPT. Use this only after the mainnet deployment gate above 
    wallet as either signer or pause guardian.
 
 5. Before approving the wallet popup, verify the chain, exact source commit, compiler settings,
-   token address, guardian, both signer addresses, `300` second window, and `2` quorum. The fee
+   token address, guardian, both signer addresses, `600` second window, and `2` quorum. The fee
    recipient and 2.5% rate are compiled into the contract and cannot be changed during deployment.
 6. Record the deployed address and transaction hash, verify it at
    [Tempo's contract verifier](https://contracts.tempo.xyz), then test only an extremely small

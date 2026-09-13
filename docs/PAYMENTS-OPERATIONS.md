@@ -6,7 +6,7 @@ War Machines uses direct pathUSD escrow on Tempo mainnet.
 
 - Chain: Tempo Mainnet `4217`
 - pathUSD: `0x20C0000000000000000000000000000000000000` (6 decimals)
-- Escrow: `0x461eefD1c4bcbE76C470487cF18b892fCD76d494`
+- Escrow: Bounty Escrow v2 address pending deployment and verification
 - Platform fee: 2.5% of the gross winning reward to `0xc20131e9132888993de6519D486E5558A5DbCb7A`
 
 The browser prepares the exact approval and escrow calls. The Worker verifies receipts only against the pinned escrow, binds the locked rules and builds to the result, and records the attestation state. It never holds a wallet private key, pathUSD balance, or payout authority.
@@ -20,7 +20,7 @@ The browser prepares the exact approval and escrow calls. The Worker verifies re
 5. Both result signers run `scripts/attest-escrow-result.ps1` using their independent encrypted keystores.
 6. Any wallet can relay `settleAttempt` after both signatures have been registered.
 
-The current deployment uses a five-minute settlement window. It reserves two minutes for result signatures, so the paid construction window is currently about three minutes. The Worker already calculates a cost-scaled three-to-five-minute window for a later escrow with a longer attempt window; do not advertise five minutes until that escrow is deployed and pinned. An idle bounty can be cancelled by its creator. A loss, draw, or missed counter deadline settles the entry to the bounty creator; an expired bounty releases its reward.
+The v2 deployment uses a ten-minute attempt window. The Worker gives the challenger a cost-scaled three-to-five-minute build window, then retains enough time for two signatures and relay. A loss, draw, or missed counter deadline settles the entry to the bounty creator. If the signer service fails, anybody can call the v2 timeout finalizer after the immutable deadline; it also sends the entry to the creator. Only an idle bounty can expire and release its reward.
 
 ## Operating limits
 

@@ -131,7 +131,7 @@ test("settlement attestations bind the exact Tempo escrow typed data and canonic
     typed = {
       domain: {
         name: "War Machines Bounty Escrow",
-        version: "1",
+        version: "2",
         chainId: 4217,
         verifyingContract: config.escrowAddress,
       },
@@ -707,6 +707,50 @@ test("direct escrow intents bind exact terms to the confirmed create and entry e
   assert.equal(forfeited.body.result.reason, "counter-build-timeout");
   assert.equal(forfeited.body.escrowSettlement.outcome, 1);
   assert.equal(forfeited.body.replay, undefined);
+  DB.sqlite
+    .prepare("UPDATE bounties SET escrow_attempt_deadline=? WHERE id=?")
+    .run(Date.now() - 1, timedOutBounty.body.id);
+  const timeoutFinalizer = await post(
+    "/api/bounties/" + timedOutBounty.body.id + "/timeout-forfeit",
+    {},
+    "direct_timeout_forfeit_fixture_0001",
+    challengerSession,
+  );
+  assert.equal(
+    timeoutFinalizer.status,
+    202,
+    JSON.stringify(timeoutFinalizer.body),
+  );
+  assert.equal(timeoutFinalizer.body.kind, "timeout-forfeit");
+  activeReceipt = {
+    status: "0x1",
+    logs: [
+      {
+        address: escrow,
+        topics: [
+          "0xb92806ef23ff7f73544c7018ae5c0c865c4103b6c6a9a497430e6e8961763298",
+          "0x" + pad(8),
+          "0x" + pad(1),
+          "0x" + challengerWallet.slice(2).padStart(64, "0"),
+        ],
+        data: "0x" + wallet.slice(2).padStart(64, "0") + pad(10000),
+      },
+    ],
+  };
+  const timeoutSettled = await post(
+    "/api/escrow/intents/" + timeoutFinalizer.body.intentId + "/confirm",
+    { transactionHash: "0x" + "ff".repeat(32) },
+    "direct_timeout_forfeit_confirm_0001",
+    challengerSession,
+  );
+  assert.equal(timeoutSettled.status, 200, JSON.stringify(timeoutSettled.body));
+  assert.equal(timeoutSettled.body.status, "open");
+  assert.equal(
+    DB.sqlite
+      .prepare("SELECT status FROM attempts WHERE id=?")
+      .get(timedOutAttempt.body.id).status,
+    "settled",
+  );
 });
 
 test("a fully populated legacy custody configuration still cannot issue a payment challenge or hold funds", async (t) => {

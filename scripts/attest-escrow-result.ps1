@@ -14,7 +14,7 @@ if (-not (Test-Path -LiteralPath $SignerOnePath) -or -not (Test-Path -LiteralPat
 $info = Invoke-RestMethod -Uri "$Origin/api/attempts/$AttemptId/settlement" -Method Get
 if ($info.status -ne 'awaiting-signatures') { throw "Attempt is $($info.status), not awaiting result signatures." }
 $deadline = [Int64]$info.settlement.validUntil
-if ($deadline -le [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) { throw 'The attestation window has expired. The challenger can call refundTimedOutAttempt.' }
+if ($deadline -le [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) { throw 'The attestation window has expired. Anybody can call forfeitTimedOutAttempt; it pays the entry to the bounty creator.' }
 
 $typedDataPath = Join-Path ([IO.Path]::GetTempPath()) "war-machines-settlement-$AttemptId.json"
 try {

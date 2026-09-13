@@ -79,8 +79,8 @@ if ([Environment]::GetEnvironmentVariable('WM_ESCROW_SIGNER_QUORUM', 'Process') 
     throw 'Public deployment requires a 2-of-2 settlement quorum.'
 }
 $window = [int][Environment]::GetEnvironmentVariable('WM_ESCROW_ATTEMPT_WINDOW_SECONDS', 'Process')
-if ($window -lt 60 -or $window -gt 3600) {
-    throw 'WM_ESCROW_ATTEMPT_WINDOW_SECONDS must be between 60 and 3600.'
+if ($window -lt 480 -or $window -gt 3600) {
+    throw 'WM_ESCROW_ATTEMPT_WINDOW_SECONDS must be between 480 and 3600. Use 600 for the reviewed 3–5 minute build window plus settlement reserve.'
 }
 if (-not $DeployerAddress -or $DeployerAddress -notmatch '^0x[0-9a-fA-F]{40}$') {
     throw 'Pass the public burner wallet with -DeployerAddress 0x...'
@@ -95,7 +95,8 @@ Write-Host "  token:    0x20C0000000000000000000000000000000000000 (pathUSD)"
 Write-Host "  guardian: $guardian"
 Write-Host "  signers:  $signerOne, $signerTwo (2-of-2)"
 Write-Host "  window:   $window seconds"
-Write-Host '  fee:      fixed at 2.5% to 0xc20131e9132888993de6519D486E5558A5DbCb7A'
+Write-Host '  fee:      fixed at 2.5% of a winning reward to 0xc20131e9132888993de6519D486E5558A5DbCb7A'
+Write-Host '  timeout:  no challenger refund; entry is forfeited to the bounty creator'
 
 $forgeArgs = @(
     'script', 'script/DeployWarMachineBountyEscrow.s.sol:DeployWarMachineBountyEscrow',

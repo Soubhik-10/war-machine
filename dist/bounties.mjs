@@ -752,6 +752,13 @@ export function createBountyUI(adapter) {
       );
       await attempt(ended.id);
     }
+    async function settleUnsignedTimeout(a) {
+      await mutate("/bounties/" + a.bounty + "/timeout-forfeit", {});
+      await open(a.bounty);
+      adapter.toast(
+        "Timeout finalized onchain. The entry was paid to the bounty creator.",
+      );
+    }
     async function watchOfficialReplay(a) {
       const catalog = await api("/rules");
       currentFeeBps = catalog.economics.platformFee.basisPoints;
@@ -838,7 +845,9 @@ export function createBountyUI(adapter) {
             expires = s?.validUntil
               ? Number(s.validUntil) * 1000 <= Date.now()
               : false,
-            ready = a.status === "ready-to-settle";
+            ready = a.status === "ready-to-settle",
+            timeoutFinalizerReady =
+              Number(a.escrowAttemptDeadline || 0) <= Date.now();
           const replayKey =
             "wm-watched-official-replay-" +
             a.id +
@@ -866,7 +875,7 @@ export function createBountyUI(adapter) {
                 : "RESULT AWAITING ATTESTATION.",
               "The game result is deterministic. The escrow releases funds only after two independent signatures.",
             ) +
-            `<section class="panel trial-wait"><span class="eyebrow">${ready ? "TWO SIGNATURES VERIFIED" : "RESULT RECORDED"}</span><h2>${r?.reason === "counter-build-timeout" ? "COUNTER TIME EXPIRED." : r?.outcome === "win" ? "YOU BROKE THE MACHINE." : r?.outcome === "loss" ? "THE DEFENSE HELD." : "DRAW OR TECHNICAL RESULT."}</h2><p>${r?.reason === "counter-build-timeout" ? `No counter was committed. The ${money(r.entry)} ${esc(runtime.currency)} entry is due to the bounty creator. ` : r?.integrity ? `Your integrity: ${(r.integrity[0] * 100).toFixed(1)}% · Defender: ${(r.integrity[1] * 100).toFixed(1)}%. ` : ""}Result hash: <code>${esc(s?.resultHash || "pending")}</code></p><p class="hint">${expires ? "The immutable escrow's signing window elapsed before settlement. It can no longer transfer this entry." : ready ? "Relay the signed verdict from Tempo Wallet. A win pays the challenger; a loss or timeout sends the entry to the bounty creator and returns this bounty to the board." : "The result is final. The independent signers must attest it before the escrow can distribute the entry or reward."}</p><div class="bounty-actions">${a.replay ? '<button id="watch-official-replay">▶ Watch exact battle</button>' : ""}${ready ? '<button class="primary" id="settle-attempt">Settle & return to bounty</button>' : ""}<button id="pending-contract">View bounty</button></div><p id="bounty-error" class="error-message"></p></section>`;
+            `<section class="panel trial-wait"><span class="eyebrow">${ready ? "TWO SIGNATURES VERIFIED" : "RESULT RECORDED"}</span><h2>${r?.reason === "counter-build-timeout" ? "COUNTER TIME EXPIRED." : r?.outcome === "win" ? "YOU BROKE THE MACHINE." : r?.outcome === "loss" ? "THE DEFENSE HELD." : "DRAW OR TECHNICAL RESULT."}</h2><p>${r?.reason === "counter-build-timeout" ? `No counter was committed. The ${money(r.entry)} ${esc(runtime.currency)} entry is due to the bounty creator. ` : r?.integrity ? `Your integrity: ${(r.integrity[0] * 100).toFixed(1)}% · Defender: ${(r.integrity[1] * 100).toFixed(1)}%. ` : ""}Result hash: <code>${esc(s?.resultHash || "pending")}</code></p><p class="hint">${expires ? (timeoutFinalizerReady ? "The signer window elapsed. Finalize this onchain loss: the entry is paid to the bounty creator and the bounty reopens." : "The signing window has just closed. The onchain timeout finalizer will be ready in a moment.") : ready ? "Relay the signed verdict from Tempo Wallet. A win pays the challenger; a loss or timeout sends the entry to the bounty creator and returns this bounty to the board." : "The result is final. The independent signers must attest it before the escrow can distribute the entry or reward."}</p><div class="bounty-actions">${a.replay ? '<button id="watch-official-replay">▶ Watch exact battle</button>' : ""}${ready ? '<button class="primary" id="settle-attempt">Settle & return to bounty</button>' : ""}${expires && timeoutFinalizerReady ? '<button class="primary" id="finalize-timeout">Finalize loss & return to bounty</button>' : ""}<button id="pending-contract">View bounty</button></div><p id="bounty-error" class="error-message"></p></section>`;
           wireHeader();
           $("#pending-contract").onclick = () => open(a.bounty);
           if ($("#watch-official-replay"))
@@ -875,7 +884,11 @@ export function createBountyUI(adapter) {
           if ($("#settle-attempt"))
             $("#settle-attempt").onclick = (e) =>
               act(e.currentTarget, () => settle(a));
-          if (!ready && !expires) schedule(poll, g, 5000);
+          if ($("#finalize-timeout"))
+            $("#finalize-timeout").onclick = (e) =>
+              act(e.currentTarget, () => settleUnsignedTimeout(a));
+          if (!ready && (!expires || !timeoutFinalizerReady))
+            schedule(poll, g, 1000);
           return;
         }
         const r = a.result,

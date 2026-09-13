@@ -33,7 +33,7 @@ contract WarMachineBountyEscrowTest {
         address[] memory signers = new address[](2);
         signers[0] = vm.addr(ORACLE_KEY);
         signers[1] = vm.addr(SECOND_ORACLE_KEY);
-        escrow = new WarMachineBountyEscrow(token, guardian, 5 minutes, signers, 2);
+        escrow = new WarMachineBountyEscrow(token, guardian, 10 minutes, signers, 2);
         token.mint(creator, 10_000_000);
         token.mint(challenger, 10_000_000);
         vm.prank(creator);
@@ -73,14 +73,15 @@ contract WarMachineBountyEscrowTest {
         );
     }
 
-    function testUnresponsiveOracleCannotTrapEntry() public {
+    function testUnresponsiveOracleForfeitsEntryToCreator() public {
         uint256 bountyId = _create(1_000_000, 100_000, 0);
         _enter(bountyId);
-        vm.warp(block.timestamp + 5 minutes);
-        vm.prank(challenger);
-        escrow.refundTimedOutAttempt(bountyId);
+        vm.warp(block.timestamp + 10 minutes);
+        vm.prank(address(0xBEEF));
+        escrow.forfeitTimedOutAttempt(bountyId);
 
-        _eq(token.balanceOf(challenger), 10_000_000, "challenger must recover timed-out entry");
+        _eq(token.balanceOf(challenger), 9_900_000, "timed-out entry must remain lost");
+        _eq(token.balanceOf(creator), 9_100_000, "creator must receive timed-out entry");
         _eq(token.balanceOf(address(escrow)), 1_000_000, "reward should remain funded");
         _eq(
             uint256(escrow.getBounty(bountyId).status),
@@ -89,14 +90,27 @@ contract WarMachineBountyEscrowTest {
         );
     }
 
-    function testExpiredActiveBountyReturnsBothParticipantsFunds() public {
+    function testAnyoneCannotForfeitBeforeTheAttemptDeadline() public {
+        uint256 bountyId = _create(1_000_000, 100_000, 0);
+        _enter(bountyId);
+
+        vm.expectRevert();
+        vm.prank(address(0xBEEF));
+        escrow.forfeitTimedOutAttempt(bountyId);
+    }
+
+    function testExpiryCannotRefundAnActiveEntry() public {
         uint256 bountyId = _create(1_000_000, 100_000, uint64(block.timestamp + 2 minutes));
         _enter(bountyId);
-        vm.warp(block.timestamp + 5 minutes);
+        vm.warp(block.timestamp + 10 minutes);
+        vm.expectRevert();
         escrow.expireBounty(bountyId);
 
-        _eq(token.balanceOf(creator), 10_000_000, "creator reward refund is wrong");
-        _eq(token.balanceOf(challenger), 10_000_000, "challenger entry refund is wrong");
+        escrow.forfeitTimedOutAttempt(bountyId);
+        escrow.expireBounty(bountyId);
+
+        _eq(token.balanceOf(creator), 10_100_000, "creator reward and entry are wrong");
+        _eq(token.balanceOf(challenger), 9_900_000, "challenger entry must remain lost");
         _eq(token.balanceOf(address(escrow)), 0, "funds must not remain after expiry");
     }
 
@@ -130,7 +144,7 @@ contract WarMachineBountyEscrowTest {
         signers[0] = vm.addr(ORACLE_KEY);
         signers[1] = vm.addr(SECOND_ORACLE_KEY);
         WarMachineBountyEscrow strict =
-            new WarMachineBountyEscrow(token, guardian, 5 minutes, signers, 2);
+            new WarMachineBountyEscrow(token, guardian, 10 minutes, signers, 2);
         vm.prank(creator);
         token.approve(address(strict), type(uint256).max);
         vm.prank(challenger);
@@ -207,13 +221,13 @@ contract WarMachineBountyEscrowTest {
         address[] memory oneSigner = new address[](1);
         oneSigner[0] = vm.addr(ORACLE_KEY);
         vm.expectRevert();
-        new WarMachineBountyEscrow(token, guardian, 5 minutes, oneSigner, 1);
+        new WarMachineBountyEscrow(token, guardian, 10 minutes, oneSigner, 1);
 
         address[] memory twoSigners = new address[](2);
         twoSigners[0] = vm.addr(ORACLE_KEY);
         twoSigners[1] = vm.addr(SECOND_ORACLE_KEY);
         vm.expectRevert();
-        new WarMachineBountyEscrow(token, guardian, 5 minutes, twoSigners, 1);
+        new WarMachineBountyEscrow(token, guardian, 10 minutes, twoSigners, 1);
     }
 
     function _create(uint128 reward, uint128 entry, uint64 expiresAt) private returns (uint256) {
