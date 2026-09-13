@@ -6,14 +6,14 @@ The public application prepares direct wallet calls to this escrow, verifies the
 
 ## Live immutable configuration
 
-| Setting | Value |
-| --- | --- |
-| Chain | Tempo Mainnet (`4217`) |
-| Token | pathUSD, `0x20C0000000000000000000000000000000000000` (6 decimals) |
-| Platform fee | 2.5% (`250` bps), recipient `0xc20131e9132888993de6519D486E5558A5DbCb7A` |
-| Attempt window | 300 seconds |
-| Pause guardian | `0xD95CBf3A061eB26d0BA641703c66a40f07C44Dc5` |
-| Settlement | Both listed signers must provide an EIP-712 result signature |
+| Setting        | Value                                                                    |
+| -------------- | ------------------------------------------------------------------------ |
+| Chain          | Tempo Mainnet (`4217`)                                                   |
+| Token          | pathUSD, `0x20C0000000000000000000000000000000000000` (6 decimals)       |
+| Platform fee   | 2.5% (`250` bps), recipient `0xc20131e9132888993de6519D486E5558A5DbCb7A` |
+| Attempt window | 300 seconds                                                              |
+| Pause guardian | `0xD95CBf3A061eB26d0BA641703c66a40f07C44Dc5`                             |
+| Settlement     | Both listed signers must provide an EIP-712 result signature             |
 
 The settings above were read from the deployed contract after verification. The contract is hardened and source-verified, but it has not had an independent third-party audit.
 
@@ -50,6 +50,14 @@ stateDiagram-v2
 ```
 
 The UI must show the gross reward, 2.5% fee, winner payout, entry amount, entry recipient, expiry, active-attempt deadline, token, chain, contract address, signer quorum, result hash, and every contract event before a wallet asks the user to sign or approve a transfer.
+
+## Paid defender reveal
+
+The defender blueprint is committed by the bounty's immutable `termsHash`, but it is not returned by public Worker routes. Before entry, a bounty exposes its arena, terrain, construction rules, construction cost, mass, fitted-part count, weapon count and economic terms. A confirmed `AttemptEntered` event grants the exact defender only to that challenger account.
+
+That paid challenger gets a server-recorded build deadline, may practice without another payment, then submits one valid counter with `POST /api/attempts/:id/deploy`. The Worker commits the defender, challenger, arena, seed, engine hash and simulation result to `resultHash` before the two signers attest it. Other users cannot obtain the defender from bounty, validation, practice, attempt or replay routes.
+
+This escrow's 300-second attempt window reserves two minutes for the signer quorum, leaving about three minutes to build. The Worker is ready to scale construction time from three to five minutes by defender cost when a future reviewed escrow has a longer attempt window. Do not point the public Worker at another escrow until its address, immutable fee constants, signer set and source verification have been reviewed and pinned in `runtimeConfig`.
 
 ## Development checks
 
@@ -122,6 +130,7 @@ repository or to ChatGPT. Use this only after the mainnet deployment gate above 
    `signer 1` and `signer 2` must be independent, dedicated key holders. They are not allowed to
    change payout amounts or recipients, but both can attest a result. Do not use the deployer
    wallet as either signer or pause guardian.
+
 5. Before approving the wallet popup, verify the chain, exact source commit, compiler settings,
    token address, guardian, both signer addresses, `300` second window, and `2` quorum. The fee
    recipient and 2.5% rate are compiled into the contract and cannot be changed during deployment.

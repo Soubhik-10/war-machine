@@ -15,11 +15,12 @@ The browser prepares the exact approval and escrow calls. The Worker verifies re
 
 1. The creator approves pathUSD and calls `createBounty`.
 2. The challenger approves pathUSD and calls `enterBounty`.
-3. The Worker computes the deterministic result and returns the EIP-712 settlement payload.
-4. Both result signers run `scripts/attest-escrow-result.ps1` using their independent encrypted keystores.
-5. Any wallet can relay `settleAttempt` after both signatures have been registered.
+3. The Worker reveals the defender to that paid challenger only and opens the construction window. Public viewers continue to receive only the scout summary.
+4. The challenger validates, practices and deploys one counter. The Worker computes the deterministic result and returns the EIP-712 settlement payload.
+5. Both result signers run `scripts/attest-escrow-result.ps1` using their independent encrypted keystores.
+6. Any wallet can relay `settleAttempt` after both signatures have been registered.
 
-The current deployment uses a five-minute settlement window. An idle bounty can be cancelled by its creator. A challenger can reclaim an unsettled entry after its deadline, and an expired bounty releases its reward.
+The current deployment uses a five-minute settlement window. It reserves two minutes for result signatures, so the paid construction window is currently about three minutes. The Worker already calculates a cost-scaled three-to-five-minute window for a later escrow with a longer attempt window; do not advertise five minutes until that escrow is deployed and pinned. An idle bounty can be cancelled by its creator. A challenger can reclaim an unsettled entry after its deadline, and an expired bounty releases its reward.
 
 ## Operating limits
 

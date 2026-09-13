@@ -2,7 +2,8 @@ node_modules/
 *.zip
 *.log
 .env*
-contracts/deployments/tempo-mainnet.local.env
+*.local.env
+!.env.example
 __pycache__/
 .openai/*
 !.openai/hosting.json

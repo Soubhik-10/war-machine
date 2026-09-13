@@ -2,21 +2,21 @@
 
 War Machines uses a non-upgradeable pathUSD bounty escrow on Tempo Mainnet. The game worker prepares an exact wallet transaction, verifies the resulting contract event, and stores immutable game terms. It never receives player pathUSD or holds a payout key.
 
-| Item | Value |
-| --- | --- |
-| Chain | Tempo Mainnet `4217` |
-| Token | pathUSD `0x20C0000000000000000000000000000000000000` (6 decimals) |
-| Escrow | [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494) |
-| Fee | 2.5% of a winning gross reward to `0xc20131e9132888993de6519D486E5558A5DbCb7A` |
-| Settlement | Two fixed EIP-712 result signatures within 300 seconds |
-| Verification | [Tempo source verification](https://contracts.tempo.xyz/verify-ui/jobs/bad196c7-ed62-47b3-863b-5adb3d682f5b) |
+| Item         | Value                                                                                                                        |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| Chain        | Tempo Mainnet `4217`                                                                                                         |
+| Token        | pathUSD `0x20C0000000000000000000000000000000000000` (6 decimals)                                                            |
+| Escrow       | [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494) |
+| Fee          | 2.5% of a winning gross reward to `0xc20131e9132888993de6519D486E5558A5DbCb7A`                                               |
+| Settlement   | Two fixed EIP-712 result signatures within 300 seconds                                                                       |
+| Verification | [Tempo source verification](https://contracts.tempo.xyz/verify-ui/jobs/bad196c7-ed62-47b3-863b-5adb3d682f5b)                 |
 
 ## Bounty flow
 
 1. The creator approves the exact gross reward and calls `createBounty` directly from their wallet.
-2. A challenger approves the exact entry and calls `enterBounty` directly from their wallet.
-3. The worker records the deterministic replay and its hash. Two result keystores sign the escrow's exact EIP-712 settlement payload.
-4. Anyone can relay `settleAttempt`; the escrow verifies both signatures and sends the winner payout, platform fee, and entry recipient payment itself.
+2. A challenger approves the exact entry and calls `enterBounty` directly from their wallet. That confirmed entry reveals the defender only to the challenger; public routes retain a cost, mass, part-count, weapon-count, terrain and limit summary.
+3. The challenger gets the current three-minute construction window, can practice for free against the revealed defender, then deploys one counter. The worker records the deterministic replay and its hash.
+4. Two result keystores sign the escrow's exact EIP-712 settlement payload. Anyone can relay `settleAttempt`; the escrow verifies both signatures and sends the winner payout, platform fee, and entry recipient payment itself.
 5. A creator can cancel an idle bounty. A challenger can recover a timed-out entry. Anyone can expire a bounty after its published expiry. These are direct contract calls and do not need an operator.
 
 ## Local result signing

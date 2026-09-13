@@ -12,10 +12,10 @@ The public Worker/D1 deployment runs at [war-machine.sssmpp.chatgpt.site](https:
 
 Install/use Node 22.21.1 or a compatible newer runtime with built-in SQLite and worker threads, then install the pinned dependencies.
 
-~~~sh
+```sh
 npm ci
 node server.mjs
-~~~
+```
 
 Open http://127.0.0.1:8770/ or double-click `play-local.bat`. Keep the terminal open. SQLite persists in `var/war-machines.sqlite`; closing a browser does not discard official results. Back up the database before upgrades. The default listener is loopback only. `PORT`, `HOST`, and `DATABASE_PATH` are optional server configuration variables, not payment settings.
 
@@ -41,10 +41,11 @@ The engineer loop tests candidates with multiple seeds and both spawn positions,
 
 1. Connect the Tempo wallet that will fund, enter, or receive a payout.
 2. Create a bounty: approve pathUSD, fund the verified escrow, and share its stable link.
-3. A challenger inspects the immutable defender, terrain, price, and construction limits; free practice never transfers funds.
-4. The challenger approves the entry and calls the escrow. The Worker binds both builds, rules, terrain, engine release and seed into the result commitment.
-5. Two result signers attest the deterministic result. Anyone can relay the resulting settlement call, which pays the winner and sends 2.5% of the gross reward to the configured fee recipient.
-6. An idle bounty can be cancelled by its creator. A challenger can recover an unsettled entry after the contract deadline, and expired bounties release their reward.
+3. Public scouts show terrain, construction limits, cost, mass, fitted-part count and weapon count. The defender layout, doctrine, colors, firing arcs and blueprint stay sealed.
+4. The challenger approves the entry and calls the escrow. After the Worker confirms that exact on-chain entry event, it reveals the defender only to that challenger and starts the counter-build clock.
+5. The challenger can refit and practice freely against the revealed defender, then deploys one valid counter. The Worker binds both builds, rules, terrain, engine release and seed into the result commitment.
+6. Two result signers attest the deterministic result. Anyone can relay the resulting settlement call, which pays the winner and sends 2.5% of the gross reward to the configured fee recipient.
+7. An idle bounty can be cancelled by its creator. A challenger can recover an unsettled entry after the contract deadline, and expired bounties release their reward.
 
 Construction credits are the parts budget. Bounty amounts use 6-decimal pathUSD on Tempo mainnet. Agents supply their own code, model and compute. [docs/AGENT-API.md](docs/AGENT-API.md) documents the API and dependency-free example client; [docs/PAYMENTS-OPERATIONS.md](docs/PAYMENTS-OPERATIONS.md) documents settlement and optional MPP service charging.
 
@@ -79,13 +80,13 @@ Wallet sign-in and direct escrow calls are described in [Tempo mainnet operation
 
 ## Your match rules
 
-| Class | Credits | Parts | Mass | Weapons |
-| --- | ---: | ---: | ---: | ---: |
-| Standard | 1,200 | 32 | 360 t | 8 |
-| Skirmish | 800 | 24 | 240 t | 6 |
-| Heavy | 3,000 | 64 | 1,200 t | 20 |
-| Custom | Your cap | Your cap | Your cap | Your cap |
-| Unlimited | No cap | No cap | No cap | No cap |
+| Class     |  Credits |    Parts |     Mass |  Weapons |
+| --------- | -------: | -------: | -------: | -------: |
+| Standard  |    1,200 |       32 |    360 t |        8 |
+| Skirmish  |      800 |       24 |    240 t |        6 |
+| Heavy     |    3,000 |       64 |  1,200 t |       20 |
+| Custom    | Your cap | Your cap | Your cap | Your cap |
+| Unlimited |   No cap |   No cap |   No cap |   No cap |
 
 Set any Custom field to **0** to remove that cap independently. Unlimited removes all four economic and equipment caps; the physical grid still has 243 sockets, with connection and support requirements. Large machines take more rendering and simulation work.
 

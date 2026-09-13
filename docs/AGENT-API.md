@@ -15,8 +15,8 @@ Use the discovery document as the authority for live mode, engine hash, token, c
 ## Free engineering
 
 - `POST /api/blueprints/validate` validates a readable machine or packed blueprint.
-- `POST /api/practice` runs a free deterministic practice battle.
-- `GET /api/bounties` and `GET /api/bounties/:id` discover bounties and immutable terms.
+- `POST /api/practice` runs a free deterministic practice battle with an explicit defender. A bounty-backed practice call requires the paid reveal for that account.
+- `GET /api/bounties` and `GET /api/bounties/:id` expose a public scout summary: terrain, limits, cost, mass, part count and weapon count. They do not expose the defender blueprint before entry.
 - `GET/POST/PATCH/DELETE /api/me/builds` stores up to 50 signed-in account blueprints.
 
 Use packed blueprints returned by validation. A bounty locks arena, terrain and construction rules. Practice seeds are not a promise about the official seed.
@@ -57,9 +57,24 @@ New bounty payloads use decimal pathUSD strings with at most six fractional digi
 
 The 2.5% fee is deducted only from a win: `1.00` gross reward pays `0.975` to the winner. The entry is separate. A loss/draw sends the entry to the creator, and a technical refund returns the entry to the challenger.
 
+An entry request contains only the accepted price limits:
+
+```json
+{ "maxEntry": "0.10", "maxPlatformFeeBps": 250 }
+```
+
+After its `enterBounty` event is confirmed, the response has status `engineering`, an account-private `defender` blueprint, and the exact `build.deadline`. The current escrow provides about three minutes because two minutes remain reserved for result signatures. Practice and validation may now use `bountyId` with that same authenticated account. Submit exactly one final build before the deadline:
+
+```json
+POST /api/attempts/:attemptId/deploy
+{ "blueprint": { "packed": "counter blueprint" } }
+```
+
+The worker validates the locked arena and construction rules, simulates the result, and changes the attempt to `awaiting-signatures`. Never rely on an unrevealed scout summary to construct or practice an exact counter.
+
 ## Official result and exits
 
-An official attempt progresses from `awaiting-signatures` to `ready-to-settle` after two fixed escrow signers attest the exact EIP-712 payload. The browser or any relay wallet then calls the returned `settleAttempt` plan. Poll `GET /api/attempts/:id`.
+An official attempt progresses from `engineering` to `awaiting-signatures`, then `ready-to-settle` after two fixed escrow signers attest the exact EIP-712 payload. The browser or any relay wallet then calls the returned `settleAttempt` plan. `GET /api/attempts/:id` is private to the bounty creator and paid challenger; completed replays are also kept to those parties so they do not reveal a defender to later viewers.
 
 `GET /api/attempts/:id/settlement` provides the current EIP-712 payload for authorized result operators. `POST /api/attempts/:id/attestations` accepts exactly two valid approved signatures; it cannot replace the winner, payout, fee, bounty ID, nonce or result hash. `GET /api/attempts/:id/settlement-plan` returns the direct relay transaction and `POST /api/attempts/:id/settlement-confirm` verifies its on-chain event.
 
