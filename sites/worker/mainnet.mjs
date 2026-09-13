@@ -3476,12 +3476,13 @@ async function finalizeExpiredV3Builds(db) {
 
 // Repair records written by the short-lived server lifecycle that incorrectly
 // marked a defended V3 bounty completed. V3 itself is authoritative: a loss
-// or draw keeps the reward funded and reopens the target for another entry.
+// or draw reopens only a fully funded target; withdrawn or paid rewards stay
+// closed.
 export async function reopenDefendedBounties(db) {
   const rows = (
     await db
       .prepare(
-        "SELECT b.id,a.result FROM bounties b JOIN attempts a ON a.bounty=b.id WHERE b.status='completed' AND b.active_attempt IS NULL AND b.fee_policy_version='pathusd-direct-escrow-v3' AND a.status='settled' AND a.escrow_settlement_tx IS NOT NULL",
+        "SELECT b.id,a.result FROM bounties b JOIN attempts a ON a.bounty=b.id WHERE b.status='completed' AND b.active_attempt IS NULL AND b.winner IS NULL AND b.fee_policy_version='pathusd-direct-escrow-v3' AND b.reserve_units=b.reward_units AND CAST(b.reserve_units AS INTEGER)>0 AND a.status='settled' AND a.escrow_settlement_tx IS NOT NULL",
       )
       .all()
   ).results;

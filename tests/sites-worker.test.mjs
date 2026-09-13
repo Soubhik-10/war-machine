@@ -271,6 +271,32 @@ test("a settled defense reopens the bounty and keeps its reward funded", async (
   assert.equal(reopened.reserve_units, "1000000");
 });
 
+test("a withdrawn, claimed or depleted bounty is never reopened by recovery", async (t) => {
+  const DB = new D1Mock();
+  await DB.migrate();
+  t.after(() => DB.close());
+  const stamp = Date.now();
+  DB.sqlite.exec(`
+    INSERT INTO accounts (id,token_hash,name,balance,created) VALUES ('creator','creator-token','Creator',0,${stamp}),('challenger','challenger-token','Challenger',0,${stamp});
+    INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,entry_units,reward_units,reserve_units,fee_policy_version) VALUES
+      ('depleted','creator','Depleted','{}',0,0,'completed',1,${stamp},${stamp},'10000','1000000','0','pathusd-direct-escrow-v3'),
+      ('claimed','creator','Claimed','{}',0,0,'completed',1,${stamp},${stamp},'10000','1000000','1000000','pathusd-direct-escrow-v3');
+    UPDATE bounties SET winner='paid-attempt' WHERE id='claimed';
+    INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,created,updated,escrow_settlement_tx) VALUES
+      ('depleted-attempt','depleted','challenger','{}',1,'settled','{"outcome":"loss","payoutStatus":"settled-onchain"}',${stamp},${stamp},'0x${"ab".repeat(32)}'),
+      ('claimed-attempt','claimed','challenger','{}',1,'settled','{"outcome":"loss","payoutStatus":"settled-onchain"}',${stamp},${stamp},'0x${"cd".repeat(32)}');
+  `);
+  await reopenDefendedBounties(DB);
+  const states = DB.sqlite
+    .prepare("SELECT id,status FROM bounties ORDER BY id")
+    .all()
+    .map(({ id, status }) => ({ id, status }));
+  assert.deepEqual(states, [
+    { id: "claimed", status: "completed" },
+    { id: "depleted", status: "completed" },
+  ]);
+});
+
 test("the V3 board reset removes only retired V2 bounty records", async (t) => {
   const db = new DatabaseSync(":memory:"),
     migrations = [
