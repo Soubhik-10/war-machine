@@ -46,6 +46,7 @@ import {
 } from "./pathusd.mjs";
 
 const now = () => Date.now(),
+  COMPLETED_BOUNTY_BOARD_MS = 10 * 60 * 1000,
   id = () => crypto.randomUUID(),
   json = (value) => JSON.stringify(value);
 const fail = (status, message) => {
@@ -761,6 +762,10 @@ async function bountyView(db, row, viewer = null, history = false) {
     status: row.status,
     listed: !!row.listed,
     created: row.created,
+    updated: row.updated,
+    completedVisibleUntil: ["completed", "claimed"].includes(row.status)
+      ? Number(row.updated) + COMPLETED_BOUNTY_BOARD_MS
+      : null,
     expires: row.expires || null,
     links: {
       share: "/#bounty=" + row.id,
@@ -3947,11 +3952,13 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       return response({ ok: true });
     }
     if (path === "/api/bounties" && method === "GET") {
+      const completedAfter = now() - COMPLETED_BOUNTY_BOARD_MS,
+        account = auth?.account || "";
       const rows = await db
         .prepare(
-          "SELECT * FROM bounties WHERE ((listed=1 AND status IN ('open','busy')) OR owner=?) AND entry_units IS NOT NULL ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'busy' THEN 1 ELSE 2 END, created DESC LIMIT 100",
+          "SELECT * FROM bounties WHERE entry_units IS NOT NULL AND (owner=? OR (listed=1 AND (status IN ('open','busy') OR (status IN ('completed','claimed') AND updated>=?)))) ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'busy' THEN 1 WHEN 'completed' THEN 2 WHEN 'claimed' THEN 2 ELSE 3 END, updated DESC LIMIT 100",
         )
-        .bind(auth?.account || "")
+        .bind(account, completedAfter)
         .all();
       return response(
         await Promise.all(

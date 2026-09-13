@@ -267,7 +267,7 @@ export function createBountyUI(adapter) {
       {
         busy: "IN TRIAL",
         completed: "COMPLETED",
-        claimed: "CLAIMED",
+        claimed: "REWARD PAID",
         cancelled: "DELETED",
         expired: "EXPIRED",
       }[s] || s.toUpperCase();
@@ -394,10 +394,11 @@ export function createBountyUI(adapter) {
   function card(b) {
     const s = scout(b),
       a = bountyArena(b),
+      complete = ["completed", "claimed"].includes(b.status),
       fee = b.platformFeeBps
         ? `${money(b.payout)} winner payout · ${money(b.platformFeeBps / 100)}% platform fee`
         : `${money(b.payout)} winner payout · legacy terms / no platform fee`;
-    return `<article class="contract-card"><div class="contract-card-top">${status(b.status)}<small>${b.status === "completed" ? "ONE TRIAL FINISHED" : b.listed ? "OPEN BOUNTY" : "UNLISTED LINK"}</small></div><div class="contract-preview">${b.blueprint ? `<canvas data-contract-thumb="${b.id}" width="300" height="260" aria-label="Defender machine"></canvas>` : sealedPreview(b)}<span class="contract-reward"><b>${money(b.reward)}</b><small>GROSS REWARD</small></span></div><div class="contract-content"><h2>${esc(b.title)}</h2><p>${esc(a.name)} · ${s.cost} build credits · ${s.mass} t · ${s.parts} fitted parts + core</p>${terrain(a)}<div class="contract-class">${esc(rulesLabel(bountyRules(b)))}</div><p class="card-fee">${fee}</p><div class="contract-footer"><span><b>${b.entry}</b> entry · ${b.attempts} trials</span><button data-contract="${b.id}">${b.blueprint ? "Inspect bounty" : "Scout bounty"} ↗</button></div></div></article>`;
+    return `<article class="contract-card"><div class="contract-card-top">${status(b.status)}<small>${complete ? "REPLAY & RESULT · 10 MINUTES" : b.listed ? "OPEN BOUNTY" : "UNLISTED LINK"}</small></div><div class="contract-preview">${b.blueprint ? `<canvas data-contract-thumb="${b.id}" width="300" height="260" aria-label="Defender machine"></canvas>` : sealedPreview(b)}<span class="contract-reward"><b>${money(b.reward)}</b><small>GROSS REWARD</small></span></div><div class="contract-content"><h2>${esc(b.title)}</h2><p>${esc(a.name)} · ${s.cost} build credits · ${s.mass} t · ${s.parts} fitted parts + core</p>${terrain(a)}<div class="contract-class">${esc(rulesLabel(bountyRules(b)))}</div><p class="card-fee">${fee}</p><div class="contract-footer"><span><b>${b.entry}</b> entry · ${b.attempts} trials</span><button data-contract="${b.id}">${complete ? "Watch result" : b.blueprint ? "Inspect bounty" : "Scout bounty"} ↗</button></div></div></article>`;
   }
   async function open(id) {
     const g = begin();
@@ -548,8 +549,10 @@ export function createBountyUI(adapter) {
             : "";
     const completionNotice =
         b.status === "completed"
-          ? `<div class="notice fee-disclosure"><strong>Completed.</strong> This bounty has finished its one official trial and is no longer available to enter. Its unclaimed reward remains in escrow until the creator returns it.</div>`
-          : "",
+          ? `<div class="notice fee-disclosure"><strong>Completed.</strong> The defense held, so the reward remains available for the creator to return. This replay and result stay on the board for 10 minutes.</div>`
+          : b.status === "claimed"
+            ? `<div class="notice fee-disclosure"><strong>Reward paid.</strong> The challenger won and the escrow sent the payout. This replay and result stay on the board for 10 minutes.</div>`
+            : "",
       returnAction =
         own && ["open", "completed"].includes(b.status)
           ? `<button id="cancel-contract">${b.status === "completed" ? "Return unclaimed reward" : "Delete bounty"} · return ${b.reward} ${runtime.currency}</button>`
@@ -791,10 +794,10 @@ export function createBountyUI(adapter) {
   }
   async function deployCounter(id, savedBlueprint) {
     const a = await api("/attempts/" + id);
-    if (a.status !== "engineering")
-      throw Error(
-        "This counter can no longer be changed. Reopen the attempt for its latest status.",
-      );
+    if (a.status !== "engineering") {
+      await attempt(a.id);
+      return;
+    }
     if (!a.defender)
       throw Error(
         "The paid defender reveal is unavailable. Reopen this attempt with the wallet that paid the entry.",
@@ -802,13 +805,25 @@ export function createBountyUI(adapter) {
     const source = savedBlueprint
         ? unpackChallenge(savedBlueprint, true)
         : adapter.getBuild(),
-      blueprint = packChallenge(source.machine, a.defender.a, 0, a.defender.q),
+      blueprint = packChallenge(source.machine, a.defender.a, 0, a.defender.q);
+    let deployed;
+    try {
       deployed = await api(
         "/attempts/" + a.id + "/deploy",
         "POST",
         { blueprint },
         uid(),
       );
+    } catch (error) {
+      if (
+        error.status === 409 &&
+        /already deployed|different committed counter/i.test(error.message)
+      ) {
+        await attempt(a.id);
+        return;
+      }
+      throw error;
+    }
     await attempt(deployed.id);
   }
   async function attempt(id) {
@@ -831,6 +846,33 @@ export function createBountyUI(adapter) {
           "This replay belongs to an archived engine version; its receipt remains available.",
         );
       adapter.replay(a, await api("/bounties/" + a.bounty));
+    }
+    async function autoplayOfficialReplay(a) {
+      if (!a.replay || !["win", "loss", "draw"].includes(a.result?.outcome))
+        return false;
+      const replayKey =
+        "wm-watched-official-replay-" +
+        a.id +
+        ":" +
+        (a.escrowSettlement?.resultHash ||
+          a.result?.settlement?.resultHash ||
+          "result");
+      try {
+        if (sessionStorage.getItem(replayKey) === "1") return false;
+        sessionStorage.setItem(replayKey, "1");
+      } catch {
+        // Private browsing may deny session storage. The replay can still run.
+      }
+      try {
+        await watchOfficialReplay(a);
+        return true;
+      } catch (error) {
+        try {
+          sessionStorage.removeItem(replayKey);
+        } catch {}
+        adapter.toast(error.message || "The official replay is unavailable.");
+        return false;
+      }
     }
     async function poll() {
       try {
@@ -906,26 +948,7 @@ export function createBountyUI(adapter) {
             ready = a.status === "ready-to-settle",
             timeoutFinalizerReady =
               Number(a.escrowAttemptDeadline || 0) <= Date.now();
-          const replayKey =
-            "wm-watched-official-replay-" +
-            a.id +
-            ":" +
-            (s?.resultHash || r?.settlement?.resultHash || "result");
-          if (
-            a.replay &&
-            ["win", "loss", "draw"].includes(r?.outcome) &&
-            sessionStorage.getItem(replayKey) !== "1"
-          ) {
-            sessionStorage.setItem(replayKey, "1");
-            try {
-              await watchOfficialReplay(a);
-              return;
-            } catch (error) {
-              adapter.toast(
-                error.message || "The official replay is unavailable.",
-              );
-            }
-          }
+          if (await autoplayOfficialReplay(a)) return;
           app.innerHTML =
             header(
               "OFFICIAL RESULT.",
@@ -947,6 +970,7 @@ export function createBountyUI(adapter) {
           schedule(poll, g, a.payment?.state === "timeout" ? 15000 : 2500);
           return;
         }
+        if (await autoplayOfficialReplay(a)) return;
         const r = a.result,
           won = r?.outcome === "win",
           technical = r?.outcome === "technical-refund";

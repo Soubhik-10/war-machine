@@ -484,6 +484,8 @@ test("official bounty trials replay before the signing result is shown", async (
   ]);
   assert.match(client, /wm-watched-official-replay-/);
   assert.match(client, /await watchOfficialReplay\(a\);/);
+  assert.match(client, /async function autoplayOfficialReplay\(a\)/);
+  assert.match(client, /if \(await autoplayOfficialReplay\(a\)\) return;/);
   assert.match(client, /id="watch-official-replay"/);
   assert.match(client, /Use a saved build/);
   assert.match(client, /data-deploy-build/);
@@ -491,6 +493,20 @@ test("official bounty trials replay before the signing result is shown", async (
   assert.match(app, /bountyUI\.attempt\(officialAttemptId\)/);
   assert.match(app, /deploy-official-counter/);
   assert.match(app, /bountyUI\.deploy\(bountyContext\.attemptId\)/);
+});
+
+test("completed paid bounties retain a public replay window", async () => {
+  const [workerSource, client] = await Promise.all([
+    readFile(new URL("../sites/worker/mainnet.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../dist/bounties.mjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(workerSource, /COMPLETED_BOUNTY_BOARD_MS = 10 \* 60 \* 1000/);
+  assert.match(
+    workerSource,
+    /status IN \('completed','claimed'\) AND updated>=\?/,
+  );
+  assert.match(client, /REPLAY & RESULT · 10 MINUTES/);
+  assert.match(client, /REWARD PAID/);
 });
 
 test("paid bounty creation does not accept funds without automatic settlement", async (t) => {
