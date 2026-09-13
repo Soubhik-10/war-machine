@@ -72,11 +72,16 @@ class D1Mock {
         "utf8",
       ),
     );
-    this.sqlite.exec(await readFile(new URL('../drizzle/0005_automatic_settlement.sql', import.meta.url), 'utf8'));
     this.sqlite.exec(
       await readFile(
-        new URL('../drizzle/0006_reset_bounty_board_v3.sql', import.meta.url),
-        'utf8',
+        new URL("../drizzle/0005_automatic_settlement.sql", import.meta.url),
+        "utf8",
+      ),
+    );
+    this.sqlite.exec(
+      await readFile(
+        new URL("../drizzle/0006_reset_bounty_board_v3.sql", import.meta.url),
+        "utf8",
       ),
     );
   }
@@ -273,7 +278,12 @@ test("the V3 board reset removes only retired V2 bounty records", async (t) => {
     ];
   t.after(() => db.close());
   for (const filename of migrations)
-    db.exec(await readFile(new URL(`../drizzle/${filename}`, import.meta.url), "utf8"));
+    db.exec(
+      await readFile(
+        new URL(`../drizzle/${filename}`, import.meta.url),
+        "utf8",
+      ),
+    );
   db.exec(`
     INSERT INTO accounts (id,token_hash,name,balance,created) VALUES ('owner','owner-token','Owner',0,1),('challenger','challenger-token','Challenger',0,1);
     INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,fee_policy_version) VALUES
@@ -300,8 +310,14 @@ test("the V3 board reset removes only retired V2 bounty records", async (t) => {
     "settlement_jobs",
     "idempotency",
   ])
-    assert.equal(db.prepare(`SELECT COUNT(*) AS total FROM ${table}`).get().total, 0);
-  assert.equal(db.prepare("SELECT COUNT(*) AS total FROM bounties").get().total, 1);
+    assert.equal(
+      db.prepare(`SELECT COUNT(*) AS total FROM ${table}`).get().total,
+      0,
+    );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS total FROM bounties").get().total,
+    1,
+  );
   assert.equal(
     db.prepare("SELECT id FROM bounties").get().id,
     "current-bounty",
@@ -410,6 +426,8 @@ test("browser wallet client uses Tempo Wallet rather than an injected provider",
   );
   assert.match(source, /feeToken,/);
   assert.match(source, /calls\.push\(plan\.approval\)/);
+  assert.match(source, /return hash;/);
+  assert.doesNotMatch(source, /eth_getTransactionReceipt/);
   assert.match(source, /method: "wallet_disconnect"/);
   assert.match(source, /walletProvider\?\.store\?\.disconnect\?\.\(\)/);
   assert.match(source, /headers: \{ "Content-Type": "application\/json" \}/);
@@ -425,6 +443,10 @@ test("paid bounty actions establish a Tempo session only when payment starts", a
   assert.match(source, /await ensurePaidWalletSession\(\);/);
   assert.match(source, /runtime\.paid \|\| me \? create\(\) : profile\(\)/);
   assert.match(source, /!runtime\.paid && !me/);
+  assert.match(source, /OUTBOX_VERSION = 3/);
+  assert.match(source, /async function confirmDirectIntent\(request\)/);
+  assert.match(source, /request\.intentId && request\.transactionHash/);
+  assert.match(source, /Discard request/);
 });
 
 test("official bounty trials replay before the signing result is shown", async () => {
@@ -557,7 +579,11 @@ test("paid bounty creation does not accept funds without automatic settlement", 
   );
   assert.equal(paused.status, 503, JSON.stringify(paused.body));
   assert.match(paused.body.error, /WM_SETTLEMENT_PRIVATE_KEY/i);
-  assert.equal(DB.sqlite.prepare("SELECT COUNT(*) AS total FROM payment_holds").get().total, 0);
+  assert.equal(
+    DB.sqlite.prepare("SELECT COUNT(*) AS total FROM payment_holds").get()
+      .total,
+    0,
+  );
 });
 
 test("a fully populated legacy custody configuration still cannot issue a payment challenge or hold funds", async (t) => {

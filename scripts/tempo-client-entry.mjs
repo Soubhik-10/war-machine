@@ -8,7 +8,6 @@ let walletProvider = null;
 
 const chainId = () => discovery?.payments?.chainId ?? 4217;
 const chainHex = () => `0x${chainId().toString(16)}`;
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function wallet() {
   // Tempo's postMessage connector opens wallet.tempo.xyz. It deliberately does
@@ -105,23 +104,10 @@ async function sendDirect(selected, calls) {
   });
   if (typeof hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(hash))
     throw Error("Tempo Wallet did not return a transaction hash.");
-  for (let attempt = 0; attempt < 90; attempt++) {
-    const receipt = await wallet().request({
-      method: "eth_getTransactionReceipt",
-      params: [hash],
-    });
-    if (receipt) {
-      if (receipt.status !== "0x1")
-        throw Error(
-          "The escrow transaction reverted. No bounty change was made.",
-        );
-      return hash;
-    }
-    await wait(1000);
-  }
-  throw Error(
-    "The transaction is still confirming. Use Recover request; do not submit it again.",
-  );
+  // Persist the transaction hash before waiting for chain finality. The game
+  // server confirms the receipt and escrow event, so returning immediately
+  // makes reload/recovery reliable even when a wallet or RPC is slow.
+  return hash;
 }
 
 export async function executeEscrowPlan(plan) {

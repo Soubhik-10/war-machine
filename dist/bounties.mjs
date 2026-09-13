@@ -1,4 +1,8 @@
-import { paymentPanel, paymentStatus, transactionLink } from './payment-status.mjs';
+import {
+  paymentPanel,
+  paymentStatus,
+  transactionLink,
+} from "./payment-status.mjs";
 import {
   ARENAS,
   TERRAIN_INFO,
@@ -38,6 +42,30 @@ const read = (key, fallback) => {
   }
 };
 const save = (key, value) => localStorage.setItem(key, JSON.stringify(value));
+const OUTBOX_KEY = "wm-sandbox-outbox";
+const OUTBOX_VERSION = 3;
+const validHash = (value) =>
+  typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
+function clearOutbox() {
+  localStorage.removeItem(OUTBOX_KEY);
+}
+function pendingOutbox() {
+  const value = read(OUTBOX_KEY, null);
+  const valid =
+    value &&
+    value.version === OUTBOX_VERSION &&
+    typeof value.path === "string" &&
+    /^\/bounties(?:\/|$)/.test(value.path) &&
+    value.body &&
+    typeof value.body === "object" &&
+    !Array.isArray(value.body) &&
+    typeof value.key === "string" &&
+    (!value.intentId || typeof value.intentId === "string") &&
+    (!value.transactionHash || validHash(value.transactionHash));
+  if (!valid && value) clearOutbox();
+  return valid ? value : null;
+}
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const shortAddress = (value) =>
   value && value.length > 10
     ? value.slice(0, 6) + "…" + value.slice(-4)
@@ -125,12 +153,41 @@ export function createBountyUI(adapter) {
       throw Error("Tempo Wallet did not complete the bounty identity check.");
     return me;
   }
+  function retryableConfirmation(error) {
+    return (
+      error?.status === 409 &&
+      /not confirmed yet|awaiting finality|awaiting canonical finality/i.test(
+        error.message,
+      )
+    );
+  }
+  async function confirmDirectIntent(request) {
+    let lastError;
+    // Tempo returns a transaction hash before the receipt reaches finality.
+    // Give the chain a short, automatic confirmation window before exposing
+    // the durable Recover action.
+    for (let attempt = 0; attempt < 30; attempt++) {
+      try {
+        return await api(
+          "/escrow/intents/" + request.intentId + "/confirm",
+          "POST",
+          { transactionHash: request.transactionHash },
+          request.key,
+        );
+      } catch (error) {
+        lastError = error;
+        if (!retryableConfirmation(error) || attempt === 29) throw error;
+        await wait(1000);
+      }
+    }
+    throw lastError;
+  }
   async function mutate(path, body) {
     // A direct payment needs a signed owner identity to bind the paid reveal,
     // refunds and winner payout. Connect it only when the player starts a
     // payment action; saved builds and history remain an optional account view.
     await ensurePaidWalletSession();
-    const pending = read("wm-sandbox-outbox", null);
+    const pending = pendingOutbox();
     if (
       pending &&
       (pending.path !== path ||
@@ -139,42 +196,46 @@ export function createBountyUI(adapter) {
       throw Error(
         "An earlier request needs recovery. Open the bounty board and choose Recover request.",
       );
-    const request = pending || { path, body, key: uid() };
-    save("wm-sandbox-outbox", request);
+    const request = pending || {
+      version: OUTBOX_VERSION,
+      path,
+      body,
+      key: uid(),
+    };
+    save(OUTBOX_KEY, request);
     try {
       let prepared;
+      if (request.intentId && request.transactionHash) {
+        const confirmed = await confirmDirectIntent(request);
+        clearOutbox();
+        return confirmed;
+      }
       if (request.intentId) {
         prepared = await api(path, "POST", body, request.key);
         if (prepared.final) {
-          localStorage.removeItem("wm-sandbox-outbox");
+          clearOutbox();
           return prepared.value;
         }
       } else {
         prepared = await api(path, "POST", body, request.key);
         if (!prepared.direct) {
-          localStorage.removeItem("wm-sandbox-outbox");
+          clearOutbox();
           return prepared;
         }
         request.intentId = prepared.intentId;
-        save("wm-sandbox-outbox", request);
+        save(OUTBOX_KEY, request);
       }
       if (!request.transactionHash) {
         request.transactionHash = await tempoClient.executeEscrowPlan(
           prepared.plan,
         );
-        save("wm-sandbox-outbox", request);
+        save(OUTBOX_KEY, request);
       }
-      const confirmed = await api(
-        "/escrow/intents/" + request.intentId + "/confirm",
-        "POST",
-        { transactionHash: request.transactionHash },
-        request.key,
-      );
-      localStorage.removeItem("wm-sandbox-outbox");
+      const confirmed = await confirmDirectIntent(request);
+      clearOutbox();
       return confirmed;
     } catch (e) {
-      if (!request.intentId && e.status && e.status < 500)
-        localStorage.removeItem("wm-sandbox-outbox");
+      if (!request.intentId && e.status && e.status < 500) clearOutbox();
       throw e;
     }
   }
@@ -194,13 +255,14 @@ export function createBountyUI(adapter) {
     }, delay);
   }
   function status(s) {
-    const label = {
-      busy: "IN TRIAL",
-      completed: "COMPLETED",
-      claimed: "CLAIMED",
-      cancelled: "DELETED",
-      expired: "EXPIRED",
-    }[s] || s.toUpperCase();
+    const label =
+      {
+        busy: "IN TRIAL",
+        completed: "COMPLETED",
+        claimed: "CLAIMED",
+        cancelled: "DELETED",
+        expired: "EXPIRED",
+      }[s] || s.toUpperCase();
     return `<span class="contract-status ${s}">${esc(label)}</span>`;
   }
   function header(title, subtitle) {
@@ -220,7 +282,8 @@ export function createBountyUI(adapter) {
         : runtime.mode === "tempo-mainnet"
           ? "MAINNET SETUP"
           : "SANDBOX SEASON";
-    return `<div class="page-heading bounty-heading"><div><span class="eyebrow">FOUNDRY BOUNTIES / ${season}</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><button id="contracts-home">All bounties</button>${me ? '<button id="build-vault">Build vault</button>' : ""}<button id="credits-btn" title="${esc(walletTitle)}" aria-label="${esc(walletTitle ? "Connected Tempo Wallet " + walletTitle : account)}">${esc(account)}</button>${runtime.paid && me ? '<button id="disconnect-wallet" class="danger" title="Clear this browser’s Tempo Wallet connection">Disconnect</button>' : ""}</div></div>${read("wm-sandbox-outbox", null) ? '<div class="notice">A request was interrupted. Its idempotency key is saved. <button id="recover-request">Recover request</button></div>' : ""}`;
+    const pending = pendingOutbox();
+    return `<div class="page-heading bounty-heading"><div><span class="eyebrow">FOUNDRY BOUNTIES / ${season}</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><button id="contracts-home">All bounties</button>${me ? '<button id="build-vault">Build vault</button>' : ""}<button id="credits-btn" title="${esc(walletTitle)}" aria-label="${esc(walletTitle ? "Connected Tempo Wallet " + walletTitle : account)}">${esc(account)}</button>${runtime.paid && me ? '<button id="disconnect-wallet" class="danger" title="Clear this browser’s Tempo Wallet connection">Disconnect</button>' : ""}</div></div>${pending ? `<div class="notice">A payment request was interrupted. ${pending.transactionHash ? "The same transaction will be confirmed; no new wallet payment is sent." : "Your request can be resumed with its saved idempotency key."} <button id="recover-request">Recover request</button><button id="discard-request">Discard request</button></div>` : ""}`;
   }
   function wireHeader() {
     if ($("#contracts-home")) $("#contracts-home").onclick = () => open();
@@ -232,12 +295,22 @@ export function createBountyUI(adapter) {
     if ($("#recover-request"))
       $("#recover-request").onclick = () =>
         act($("#recover-request"), async () => {
-          const p = read("wm-sandbox-outbox", null),
-            r = await mutate(p.path, p.body);
+          const p = pendingOutbox();
+          if (!p)
+            throw Error("That interrupted request is no longer available.");
+          const r = await mutate(p.path, p.body);
           await refreshMe();
           if (p.path.endsWith("/attempts")) await attempt(r.id);
           else await open(r.id);
         });
+    if ($("#discard-request"))
+      $("#discard-request").onclick = () => {
+        clearOutbox();
+        adapter.toast(
+          "Interrupted request discarded. No wallet transaction was sent.",
+        );
+        void open();
+      };
   }
   async function act(button, fn) {
     if (button) button.disabled = true;
@@ -478,7 +551,7 @@ export function createBountyUI(adapter) {
         revealed ? "ENGINEER THE COUNTER." : "SCOUT THE TARGET.",
         esc(b.title),
       ) +
-       `<div class="contract-detail"><section class="panel defender-card"><div class="contract-card-top">${status(b.status)}<small>${b.status === "completed" ? "UNCLAIMED REWARD RESERVED" : b.funded ? "REWARD RESERVED" : "BOUNTY CLOSED"}</small></div>${preview}<div class="defender-caption">${defenderCaption}</div><div class="bounty-actions">${defenderActions}<button id="copy-contract">↗ Copy bounty link</button><button id="save-contract">${savedIds.has(b.id) ? "★ Saved bounty" : "☆ Save bounty"}</button>${navigator.share ? '<button id="native-share-contract">Share…</button>' : ""}</div></section><section class="panel contract-terms"><span class="eyebrow">${esc(b.ownerName)} / BOUNTY TERMS</span><h2>${esc(b.title)}</h2><div class="contract-economy"><div><b>${money(b.reward)}</b><small>GROSS REWARD</small></div><div><b>${money(b.entry)}</b><small>ENTRY COST</small></div><div><b>${signed(b.netIfWin)}</b><small>NET AFTER ALL FEES</small></div></div>${feeNotice(b)}${completionNotice}<div class="contract-rule"><strong>${esc(a.name)}</strong><p>${esc(a.desc)}</p>${terrain(a)}</div><div class="contract-rule"><strong>${esc(rulesLabel(lockedRules))}</strong><p>Locked for both machines. Autonomous combat · 100 seconds · one official attempt at a time.</p></div><div class="contract-rule"><strong>Your counter: ${esc(draft.machine.name)}</strong><p>${counterStatus}</p></div>${revealed ? `<div class="bounty-actions"><button id="refit-counter" ${!b.compatible ? "disabled" : ""}>Refit counter</button><button id="free-practice" ${issues.length || !b.compatible ? "disabled" : ""}>Free practice</button></div>` : ""}${entryAction}${!runtime.paid && !me ? '<button id="join-profile">Sign in to enter this sandbox bounty</button>' : ""}<p class="hint">${revealed ? "You hold a paid reveal for this bounty. Free practice never transfers funds." : runtime.paid && !runtime.acceptingNewBounties ? runtime.settlementReason : runtime.paid ? "Any Tempo Wallet can pay this entry. One confirmation atomically approves pathUSD if needed and enters the escrow, then reveals the exact defender and starts your timed counter-build window." : "The entry is sent directly to the verified escrow. After confirmation, you get the exact defender and a timed counter-build window. A loss sends the entry to the creator; a technical refund returns it."} ${own ? "You cannot claim your own reward." : ""}</p><p class="error-message" id="bounty-error">${!b.compatible ? "This engine version is archived. Its receipt remains available, but current-engine practice is unavailable." : ""}</p><p class="contract-expiry">${b.expires ? "Expires " + time(b.expires) : "No deadline · until claimed or closed"} · ${b.attempts} attempts<br>${b.listed ? "Visible on the board" : "Unlisted: anyone with the link can scout and pay the posted entry."}</p>${returnAction}${me && isExpired && ["open", "busy"].includes(b.status) ? '<button id="expire-contract">Settle expiry onchain</button>' : ""}</section></div><section class="panel contract-history"><h3>Verified attempts</h3>${b.history.length ? b.history.map((a) => (revealed ? `<button data-attempt="${a.id}" class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : "REFUNDED"}</span><small>${time(a.created)}</small><strong>${a.result?.time ? Number(a.result.time).toFixed(1) + "s" : "Technical refund"} ↗</strong></button>` : `<div class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : "REFUNDED"}</span><small>${time(a.created)}</small><strong>Defender replay sealed</strong></div>`)).join("") : "<p>No completed official trials yet. Be the first to test this defense.</p>"}</section>`;
+      `<div class="contract-detail"><section class="panel defender-card"><div class="contract-card-top">${status(b.status)}<small>${b.status === "completed" ? "UNCLAIMED REWARD RESERVED" : b.funded ? "REWARD RESERVED" : "BOUNTY CLOSED"}</small></div>${preview}<div class="defender-caption">${defenderCaption}</div><div class="bounty-actions">${defenderActions}<button id="copy-contract">↗ Copy bounty link</button><button id="save-contract">${savedIds.has(b.id) ? "★ Saved bounty" : "☆ Save bounty"}</button>${navigator.share ? '<button id="native-share-contract">Share…</button>' : ""}</div></section><section class="panel contract-terms"><span class="eyebrow">${esc(b.ownerName)} / BOUNTY TERMS</span><h2>${esc(b.title)}</h2><div class="contract-economy"><div><b>${money(b.reward)}</b><small>GROSS REWARD</small></div><div><b>${money(b.entry)}</b><small>ENTRY COST</small></div><div><b>${signed(b.netIfWin)}</b><small>NET AFTER ALL FEES</small></div></div>${feeNotice(b)}${completionNotice}<div class="contract-rule"><strong>${esc(a.name)}</strong><p>${esc(a.desc)}</p>${terrain(a)}</div><div class="contract-rule"><strong>${esc(rulesLabel(lockedRules))}</strong><p>Locked for both machines. Autonomous combat · 100 seconds · one official attempt at a time.</p></div><div class="contract-rule"><strong>Your counter: ${esc(draft.machine.name)}</strong><p>${counterStatus}</p></div>${revealed ? `<div class="bounty-actions"><button id="refit-counter" ${!b.compatible ? "disabled" : ""}>Refit counter</button><button id="free-practice" ${issues.length || !b.compatible ? "disabled" : ""}>Free practice</button></div>` : ""}${entryAction}${!runtime.paid && !me ? '<button id="join-profile">Sign in to enter this sandbox bounty</button>' : ""}<p class="hint">${revealed ? "You hold a paid reveal for this bounty. Free practice never transfers funds." : runtime.paid && !runtime.acceptingNewBounties ? runtime.settlementReason : runtime.paid ? "Any Tempo Wallet can pay this entry. One confirmation atomically approves pathUSD if needed and enters the escrow, then reveals the exact defender and starts your timed counter-build window." : "The entry is sent directly to the verified escrow. After confirmation, you get the exact defender and a timed counter-build window. A loss sends the entry to the creator; a technical refund returns it."} ${own ? "You cannot claim your own reward." : ""}</p><p class="error-message" id="bounty-error">${!b.compatible ? "This engine version is archived. Its receipt remains available, but current-engine practice is unavailable." : ""}</p><p class="contract-expiry">${b.expires ? "Expires " + time(b.expires) : "No deadline · until claimed or closed"} · ${b.attempts} attempts<br>${b.listed ? "Visible on the board" : "Unlisted: anyone with the link can scout and pay the posted entry."}</p>${returnAction}${me && isExpired && ["open", "busy"].includes(b.status) ? '<button id="expire-contract">Settle expiry onchain</button>' : ""}</section></div><section class="panel contract-history"><h3>Verified attempts</h3>${b.history.length ? b.history.map((a) => (revealed ? `<button data-attempt="${a.id}" class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : "REFUNDED"}</span><small>${time(a.created)}</small><strong>${a.result?.time ? Number(a.result.time).toFixed(1) + "s" : "Technical refund"} ↗</strong></button>` : `<div class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : "REFUNDED"}</span><small>${time(a.created)}</small><strong>Defender replay sealed</strong></div>`)).join("") : "<p>No completed official trials yet. Be the first to test this defense.</p>"}</section>`;
     if (revealed) thumb($("#defender-preview"), b.blueprint);
     wireHeader();
     if ($("#refit-counter"))
@@ -543,7 +616,9 @@ export function createBountyUI(adapter) {
       $("#cancel-contract").onclick = (e) =>
         act(e.currentTarget, async () => {
           await mutate("/bounties/" + b.id + "/cancel", {});
-          adapter.toast("Bounty deleted. The unused reward returned to your wallet.");
+          adapter.toast(
+            "Bounty deleted. The unused reward returned to your wallet.",
+          );
           await open();
         });
     if ($("#expire-contract"))
@@ -774,9 +849,15 @@ export function createBountyUI(adapter) {
               "The paid defender reveal is unavailable. Reopen this attempt with the wallet that paid the entry.",
             );
           if (!seconds) {
-            app.innerHTML = header('ENGINEERING WINDOW CLOSED.', 'No counter was deployed before the deadline.') + paymentPanel(a) + '<button id="pending-contract">View bounty</button>';
+            app.innerHTML =
+              header(
+                "ENGINEERING WINDOW CLOSED.",
+                "No counter was deployed before the deadline.",
+              ) +
+              paymentPanel(a) +
+              '<button id="pending-contract">View bounty</button>';
             wireHeader();
-            $('#pending-contract').onclick = () => open(a.bounty);
+            $("#pending-contract").onclick = () => open(a.bounty);
             schedule(poll, g, 5000);
             return;
           }
@@ -837,13 +918,25 @@ export function createBountyUI(adapter) {
               );
             }
           }
-          app.innerHTML = header('OFFICIAL RESULT.', 'Your settlement continues automatically.') + paymentPanel(a) +
-            '<section class="panel trial-wait"><h2>' + esc(r?.outcome?.toUpperCase() || 'RESULT RECORDED') + '</h2><div class="bounty-actions">' +
-            (a.replay ? '<button id="watch-official-replay">Watch exact battle</button>' : '') + '<button id="pending-contract">View bounty</button></div></section>';
+          app.innerHTML =
+            header(
+              "OFFICIAL RESULT.",
+              "Your settlement continues automatically.",
+            ) +
+            paymentPanel(a) +
+            '<section class="panel trial-wait"><h2>' +
+            esc(r?.outcome?.toUpperCase() || "RESULT RECORDED") +
+            '</h2><div class="bounty-actions">' +
+            (a.replay
+              ? '<button id="watch-official-replay">Watch exact battle</button>'
+              : "") +
+            '<button id="pending-contract">View bounty</button></div></section>';
           wireHeader();
-          $('#pending-contract').onclick = () => open(a.bounty);
-          if ($('#watch-official-replay')) $('#watch-official-replay').onclick = e => act(e.currentTarget, () => watchOfficialReplay(a));
-          schedule(poll, g, a.payment?.state === 'timeout' ? 15000 : 2500);
+          $("#pending-contract").onclick = () => open(a.bounty);
+          if ($("#watch-official-replay"))
+            $("#watch-official-replay").onclick = (e) =>
+              act(e.currentTarget, () => watchOfficialReplay(a));
+          schedule(poll, g, a.payment?.state === "timeout" ? 15000 : 2500);
           return;
         }
         const r = a.result,
@@ -858,7 +951,8 @@ export function createBountyUI(adapter) {
                 ? "Recorded official result."
                 : "Your entry was returned onchain.",
           ) +
-          paymentPanel(a) + `<section class="panel official-result ${won ? "won" : ""}"><span class="eyebrow">${r?.payoutStatus === "settled-onchain" ? "ESCROW SETTLED" : technical ? "TECHNICAL REFUND" : "ON-CHAIN RESULT"}</span><h2>${won ? "BOUNTY CLAIMED." : technical ? "ENTRY RETURNED." : r?.outcome === "draw" ? "DEFENSE HELD." : r ? "BACK TO THE DRAWING BOARD." : "ENTRY RETURNED."}</h2><div class="contract-economy"><div><b>${r ? (Number(r.net) > 0 ? "+" : "") + r.net : "REFUND"}</b><small>${esc(runtime.currency).toUpperCase()} CHANGE</small></div><div><b>${r?.time ? Number(r.time).toFixed(1) + "s" : "—"}</b><small>TRIAL DURATION</small></div><div><b>${r?.payoutStatus === "settled-onchain" ? "✓" : "—"}</b><small>ESCROW</small></div></div><p>${r?.integrity ? `Your integrity: ${(r.integrity[0] * 100).toFixed(1)}% · Defender: ${(r.integrity[1] * 100).toFixed(1)}%. ${won ? "The payout was sent by the escrow after the 2.5% platform fee." : "The escrow processed this official result."}` : esc(a.error || "No server-side balance was held.")}</p>${r ? `<div class="notice fee-disclosure">Gross reward: ${money(r.grossReward ?? r.reward ?? 0)} · Platform fee: ${money(r.platformFee ?? 0)} (${money((r.platformFeeBps ?? 0) / 100)}% on wins) · Paid to challenger: ${money(r.payout ?? 0)} · Separate entry: ${money(r.entry ?? 0)} ${esc(runtime.currency)}.</div>` : ""}<div class="bounty-actions">${a.replay ? '<button id="verified-replay" class="primary">▶ Watch exact replay</button>' : ""}<button id="result-contract">Back to bounty</button><button id="result-refit">Refit counter</button></div><p class="hint">Attempt ${esc(a.id)} · ${time(a.updated)}<br>The replay reconstructs the committed machine pair, arena, seed and engine release.</p><p id="bounty-error" class="error-message"></p></section>`;
+          paymentPanel(a) +
+          `<section class="panel official-result ${won ? "won" : ""}"><span class="eyebrow">${r?.payoutStatus === "settled-onchain" ? "ESCROW SETTLED" : technical ? "TECHNICAL REFUND" : "ON-CHAIN RESULT"}</span><h2>${won ? "BOUNTY CLAIMED." : technical ? "ENTRY RETURNED." : r?.outcome === "draw" ? "DEFENSE HELD." : r ? "BACK TO THE DRAWING BOARD." : "ENTRY RETURNED."}</h2><div class="contract-economy"><div><b>${r ? (Number(r.net) > 0 ? "+" : "") + r.net : "REFUND"}</b><small>${esc(runtime.currency).toUpperCase()} CHANGE</small></div><div><b>${r?.time ? Number(r.time).toFixed(1) + "s" : "—"}</b><small>TRIAL DURATION</small></div><div><b>${r?.payoutStatus === "settled-onchain" ? "✓" : "—"}</b><small>ESCROW</small></div></div><p>${r?.integrity ? `Your integrity: ${(r.integrity[0] * 100).toFixed(1)}% · Defender: ${(r.integrity[1] * 100).toFixed(1)}%. ${won ? "The payout was sent by the escrow after the 2.5% platform fee." : "The escrow processed this official result."}` : esc(a.error || "No server-side balance was held.")}</p>${r ? `<div class="notice fee-disclosure">Gross reward: ${money(r.grossReward ?? r.reward ?? 0)} · Platform fee: ${money(r.platformFee ?? 0)} (${money((r.platformFeeBps ?? 0) / 100)}% on wins) · Paid to challenger: ${money(r.payout ?? 0)} · Separate entry: ${money(r.entry ?? 0)} ${esc(runtime.currency)}.</div>` : ""}<div class="bounty-actions">${a.replay ? '<button id="verified-replay" class="primary">▶ Watch exact replay</button>' : ""}<button id="result-contract">Back to bounty</button><button id="result-refit">Refit counter</button></div><p class="hint">Attempt ${esc(a.id)} · ${time(a.updated)}<br>The replay reconstructs the committed machine pair, arena, seed and engine release.</p><p id="bounty-error" class="error-message"></p></section>`;
         wireHeader();
         $("#result-contract").onclick = () => open(a.bounty);
         $("#result-refit").onclick = (e) =>
