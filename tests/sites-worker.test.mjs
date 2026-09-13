@@ -446,6 +446,7 @@ test("paid bounty actions establish a Tempo session only when payment starts", a
   assert.match(source, /OUTBOX_VERSION = 3/);
   assert.match(source, /async function confirmDirectIntent\(request\)/);
   assert.match(source, /request\.intentId && request\.transactionHash/);
+  assert.match(source, /prepared\.transactionHash/);
   assert.match(source, /Discard request/);
   assert.match(source, /Tempo RPC/i);
 });
@@ -461,6 +462,19 @@ test("Tempo RPC transport failures remain retry-safe payment errors", async () =
     /Retry the saved request; do not submit another wallet payment/,
   );
   assert.match(source, /error\.status \|\| 503/);
+});
+
+test("direct escrow confirmation durably binds the first wallet transaction", async () => {
+  const source = await readFile(
+    new URL("../sites/worker/mainnet.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /transactionHash: validHash\(hold\.provider_ref\)/);
+  assert.match(
+    source,
+    /UPDATE payment_holds SET provider_ref=\?,updated=\? WHERE id=\? AND status='awaiting-onchain' AND provider_ref IS NULL/,
+  );
+  assert.match(source, /already recovering a different wallet transaction/);
 });
 
 test("official bounty trials replay before the signing result is shown", async () => {

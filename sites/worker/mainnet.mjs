@@ -2234,6 +2234,10 @@ function directPlanFromCreate(config, hold) {
     kind: "create-bounty",
     termsHash: value.termsHash,
     expiresAt: value.expiresAt,
+    // Once a wallet has produced a hash, this same intent is permanently
+    // bound to it. Returning it lets a refresh recover confirmation without
+    // opening the wallet or sending a duplicate funding transaction.
+    transactionHash: validHash(hold.provider_ref) ? hold.provider_ref : null,
     plan: directPlan(config, call, reward),
   };
 }
@@ -2324,6 +2328,7 @@ function directPlanFromEntry(config, hold, row) {
     intentId: hold.id,
     kind: "enter-bounty",
     bounty: row.id,
+    transactionHash: validHash(hold.provider_ref) ? hold.provider_ref : null,
     plan: directPlan(config, call, BigInt(hold.amount_units)),
   };
 }
@@ -2357,6 +2362,35 @@ async function confirmDirectIntent(db, auth, intentId, hash, config) {
     "This escrow intent cannot be confirmed.",
     409,
   );
+  check(validHash(hash), "Transaction hash is invalid.", 400);
+  check(
+    !hold.provider_ref ||
+      hold.provider_ref.toLowerCase() === hash.toLowerCase(),
+    "This bounty request is already recovering a different wallet transaction. Resume the saved request instead of sending another payment.",
+    409,
+  );
+  // Bind the wallet result before looking up its receipt. Receipt RPCs can
+  // briefly fail after Tempo Wallet returns a hash; persisting it first makes
+  // every retry idempotent and prevents a refresh from funding twice.
+  if (!hold.provider_ref) {
+    const claim = await db
+      .prepare(
+        "UPDATE payment_holds SET provider_ref=?,updated=? WHERE id=? AND status='awaiting-onchain' AND provider_ref IS NULL",
+      )
+      .bind(hash, now(), hold.id)
+      .run();
+    if (!claim.meta.changes) {
+      const bound = await db
+        .prepare("SELECT provider_ref FROM payment_holds WHERE id=?")
+        .bind(hold.id)
+        .first();
+      check(
+        bound?.provider_ref?.toLowerCase() === hash.toLowerCase(),
+        "This bounty request is already recovering a different wallet transaction. Resume the saved request instead of sending another payment.",
+        409,
+      );
+    }
+  }
   const receiptValue = await receipt(config, hash),
     saved = parse(hold.body),
     creator = await payoutAddress(db, auth.account);

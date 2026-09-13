@@ -226,6 +226,13 @@ export function createBountyUI(adapter) {
         request.intentId = prepared.intentId;
         save(OUTBOX_KEY, request);
       }
+      // The server may have already bound a submitted wallet hash before an
+      // earlier confirmation was interrupted. Always recover that exact hash;
+      // never ask Tempo Wallet to fund the same request a second time.
+      if (!request.transactionHash && prepared.transactionHash) {
+        request.transactionHash = prepared.transactionHash;
+        save(OUTBOX_KEY, request);
+      }
       if (!request.transactionHash) {
         request.transactionHash = await tempoClient.executeEscrowPlan(
           prepared.plan,
