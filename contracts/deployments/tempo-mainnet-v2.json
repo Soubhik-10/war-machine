@@ -26,5 +26,5 @@
       "0x9fD9719d8DE2f92F49a00068dFEA59006f6FD902"
     ]
   },
-  "applicationStatus": "The public Site pins this escrow address but accepts no paid bounty funds until independently operated result signers are ready."
+  "applicationStatus": "The public Site pins this escrow address and accepts direct wallet bounty funds. Settlement requires both encrypted result signers before the immutable attempt deadline."
 }

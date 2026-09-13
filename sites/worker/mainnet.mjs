@@ -221,8 +221,8 @@ function canonicalBlueprint(input, locked) {
 export function runtimeConfig(env, origin) {
   if (env.WM_MODE !== "tempo-mainnet") return { mode: "demo", enabled: false };
   // Funds never pass through this Worker. The address is pinned to the verified, immutable
-  // deployment rather than accepting an operator-substituted token or custodial recipient.
-  const escrow = "0x461eefD1c4bcbE76C470487cF18b892fCD76d494";
+  // V2 deployment rather than accepting an operator-substituted token or custodial recipient.
+  const escrow = "0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e";
   if (
     String(env.WM_BOUNTY_ESCROW_ADDRESS || "").toLowerCase() !==
     escrow.toLowerCase()
@@ -1480,14 +1480,15 @@ async function attemptView(db, attemptId, viewer) {
       settlementDeadline: Number(bounty.escrow_attempt_deadline || 0),
     };
   }
+  const counterBlueprint = attempt.blueprint ? parse(attempt.blueprint) : null;
   if (
-    attempt.blueprint &&
+    counterBlueprint &&
     (done ||
       ["awaiting-signatures", "ready-to-settle"].includes(attempt.status)) &&
     (challenger || creator)
   )
     value.replay = {
-      challenger: parse(attempt.blueprint),
+      challenger: counterBlueprint,
       defender: parse(bounty.blueprint),
       arena: parse(bounty.blueprint).a,
       seed: attempt.seed,

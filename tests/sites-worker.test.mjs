@@ -118,7 +118,7 @@ test("settlement attestations bind the exact Tempo escrow typed data and canonic
     two = privateKeyToAccount("0x" + "02".repeat(32)),
     config = {
       chainId: 4217,
-      escrowAddress: "0x461eefD1c4bcbE76C470487cF18b892fCD76d494",
+      escrowAddress: "0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e",
     },
     payload = {
       bountyId: "7",
@@ -210,7 +210,7 @@ test("Tempo wallet sign-in verifies an EIP-191 account and issues a session", as
   const env = {
     DB,
     WM_MODE: "tempo-mainnet",
-    WM_BOUNTY_ESCROW_ADDRESS: "0x461eefD1c4bcbE76C470487cF18b892fCD76d494",
+    WM_BOUNTY_ESCROW_ADDRESS: "0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e",
     WM_TEMPO_RPC_URL: "https://tempo-rpc.fixture",
   };
   const challenge = await call(env, "/api/auth/challenge", "POST", {
@@ -341,7 +341,7 @@ test("direct escrow intents bind exact terms to the confirmed create and entry e
   const DB = new D1Mock();
   await DB.migrate();
   t.after(() => DB.close());
-  const escrow = "0x461eefD1c4bcbE76C470487cF18b892fCD76d494",
+  const escrow = "0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e",
     wallet = "0x1111111111111111111111111111111111111111",
     session = "direct-session-token",
     account = "11111111-1111-4111-8111-111111111111",

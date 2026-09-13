@@ -8,7 +8,7 @@ It runs the bundled Worker with D1 binding `DB` and the following live runtime c
 
 ```text
 WM_MODE=tempo-mainnet
-WM_BOUNTY_ESCROW_ADDRESS=0x461eefD1c4bcbE76C470487cF18b892fCD76d494
+WM_BOUNTY_ESCROW_ADDRESS=0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e
 ```
 
 The Worker serves the game, account build vault, bounty metadata, wallet identity flow, direct escrow transaction plans, receipt verification, deterministic simulations, and result-attestation state. It does not store a private key or hold pathUSD.

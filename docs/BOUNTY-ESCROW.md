@@ -4,7 +4,7 @@
 
 The retired v1 escrow remains immutable at [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494). Its historical record remains in [`contracts/deployments/tempo-mainnet.json`](../contracts/deployments/tempo-mainnet.json); do not send it new bounty funds.
 
-The public application prepares direct wallet calls to this escrow and verifies the emitted events. It does not custody player funds or contain settlement private keys. The current tiny-amount trial uses local encrypted result signers; the Site remains paused until those signers are independently operated.
+The public application prepares direct wallet calls to this escrow and verifies the emitted events. It does not custody player funds or contain settlement private keys. Live small-amount trials use the two local encrypted result signers; each completed attempt must receive both signatures before its escrow deadline.
 
 ## Live immutable configuration
 
