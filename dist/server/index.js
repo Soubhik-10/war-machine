@@ -750,6 +750,11 @@ if(document.modelContext?.registerTool){const lifecycle=new AbortController();co
 .profile-form #new-key-result {
   overflow-wrap: anywhere;
 }
+.profile-form #tempo-wallet-login {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
 .agent-row {
   display: flex;
   align-items: center;
