@@ -148,6 +148,18 @@ export async function executeEscrowPlan(plan) {
 }
 
 export async function logout() {
-  await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
-  address = null;
+  // Clear both identities: the site cookie and the persisted Tempo connector
+  // state. `wallet_disconnect` is local to the accounts provider, so it does
+  // not move funds or require an onchain transaction.
+  try {
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+  } finally {
+    try {
+      await walletProvider?.request({ method: "wallet_disconnect" });
+    } catch {
+      // A closed wallet popup must not prevent this browser session clearing.
+    }
+    walletProvider?.store?.disconnect?.();
+    address = null;
+  }
 }

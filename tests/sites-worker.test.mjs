@@ -284,6 +284,8 @@ test("browser wallet client uses Tempo Wallet rather than an injected provider",
   );
   assert.match(source, /feeToken,/);
   assert.match(source, /calls\.push\(plan\.approval\)/);
+  assert.match(source, /method: "wallet_disconnect"/);
+  assert.match(source, /walletProvider\?\.store\?\.disconnect\?\.\(\)/);
   assert.doesNotMatch(source, /window\.ethereum/);
 });
 

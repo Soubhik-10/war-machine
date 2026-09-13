@@ -205,12 +205,15 @@ export function createBountyUI(adapter) {
         : runtime.mode === "tempo-mainnet"
           ? "MAINNET SETUP"
           : "SANDBOX SEASON";
-    return `<div class="page-heading bounty-heading"><div><span class="eyebrow">FOUNDRY BOUNTIES / ${season}</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><button id="contracts-home">All bounties</button>${me ? '<button id="build-vault">Build vault</button>' : ""}<button id="credits-btn" title="${esc(walletTitle)}" aria-label="${esc(walletTitle ? "Connected Tempo Wallet " + walletTitle : account)}">${esc(account)}</button></div></div>${read("wm-sandbox-outbox", null) ? '<div class="notice">A request was interrupted. Its idempotency key is saved. <button id="recover-request">Recover request</button></div>' : ""}`;
+    return `<div class="page-heading bounty-heading"><div><span class="eyebrow">FOUNDRY BOUNTIES / ${season}</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><button id="contracts-home">All bounties</button>${me ? '<button id="build-vault">Build vault</button>' : ""}<button id="credits-btn" title="${esc(walletTitle)}" aria-label="${esc(walletTitle ? "Connected Tempo Wallet " + walletTitle : account)}">${esc(account)}</button>${runtime.paid && me ? '<button id="disconnect-wallet" class="danger" title="Clear this browser’s Tempo Wallet connection">Disconnect</button>' : ""}</div></div>${read("wm-sandbox-outbox", null) ? '<div class="notice">A request was interrupted. Its idempotency key is saved. <button id="recover-request">Recover request</button></div>' : ""}`;
   }
   function wireHeader() {
     if ($("#contracts-home")) $("#contracts-home").onclick = () => open();
     if ($("#build-vault")) $("#build-vault").onclick = vault;
     if ($("#credits-btn")) $("#credits-btn").onclick = profile;
+    if ($("#disconnect-wallet"))
+      $("#disconnect-wallet").onclick = (e) =>
+        act(e.currentTarget, () => disconnectWallet());
     if ($("#recover-request"))
       $("#recover-request").onclick = () =>
         act($("#recover-request"), async () => {
@@ -250,6 +253,12 @@ export function createBountyUI(adapter) {
         // The address remains visible if a public RPC is briefly unavailable.
       }
     return me;
+  }
+  async function disconnectWallet(returnId) {
+    await tempoClient.logout();
+    me = null;
+    walletBalance = null;
+    await open(returnId);
   }
   function thumb(canvas, packed) {
     adapter.thumbnail(canvas, unpackChallenge(packed, true).machine);
@@ -936,9 +945,7 @@ export function createBountyUI(adapter) {
       $("#open-history").onclick = history;
       $("#tempo-wallet-logout").onclick = (e) =>
         act(e.currentTarget, async () => {
-          await tempoClient.logout();
-          me = null;
-          await open(returnId);
+          await disconnectWallet(returnId);
         });
       return;
     }
