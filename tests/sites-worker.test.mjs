@@ -73,6 +73,12 @@ class D1Mock {
       ),
     );
     this.sqlite.exec(await readFile(new URL('../drizzle/0005_automatic_settlement.sql', import.meta.url), 'utf8'));
+    this.sqlite.exec(
+      await readFile(
+        new URL('../drizzle/0006_reset_bounty_board_v3.sql', import.meta.url),
+        'utf8',
+      ),
+    );
   }
   close() {
     this.sqlite.close();
@@ -253,6 +259,53 @@ test("a settled defense completes the bounty and preserves its returnable reward
     .get("completed-bounty");
   assert.equal(completed.status, "completed");
   assert.equal(completed.reserve_units, "1000000");
+});
+
+test("the V3 board reset removes only retired V2 bounty records", async (t) => {
+  const db = new DatabaseSync(":memory:"),
+    migrations = [
+      "0000_war_machines.sql",
+      "0001_tempo_mainnet.sql",
+      "0002_direct_escrow.sql",
+      "0003_paid_reveal.sql",
+      "0004_reset_bounty_board.sql",
+      "0005_automatic_settlement.sql",
+    ];
+  t.after(() => db.close());
+  for (const filename of migrations)
+    db.exec(await readFile(new URL(`../drizzle/${filename}`, import.meta.url), "utf8"));
+  db.exec(`
+    INSERT INTO accounts (id,token_hash,name,balance,created) VALUES ('owner','owner-token','Owner',0,1),('challenger','challenger-token','Challenger',0,1);
+    INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,fee_policy_version) VALUES
+      ('old-bounty','owner','Old','{}',0,0,'busy',1,1,1,'pathusd-direct-escrow-v2'),
+      ('current-bounty','owner','Current','{}',0,0,'open',1,1,1,'pathusd-direct-escrow-v3');
+    INSERT INTO attempts (id,bounty,account,blueprint,seed,status,created,updated) VALUES ('old-attempt','old-bounty','challenger','{}',1,'engineering',1,1);
+    INSERT INTO bookmarks (account,bounty,created) VALUES ('owner','old-bounty',1);
+    INSERT INTO payment_holds (id,account,bounty,request_key,digest,body,amount_units,purpose,expires,status,created,updated) VALUES ('old-hold','owner','old-bounty','old-key','digest','{}','1','direct-create',1,'awaiting-onchain',1,1);
+    INSERT INTO financial_operations (id,kind,account,ref,amount_units,recipient,status,created,updated) VALUES ('old-operation','settle','owner','old-attempt','1','owner','queued',1,1);
+    INSERT INTO settlement_jobs (attempt,created,updated) VALUES ('old-attempt',1,1);
+    INSERT INTO idempotency (account,key,kind,digest,ref,created) VALUES ('owner','old-key','create','digest','old-bounty',1);
+  `);
+  db.exec(
+    await readFile(
+      new URL("../drizzle/0006_reset_bounty_board_v3.sql", import.meta.url),
+      "utf8",
+    ),
+  );
+  for (const table of [
+    "attempts",
+    "bookmarks",
+    "payment_holds",
+    "financial_operations",
+    "settlement_jobs",
+    "idempotency",
+  ])
+    assert.equal(db.prepare(`SELECT COUNT(*) AS total FROM ${table}`).get().total, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS total FROM bounties").get().total, 1);
+  assert.equal(
+    db.prepare("SELECT id FROM bounties").get().id,
+    "current-bounty",
+  );
 });
 
 test("Tempo wallet sign-in verifies an EIP-191 account and issues a session", async (t) => {
