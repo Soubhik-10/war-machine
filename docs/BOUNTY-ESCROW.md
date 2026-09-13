@@ -1,6 +1,21 @@
 # War Machines bounty escrow
 
-`contracts/src/WarMachineBountyEscrow.sol` is a standalone, non-upgradeable pathUSD escrow for paid War Machines bounties on Tempo mainnet. It is **not deployed yet**. A public deployment must not happen until the tests, bytecode, two independent settlement signers, pause guardian, user interface, backend attestation service, testnet rehearsal, and an independent Solidity review are complete.
+`contracts/src/WarMachineBountyEscrow.sol` is a standalone, non-upgradeable pathUSD escrow for paid War Machines bounties on Tempo mainnet. It is live at [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494), deployed in [transaction `0x90df…45d1`](https://explore.tempo.xyz/tx/0x90df3b99bbfa4b7f806b05dd15c379bbd79523dfa7f7478d271fd96e3b5445d1) at block `39272885`. Its source was verified with Tempo's contract verifier ([verification record](https://contracts.tempo.xyz/verify-ui/jobs/bad196c7-ed62-47b3-863b-5adb3d682f5b)). The complete public deployment record is [`contracts/deployments/tempo-mainnet.json`](../contracts/deployments/tempo-mainnet.json).
+
+The contract is live; the paid-bounty application is deliberately **not live** yet. The public Site does not currently make direct wallet calls to this escrow or operate the two-signature result-attestation service, so it cannot accept bounty funds. This keeps the retired custodial payment route disabled.
+
+## Live immutable configuration
+
+| Setting | Value |
+| --- | --- |
+| Chain | Tempo Mainnet (`4217`) |
+| Token | pathUSD, `0x20C0000000000000000000000000000000000000` (6 decimals) |
+| Platform fee | 2.5% (`250` bps), recipient `0xc20131e9132888993de6519D486E5558A5DbCb7A` |
+| Attempt window | 300 seconds |
+| Pause guardian | `0xD95CBf3A061eB26d0BA641703c66a40f07C44Dc5` |
+| Settlement | Both listed signers must provide an EIP-712 result signature |
+
+The settings above were read from the deployed contract after verification. The contract is hardened and source-verified, but it has not had an independent third-party audit.
 
 ## What the contract protects
 
@@ -48,17 +63,16 @@ cd contracts
 
 The tests cover payout accounting, fixed fees, loss/draw reserve retention, active-attempt cancellation protection, oracle timeout refunds, expiry refunds, invalid signatures, replay resistance, and pause powers.
 
-## Mainnet deployment gate
+## Paid application activation gate
 
-Do not set Site paid-mode environment variables or take a payment until all of these are true:
+Do not take a payment through the Site until all of these are true:
 
-1. Run the contract test suite and static analysis from a clean checkout.
-2. Have an independent Solidity reviewer inspect the exact deployed bytecode and source.
-3. Rehearse with two independent settlement keys, a dedicated pause guardian, expiry, cancellation, incorrect signatures, signer outage, wrong token, and wallet rejection.
-4. Implement server-side EIP-712 result signing with separate keys and immutable result/replay hashing. The existing custodial payout queue must remain disabled until it is replaced.
-5. Implement wallet contract calls for `approve`, `createBounty`, `enterBounty`, `settleAttempt` status reads, timeout refunds, and cancellation/expiry. MPP charge receipts cannot substitute for an on-chain bounty deposit.
-6. Verify the deployed source at Tempo's contract verifier and publish the exact address in the site, `SKILL.md`, and API discovery.
-7. Test first with a deliberately low real-money cap and no fee sponsorship. Paid-entry prize rules, tax, sanctions, consumer protection, and payment-provider requirements still need an operator review.
+1. Have an independent Solidity reviewer inspect the exact deployed bytecode and source.
+2. Rehearse with two independently controlled settlement keys, the pause guardian, expiry, cancellation, incorrect signatures, signer outage, wrong token, and wallet rejection.
+3. Implement a separate result-attestation service that verifies the deterministic replay and produces EIP-712 signatures from the two protected signing keys. The retired custodial payout queue must remain disabled.
+4. Implement wallet contract calls for `approve`, `createBounty`, `enterBounty`, settlement reads, timeout refunds, and cancellation/expiry. MPP charge receipts cannot substitute for an on-chain bounty deposit.
+5. Display this contract address, token, gross reward, 2.5% fee, winner payout, entry amount, expiry, attempt deadline, signer quorum, result hash, and relevant events before every signing request.
+6. Test first with a deliberately low real-money cap and no fee sponsorship. Paid-entry prize rules, tax, sanctions, consumer protection, and payment-provider requirements still need an operator review.
 
 Tempo documents Foundry deployment and verification at <https://docs.tempo.xyz/sdk/foundry> and <https://docs.tempo.xyz/quickstart/verify-contracts>. Tempo mainnet is chain ID 4217 and pathUSD uses six decimals: <https://docs.tempo.xyz/protocol/exchange/pathUSD>.
 

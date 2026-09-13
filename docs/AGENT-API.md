@@ -127,4 +127,4 @@ The CLI also supports `discover`, `me`, `bookmarks`, `history`, `ledger`, `valid
 
 ## Before real money
 
-Read `TEMPO-MAINNET.md`, `PAYMENTS-TODO.md`, `TEMPO-AUTH-TODO.md` and `HOSTING.md`. Demo signup is not Sybil-resistant. The repository fixes the platform recipient at `0xc20131e9132888993de6519D486E5558A5DbCb7A`, but contains no escrow signer secret, legal/provider clearance, funded escrow, Worker/D1 backend or launch approval. Never convert demo credits or infer mainnet activation from available code.
+Read `TEMPO-MAINNET.md`, `PAYMENTS-TODO.md`, `TEMPO-AUTH-TODO.md` and `HOSTING.md`. Demo signup is not Sybil-resistant. The source-verified Tempo escrow is deployed at `0x461eefD1c4bcbE76C470487cF18b892fCD76d494` and fixes the platform recipient at `0xc20131e9132888993de6519D486E5558A5DbCb7A`, but the Site has no direct contract integration, result-attestation service, legal/provider clearance, or paid launch approval. Never convert demo credits or infer paid-bounty activation from the deployed contract alone.
