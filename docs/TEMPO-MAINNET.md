@@ -1,33 +1,60 @@
 # Tempo mainnet operations
 
-## Current status
+War Machines uses a non-upgradeable pathUSD bounty escrow on Tempo Mainnet. The game worker prepares an exact wallet transaction, verifies the resulting contract event, and stores immutable game terms. It never receives player pathUSD or holds a payout key.
 
-War Machines has a source-verified, non-upgradeable pathUSD bounty escrow on Tempo Mainnet:
+| Item | Value |
+| --- | --- |
+| Chain | Tempo Mainnet `4217` |
+| Token | pathUSD `0x20C0000000000000000000000000000000000000` (6 decimals) |
+| Escrow | [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494) |
+| Fee | 2.5% of a winning gross reward to `0xc20131e9132888993de6519D486E5558A5DbCb7A` |
+| Settlement | Two fixed EIP-712 result signatures within 300 seconds |
+| Verification | [Tempo source verification](https://contracts.tempo.xyz/verify-ui/jobs/bad196c7-ed62-47b3-863b-5adb3d682f5b) |
 
-- **Escrow:** [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494)
-- **Chain:** Tempo Mainnet (`4217`)
-- **Token:** pathUSD, `0x20C0000000000000000000000000000000000000`, 6 decimals
-- **Fee:** fixed 2.5% of the gross winner reward to `0xc20131e9132888993de6519D486E5558A5DbCb7A`
-- **Verification:** [Tempo contract verification record](https://contracts.tempo.xyz/verify-ui/jobs/bad196c7-ed62-47b3-863b-5adb3d682f5b)
+## Bounty flow
 
-The exact public configuration is versioned in [`contracts/deployments/tempo-mainnet.json`](../contracts/deployments/tempo-mainnet.json). The public Site still accepts **no Tempo funds**. Its legacy MPP charge plus server-signer payout route is permanently disabled in `sites/worker/mainnet.mjs`; environment variables cannot re-enable it.
+1. The creator approves the exact gross reward and calls `createBounty` directly from their wallet.
+2. A challenger approves the exact entry and calls `enterBounty` directly from their wallet.
+3. The worker records the deterministic replay and its hash. Two result keystores sign the escrow's exact EIP-712 settlement payload.
+4. Anyone can relay `settleAttempt`; the escrow verifies both signatures and sends the winner payout, platform fee, and entry recipient payment itself.
+5. A creator can cancel an idle bounty. A challenger can recover a timed-out entry. Anyone can expire a bounty after its published expiry. These are direct contract calls and do not need an operator.
 
-## What must be built before paid bounties open
+## Local result signing
 
-1. Direct browser wallet integration for `approve`, `createBounty`, `enterBounty`, timeout refund, creator cancellation and expiry.
-2. A distinct, protected result service that replays each accepted match, saves a canonical result/replay hash, and obtains the escrow's two required EIP-712 settlement signatures.
-3. Event indexing and durable reconciliation for the deployed escrow. The Site must treat on-chain events and view calls as the financial source of truth.
-4. A real-wallet rehearsal using tiny amounts from two wallets, including invalid approvals, signer disagreement, timeout refund, expiry, cancellation, win, loss, draw and pause behavior.
-5. An independent Solidity/security review, operator runbook, monitoring, key recovery, and a legal/provider review for paid-entry prize activity.
+For the current small private trial, result keystores remain only in local encrypted Foundry keystores. The Site, D1 database, Git repository, browser bundle, and environment settings contain no signer password or private key.
 
-Until these are complete, game credits are demo-only and cannot be redeemed or converted to pathUSD.
+After an attempt reaches **awaiting signatures**, run this from the desktop repository. Foundry asks locally for each keystore password; the script only sends two completed signatures back to the API and never broadcasts a transaction.
 
-## Security boundaries
+```powershell
+.\scripts\attest-escrow-result.ps1 -AttemptId <attempt UUID> -Origin https://your-site.example
+```
 
-- The escrow holds funds. The web backend must never custody player pathUSD or possess a general payout key.
-- The pause guardian can stop new bounties and entries but cannot move funds or block exits.
-- A settlement requires both configured signers. Put them in separate protected controls before public launch; do not store either key in ChatGPT Sites, D1, browser code, a repository, or a shared environment file.
-- MPP `tempo.session` is an agent-to-service payment channel. It is useful for metered API work, but it cannot decide a game winner or replace the bounty escrow.
-- A source-verified contract is not an independent security audit. The contract should not receive significant user funds before the review and rehearsal above.
+Then the browser shows **Settle onchain**, which submits the verified contract call from a wallet. If signing does not finish before the 300-second window, use **Recover entry onchain**. No server action is required to return that entry.
 
-Tempo references: [Foundry](https://docs.tempo.xyz/sdk/foundry), [contract verification](https://docs.tempo.xyz/quickstart/verify-contracts), [pathUSD](https://docs.tempo.xyz/protocol/exchange/pathUSD).
+This manual operation is acceptable only for an extremely small private rehearsal. A public release needs separate signer operators, a reviewed replay/attestation service, monitoring, and an independent Solidity/security review.
+
+## MPP scope
+
+MPP is deliberately separate from bounty funding. Standard MPP Tempo charges transfer or settle service payments; they cannot call this escrow's `createBounty` or `enterBounty` functions. The Worker can expose separately priced agent API work only when all of these are configured:
+
+```text
+WM_AGENT_MPP_ENABLED=true
+WM_AGENT_MPP_RECIPIENT=<separate service payee address>
+WM_AGENT_MPP_PRICE=<exact positive pathUSD decimal>
+MPP_SECRET_KEY=<32+ character server secret>
+```
+
+That enables `POST /api/agent/practice` for MPP-capable agents. It never funds a bounty, pays an entry, decides a winner, or receives the 2.5% bounty fee.
+
+## Site configuration
+
+Set only the pinned public escrow address to enable wallet bounty calls:
+
+```text
+WM_MODE=tempo-mainnet
+WM_BOUNTY_ESCROW_ADDRESS=0x461eefD1c4bcbE76C470487cF18b892fCD76d494
+```
+
+The Worker fails closed when the address differs. `WM_TEMPO_RPC_URL` is optional and defaults to `https://rpc.tempo.xyz`.
+
+Do not send pathUSD straight to the escrow address. Use the contract methods prepared by the game, or call the verified ABI yourself after checking its terms. The contract is source-verified, not independently audited.

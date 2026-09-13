@@ -2,7 +2,7 @@
 
 `contracts/src/WarMachineBountyEscrow.sol` is a standalone, non-upgradeable pathUSD escrow for paid War Machines bounties on Tempo mainnet. It is live at [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494), deployed in [transaction `0x90df…45d1`](https://explore.tempo.xyz/tx/0x90df3b99bbfa4b7f806b05dd15c379bbd79523dfa7f7478d271fd96e3b5445d1) at block `39272885`. Its source was verified with Tempo's contract verifier ([verification record](https://contracts.tempo.xyz/verify-ui/jobs/bad196c7-ed62-47b3-863b-5adb3d682f5b)). The complete public deployment record is [`contracts/deployments/tempo-mainnet.json`](../contracts/deployments/tempo-mainnet.json).
 
-The contract is live; the paid-bounty application is deliberately **not live** yet. The public Site does not currently make direct wallet calls to this escrow or operate the two-signature result-attestation service, so it cannot accept bounty funds. This keeps the retired custodial payment route disabled.
+The public application prepares direct wallet calls to this escrow, verifies the emitted events, and supports cancellation, expiry and timeout refunds. It does not custody player funds or contain settlement private keys. The current tiny-amount trial uses local encrypted result signers; the Site is not ready for an unattended public-money launch until those signers are independently operated and the system has had an independent review.
 
 ## Live immutable configuration
 
@@ -63,14 +63,14 @@ cd contracts
 
 The tests cover payout accounting, fixed fees, loss/draw reserve retention, active-attempt cancellation protection, oracle timeout refunds, expiry refunds, invalid signatures, replay resistance, and pause powers.
 
-## Paid application activation gate
+## Public-money activation gate
 
 Do not take a payment through the Site until all of these are true:
 
 1. Have an independent Solidity reviewer inspect the exact deployed bytecode and source.
 2. Rehearse with two independently controlled settlement keys, the pause guardian, expiry, cancellation, incorrect signatures, signer outage, wrong token, and wallet rejection.
-3. Implement a separate result-attestation service that verifies the deterministic replay and produces EIP-712 signatures from the two protected signing keys. The retired custodial payout queue must remain disabled.
-4. Implement wallet contract calls for `approve`, `createBounty`, `enterBounty`, settlement reads, timeout refunds, and cancellation/expiry. MPP charge receipts cannot substitute for an on-chain bounty deposit.
+3. Replace the local manual signer process with a separately operated replay/attestation service. The retired custodial payout queue must remain disabled.
+4. Rehearse direct wallet calls for `approve`, `createBounty`, `enterBounty`, settlement, timeout refunds, cancellation and expiry. MPP charge receipts cannot substitute for an on-chain bounty deposit.
 5. Display this contract address, token, gross reward, 2.5% fee, winner payout, entry amount, expiry, attempt deadline, signer quorum, result hash, and relevant events before every signing request.
 6. Test first with a deliberately low real-money cap and no fee sponsorship. Paid-entry prize rules, tax, sanctions, consumer protection, and payment-provider requirements still need an operator review.
 

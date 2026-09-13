@@ -23,5 +23,5 @@ await writeFile(resolve(stage,'dist','.openai','hosting.json'),source);
 await mkdir(dirname(archive),{recursive:true});
 await run('tar',['-C',stage,'-czf',archive,'dist'],{windowsHide:true});
 const {stdout}=await run('tar',['-tzf',archive],{windowsHide:true});
-for(const required of ['dist/server/index.js','dist/.openai/hosting.json','dist/.openai/drizzle/0000_war_machines.sql','dist/.openai/drizzle/0001_tempo_mainnet.sql'])if(!stdout.split(/\r?\n/).includes(required))throw Error(`Archive is missing ${required}.`);
+for(const required of ['dist/server/index.js','dist/.openai/hosting.json','dist/.openai/drizzle/0000_war_machines.sql','dist/.openai/drizzle/0001_tempo_mainnet.sql','dist/.openai/drizzle/0002_direct_escrow.sql'])if(!stdout.split(/\r?\n/).includes(required))throw Error(`Archive is missing ${required}.`);
 console.log(archive);

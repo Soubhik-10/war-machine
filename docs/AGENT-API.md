@@ -1,130 +1,82 @@
-# External engineer API — demo and Tempo modes
+# External engineer API
 
-The game hosts no agent code and calls no AI service. Agents bring their own program/model/compute. A human can also play every step in the browser. Demo mode is the default; an explicitly configured paid mode uses Tempo mainnet pathUSD and MPP.
+War Machines supplies deterministic simulation, build validation and an optional Tempo bounty interface. It does not supply an AI model. Agents bring their own compute and may use the same public rules, parts, terrain and blueprint format as browser players.
 
-Base URL: the same origin as the game, `/api`. Start locally with `node server.mjs`; default `http://127.0.0.1:8770`. JSON bodies are limited to 64 KiB. Use `Content-Type: application/json` on POST/PATCH. Browser requests are same-origin; server-to-server agents use scoped bearer credentials. Paid browser owners use Secure/HttpOnly sessions.
+Begin with:
 
-## Discovery and guest engineering
+```text
+GET /.well-known/war-machines.json
+GET /api/rules
+GET /api/openapi.json
+```
 
-`GET /.well-known/war-machines.json` is the entry point. `GET /api/openapi.json` supplies OpenAPI 3.1; `/agents.md` contains agent instructions. Paths are relative to this server, without hardcoded deployment domains.
+Use the discovery document as the authority for live mode, engine hash, token, chain, escrow address and payment capabilities. Do not guess a production origin.
 
-`POST /blueprints/validate` accepts exactly one of `machine` (readable named modules) or `blueprint` (packed JSON). Optional `bountyId` locks arena and limits; otherwise use `arena` and complete `rules` with a readable machine. Return fields: `valid`, `issues`, `stats`, `machine`, `blueprint`, `environment`, `advice`, `versions`. Invalid drafts return `valid:false`; malformed request envelopes return HTTP 400. Named modules accept `id,x,y,z?,r?,u?,c?`. See OpenAPI for bounds and customization.
+## Free engineering
 
-`POST /practice` accepts `challenger` and exactly one of `defender` or `bountyId`, plus an optional uint32 `seed` (default 42). Both builds are validated under the defender rules. It returns `{kind:"practice", official:false, creditsChanged:0, versions, result}`. No account or ledger mutation occurs. The free API shares the one worker with official trials, permits four calls per minute per IP and rejects with 429 when official work is pending. Local engine imports are preferable for large searches.
+- `POST /api/blueprints/validate` validates a readable machine or packed blueprint.
+- `POST /api/practice` runs a free deterministic practice battle.
+- `GET /api/bounties` and `GET /api/bounties/:id` discover bounties and immutable terms.
+- `GET/POST/PATCH/DELETE /api/me/builds` stores up to 50 signed-in account blueprints.
 
-`GET /me/bookmarks`, `PUT /me/bookmarks/ID`, `DELETE /me/bookmarks/ID` save bounties for the authenticated account, including its agents. Repeated save/remove operations are idempotent. `GET /me/builds`, `POST /me/builds`, `PATCH /me/builds/ID` and `DELETE /me/builds/ID` manage up to 50 private account blueprints; saving and replacing require an idempotency key. Bounty responses include relative share/self/attempt links.
+Use packed blueprints returned by validation. A bounty locks arena, terrain and construction rules. Practice seeds are not a promise about the official seed.
 
-## Credentials and limits
+## Tempo bounty calls
 
-Create a demo profile or sign in with a verified Tempo wallet/passkey, then mint a restricted agent key. Send `Authorization: Bearer YOUR_AGENT_KEY`. Tokens are stored hashed server-side. Never put credentials in share URLs, committed source, or chat output. Owners choose scopes, optional bounty restrictions, expiry, per-entry cap, cumulative spend cap and a separate reward-funding cap; agent keys cannot expand them.
-
-Default grant: 1,000 demo credits. New accounts have no personal entry/daily cap (`null`). Owners can choose either cap; daily spending is measured by server UTC date. Existing accounts retain their current caps. Zero cap permits free entries only. Refunds restore the allowance for the day of the original attempt. Funding reserves are separate from entry spending caps.
-
-## Routes
-
-| Method | Path | Behavior |
-| --- | --- | --- |
-| GET | `/rules` | Public parts, arenas, versions, standard rules, 10 valid example packed blueprints |
-| GET | `/health` | Local server health; no dependency checks or AI call |
-| POST | `/session` | `{ "name": "Engineer" }` → demo owner token + profile; rate-limited test identity |
-| GET | `/me` | Balance, reserved rewards, UTC spending, caps, versions |
-| PATCH | `/me` | Owner only: `{name?, entryCap?, dailyCap?}` |
-| GET | `/me/ledger` | Latest 100 credit/debit entries |
-| GET | `/me/attempts` | Latest 30 account attempts, including pending |
-| GET / POST | `/me/builds` | List or save up to 50 private account blueprints |
-| PATCH / DELETE | `/me/builds/:id` | Replace or remove an account blueprint |
-| GET/POST | `/agents` | Owner only: list keys / mint `{name}` (key shown once, maximum 8 active) |
-| DELETE | `/agents/:id` | Owner only, revoke immediately |
-| GET | `/bounties` | Listed bounties + caller's unlisted bounties, up to 100; open/busy first |
-| GET | `/bounties/:id` | Public immutable terms, defender, live status and recent receipts |
-| POST | `/bounties` | Create and reserve reward; requires Idempotency-Key |
-| POST | `/bounties/:id/cancel` | Creator account or its delegated agent, empty JSON; closes an idle bounty and returns its reserve |
-| POST | `/bounties/:id/attempts` | Atomically accept one official build; requires Idempotency-Key |
-| GET | `/attempts/:id` | Pending status visible to entrant/creator; completed receipt and replay public |
-
-Unlisted is not private: anyone who knows its ID can inspect and enter it. Never put personal or sensitive data in a title or blueprint name. Unknown body fields are rejected. There is no API to submit a winner, payout amount, balance, official seed or command script.
-
-## Create a bounty
-
-POST `/bounties` with a fresh `Idempotency-Key` (16–100 alphanumeric, `_`, `-`; UUID recommended):
+Paid calls require all of these discovery fields:
 
 ```json
 {
-  "title": "Break my cooling tower",
-  "blueprint": "REPLACE WITH A PACKED BLUEPRINT OBJECT",
-  "entry": 10,
-  "reward": 100,
-  "maxPlatformFeeBps": 250,
-  "hours": 24,
-  "listed": false
+  "payments": { "enabled": true, "directEscrow": true, "chainId": 4217 },
+  "currency": "pathUSD"
 }
 ```
 
-`blueprint` is the exact JSON object exported by the workshop or provided in `/rules.examples`. In JavaScript use `packChallenge(machine, arenaId, 0, rules)` from `dist/data.mjs`. It contains `q` construction caps, `a` arena and `m` component rows, plus front/paint/upgrades/doctrine. Use `/rules.parts` indexes, not guessed indexes. All support, connection, mobility, core and physical 243-socket rules apply. Standard is 1200 credits/32 fitted parts plus one required command core/360 t/8 weapons; custom permits independently null caps; unlimited removes those four caps. Declared construction credits are not a funded account balance.
+A player or autonomous wallet signs in with `/api/auth/challenge` and `/api/auth/verify`. That signature proves the wallet address only. It never approves a token transfer.
 
-Bounds: entry and reward independently 0–1,000,000,000, with no required ratio; duration 0–8,760 whole hours (0 means no expiry), title 1–70 characters, 20 active bounties per owner. Creation debits/reserves the reward immediately. IDs and terms remain stable; editing your workshop cannot change an existing bounty. A share is `/#bounty=ID` on the deployed game origin. An old localhost link cannot reach another person's PC.
+`POST /api/bounties` and `POST /api/bounties/:id/attempts` require an `Idempotency-Key` and return `202` with a `direct` intent. Persist the exact request, intent ID and transaction hash. Execute its two wallet calls exactly as returned:
 
-## Platform fee and precision
+1. `approve(pathUSD, escrow, exact amount)`
+2. the escrow method (`createBounty` or `enterBounty`)
 
-New bounties snapshot 250 basis points (2.5%) of gross winnings. Both creation and entry require an explicit `maxPlatformFeeBps`; an omitted value is accepted only for entry to legacy zero-fee bounties. Clients cannot lower or change the actual policy. A mismatch is rejected before any credit movement. Read `/rules.economics.platformFee` for new bounties and the bounty itself for existing terms.
+Then call `POST /api/escrow/intents/:intentId/confirm` with `{ "transactionHash": "0x..." }`. The worker verifies an event from the pinned live escrow before showing the bounty or official attempt. Never transfer pathUSD directly to the escrow address and never change an approved plan's recipient, calldata, token or amount.
 
-Gross 100 − fee 2.5 = payout 97.5; entry 10 means net +87.5 on a win. Entry is charged separately into the arena treasury. No platform deduction on loss, draw, technical refund or cancelled/expired reserves. Inputs remain whole credits; API balances, ledger amounts and payouts use credits with up to 3 decimals. SQLite balances/ledger amounts use integer thousandths; fee arithmetic uses integer base units and rounds down. Existing balances migrate once without changing value, and old receipts remain unchanged.
+New bounty payloads use decimal pathUSD strings with at most six fractional digits:
 
-Download the standalone skill from `/skills/war-machines-engineer/SKILL.md` (also linked on the Agents page and in discovery). In paid mode, creation and entry can return an MPP `402`; use a compatible MPP client, verify every discovered chain/token/recipient/amount, and preserve the idempotency key. Polling and free routes never charge. Demo mode requires no wallet.
-
-## Enter a trial
-
-1. GET the bounty and verify `status: open`, `compatible: true`, its caps, entry, gross reward, platform fee, payout, net, expiry and defender. Disclose these terms before spending.
-2. Build a legal counter on your own infrastructure. You can import `Battle` and `unpackChallenge` for free local practice with seeds of your choosing. Calls to your own AI are outside this platform.
-3. Save a fresh idempotency key and the exact request before sending it.
-4. POST `/bounties/ID/attempts` with `{ "blueprint": PACKED_OBJECT, "maxEntry": 10, "maxPlatformFeeBps": 250 }`.
-5. A 202 response contains the persistent attempt ID. Poll `/attempts/ID`; polling is free. Another accepted challenger yields 409 with no charge.
-6. Keep the same body, path and key when retrying an uncertain request. Same key + same request returns the original operation even if the bounty has since closed. Reusing a key for a different request returns 409. A new key is a new potential paid demo attempt.
-
-The server validates the challenger against **the bounty's** rules and arena, ignoring any attempted cap/arena substitution. It generates the official seed after acceptance. One bit of that random seed chooses the spawn side; player identity remains side 0 in the replay interface. Each accepted attempt commits its charge, immutable challenger, seed, lock and durable queue record in one SQLite transaction.
-
-Win: 2.5% of the gross reward goes to the platform fee treasury and 97.5% is paid once to the winner; the bounty is claimed. Older bounties retain zero platform fee. Loss/draw: entry consumed, the bounty reopens if still eligible. Technical failure: full entry refund, no reward. An attempt accepted before expiry finishes before the reserve can be released. No human referee is involved.
-
-## Results and replay
-
-`queued` → `running` → `settled` or `refunded`. Settled result includes winner (0 challenger, 1 defender, -1 draw), outcome, time, integrity, damage, telemetry, event summary, entry, grossReward, platformFeeBps, platformFee, payout, reward (alias for payout), feePolicyVersion, net and server verification time. Bounty reward remains the gross amount. Pending attempts include their economics quote. `replay` contains both accepted blueprints, arena, seed, `swapSpawns`, and engine/balance/terrain versions plus content hash.
-
-```js
-const a = unpackChallenge(receipt.replay.challenger).machine;
-const b = unpackChallenge(receipt.replay.defender).machine;
-const battle = new Battle(a, b, receipt.replay.arena, receipt.replay.seed, {
-  mode: 'auto', swapSpawns: receipt.replay.swapSpawns
-});
-const localResult = battle.run(); // Reconstructs; cannot award credits.
+```json
+{
+  "title": "Break the cooling rig",
+  "blueprint": { "packed": "blueprint object" },
+  "entry": "0.10",
+  "reward": "1.00",
+  "hours": 24,
+  "listed": false,
+  "maxPlatformFeeBps": 250
+}
 ```
 
-Only replay with the matching engine release. Receipts remain authoritative if an old engine is unavailable. Idle incompatible bounties are archived with reserves returned; queued/running incompatible jobs are refunded. Never run an accepted job using a newer engine and call it the same verified result.
+The 2.5% fee is deducted only from a win: `1.00` gross reward pays `0.975` to the winner. The entry is separate. A loss/draw sends the entry to the creator, and a technical refund returns the entry to the challenger.
 
-The single worker has a 30-second wall limit, 6002-tick bound and 192 MiB old-generation heap limit; at most 16 attempts are pending globally. Crashed leased work is reclaimed after 45 seconds with the same inputs/seed and a fresh fencing token. Three abandoned executions cause a refund. Late completion from an old worker cannot settle a reclaimed job. Current implementation runs one server process per SQLite DB; it is not a horizontally distributed cloud queue.
+## Official result and exits
 
-## Example client
+An official attempt progresses from `awaiting-signatures` to `ready-to-settle` after two fixed escrow signers attest the exact EIP-712 payload. The browser or any relay wallet then calls the returned `settleAttempt` plan. Poll `GET /api/attempts/:id`.
 
-Use `examples/agent-client.mjs` with Node's built-in fetch. No npm or AI SDK is required. Set `WAR_MACHINE_URL` and `WAR_MACHINE_TOKEN` in the invoking process environment. Commands:
+`GET /api/attempts/:id/settlement` provides the current EIP-712 payload for authorized result operators. `POST /api/attempts/:id/attestations` accepts exactly two valid approved signatures; it cannot replace the winner, payout, fee, bounty ID, nonce or result hash. `GET /api/attempts/:id/settlement-plan` returns the direct relay transaction and `POST /api/attempts/:id/settlement-confirm` verifies its on-chain event.
 
-```sh
-node examples/agent-client.mjs rules
-node examples/agent-client.mjs list
-node examples/agent-client.mjs inspect BOUNTY_ID
-node examples/agent-client.mjs submit BOUNTY_ID blueprint.json 10 250
-node examples/agent-client.mjs retry work/agent-request-UUID.json
-node examples/agent-client.mjs status ATTEMPT_ID
-```
+Direct exits are prepared and confirmed with the same intent pattern:
 
-The submit command persists its retry identity before charging. It does not choose a machine or call a model for the agent. Do not commit its request files if blueprints are private.
+- `POST /api/bounties/:id/cancel` — creator, idle bounty only.
+- `POST /api/attempts/:id/refund` — active challenger after the 300-second result window.
+- `POST /api/bounties/:id/expire` — any signed-in wallet after the bounty expiry.
 
-## Working engineer loop
+The contract processes each exit; the worker never sends a custody payout.
 
-`node examples/engineer-loop.mjs --bounty ID` scouts and validates ten factory candidates, simulates each over three training seeds and both spawn sides, selects by training win rate/integrity, then tests only the selected design on two held-out seeds. It saves the chosen packed blueprint and a report under `work/`. No demo credits are spent. Supply `--candidates DIRECTORY` for up to 50 JSON designs produced by your own program/model. Files can be readable validation requests or packed blueprints.
+## MPP agent work
 
-`--enter --max-entry INTEGER --max-platform-fee-bps 250` with `WAR_MACHINE_TOKEN` opts into exactly one official entry. The loop checks the local source hash against the bounty before simulation, refreshes eligibility, persists the request identity and never retries with a fresh key automatically. A practice win does not guarantee the server-chosen official outcome.
+MPP is optional and independent of bounty funds. If discovery lists an MPP route, an MPP-capable agent can call that explicitly priced service route (currently `/api/agent/practice`) using `tempo.charge`. Verify the advertised origin, recipient, pathUSD amount, chain and expiry before paying.
 
-The CLI also supports `discover`, `me`, `bookmarks`, `history`, `ledger`, `validate REQUEST.json [NEW_OUTPUT.json]`, `practice REQUEST.json`, `create CONTRACT.json`, `save ID`, `unsave ID` and `cancel ID`. Use `retry` after uncertain creation/entry. Credentials are not written to retry files. Existing output files are not overwritten by validation.
+MPP never creates a bounty, enters one, settles a result, or pays the 2.5% bounty fee. A scoped API key cannot approve a bounty transaction; an autonomous agent that needs to fund or enter a bounty must control and sign with its own Tempo wallet.
 
-## Before real money
+Keep wallet sessions, agent keys, idempotency keys and MPP credentials out of URLs, blueprints, logs and source control. Unlisted bounty links are visible to anyone who receives them.
 
-Read `TEMPO-MAINNET.md`, `PAYMENTS-TODO.md`, `TEMPO-AUTH-TODO.md` and `HOSTING.md`. Demo signup is not Sybil-resistant. The source-verified Tempo escrow is deployed at `0x461eefD1c4bcbE76C470487cF18b892fCD76d494` and fixes the platform recipient at `0xc20131e9132888993de6519D486E5558A5DbCb7A`, but the Site has no direct contract integration, result-attestation service, legal/provider clearance, or paid launch approval. Never convert demo credits or infer paid-bounty activation from the deployed contract alone.
+See [Tempo mainnet operations](TEMPO-MAINNET.md) and the downloadable `SKILL.md` for the signer workflow and current trial limits.
