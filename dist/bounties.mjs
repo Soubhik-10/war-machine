@@ -711,6 +711,19 @@ export function createBountyUI(adapter) {
       const bounty = await mutate("/attempts/" + a.id + "/refund", {});
       await open(bounty.id);
     }
+    async function watchOfficialReplay(a) {
+      const catalog = await api("/rules");
+      currentFeeBps = catalog.economics.platformFee.basisPoints;
+      if (catalog.versions.hash !== CLIENT_ENGINE_HASH)
+        throw Error(
+          "Reload this tab to load the current simulation before replaying.",
+        );
+      if (catalog.versions.hash !== a.replay?.versions?.hash)
+        throw Error(
+          "This replay belongs to an archived engine version; its receipt remains available.",
+        );
+      adapter.replay(a, await api("/bounties/" + a.bounty));
+    }
     async function poll() {
       try {
         const a = await api("/attempts/" + id);
@@ -802,6 +815,26 @@ export function createBountyUI(adapter) {
               ? Number(s.validUntil) * 1000 <= Date.now()
               : false,
             ready = a.status === "ready-to-settle";
+          const replayKey =
+            "wm-watched-official-replay-" +
+            a.id +
+            ":" +
+            (s?.resultHash || r?.settlement?.resultHash || "result");
+          if (
+            a.replay &&
+            ["win", "loss", "draw"].includes(r?.outcome) &&
+            sessionStorage.getItem(replayKey) !== "1"
+          ) {
+            sessionStorage.setItem(replayKey, "1");
+            try {
+              await watchOfficialReplay(a);
+              return;
+            } catch (error) {
+              adapter.toast(
+                error.message || "The official replay is unavailable.",
+              );
+            }
+          }
           app.innerHTML =
             header(
               ready
@@ -809,9 +842,12 @@ export function createBountyUI(adapter) {
                 : "RESULT AWAITING ATTESTATION.",
               "The game result is deterministic. The escrow releases funds only after two independent signatures.",
             ) +
-            `<section class="panel trial-wait"><span class="eyebrow">${ready ? "TWO SIGNATURES VERIFIED" : "RESULT SIGNING IN PROGRESS"}</span><h2>${r?.outcome === "win" ? "YOU BROKE THE MACHINE." : r?.outcome === "loss" ? "THE DEFENSE HELD." : "DRAW OR TECHNICAL RESULT."}</h2><p>${r?.integrity ? `Your integrity: ${(r.integrity[0] * 100).toFixed(1)}% · Defender: ${(r.integrity[1] * 100).toFixed(1)}%. ` : ""}Result hash: <code>${esc(s?.resultHash || "pending")}</code></p><p class="hint">${expires ? "The result window elapsed. The challenger can recover the entry directly from escrow." : ready ? "Submit the signed settlement transaction. Any wallet can relay it; the contract verifies the two signatures and exact payout." : "The independently held signer keys review and attest the exact result. If this window expires, the challenger can recover the entry onchain."}</p><div class="bounty-actions">${ready ? '<button class="primary" id="settle-attempt">Settle onchain</button>' : ""}${expires ? '<button id="refund-attempt">Recover entry onchain</button>' : ""}<button id="pending-contract">View bounty</button></div><p id="bounty-error" class="error-message"></p></section>`;
+            `<section class="panel trial-wait"><span class="eyebrow">${ready ? "TWO SIGNATURES VERIFIED" : "RESULT SIGNING IN PROGRESS"}</span><h2>${r?.outcome === "win" ? "YOU BROKE THE MACHINE." : r?.outcome === "loss" ? "THE DEFENSE HELD." : "DRAW OR TECHNICAL RESULT."}</h2><p>${r?.integrity ? `Your integrity: ${(r.integrity[0] * 100).toFixed(1)}% · Defender: ${(r.integrity[1] * 100).toFixed(1)}%. ` : ""}Result hash: <code>${esc(s?.resultHash || "pending")}</code></p><p class="hint">${expires ? "The result window elapsed. The challenger can recover the entry directly from escrow." : ready ? "Submit the signed settlement transaction. Any wallet can relay it; the contract verifies the two signatures and exact payout." : "The independently held signer keys review and attest the exact result. If this window expires, the challenger can recover the entry onchain."}</p><div class="bounty-actions">${a.replay ? '<button id="watch-official-replay">▶ Watch exact battle</button>' : ""}${ready ? '<button class="primary" id="settle-attempt">Settle onchain</button>' : ""}${expires ? '<button id="refund-attempt">Recover entry onchain</button>' : ""}<button id="pending-contract">View bounty</button></div><p id="bounty-error" class="error-message"></p></section>`;
           wireHeader();
           $("#pending-contract").onclick = () => open(a.bounty);
+          if ($("#watch-official-replay"))
+            $("#watch-official-replay").onclick = (e) =>
+              act(e.currentTarget, () => watchOfficialReplay(a));
           if ($("#settle-attempt"))
             $("#settle-attempt").onclick = (e) =>
               act(e.currentTarget, () => settle(a));
@@ -847,19 +883,7 @@ export function createBountyUI(adapter) {
           });
         if ($("#verified-replay"))
           $("#verified-replay").onclick = (e) =>
-            act(e.currentTarget, async () => {
-              const catalog = await api("/rules");
-              currentFeeBps = catalog.economics.platformFee.basisPoints;
-              if (catalog.versions.hash !== CLIENT_ENGINE_HASH)
-                throw Error(
-                  "Reload this tab to load the current simulation before replaying.",
-                );
-              if (catalog.versions.hash !== a.replay.versions.hash)
-                throw Error(
-                  "Replay belongs to an archived engine version; its verified receipt remains available.",
-                );
-              adapter.replay(a, await api("/bounties/" + a.bounty));
-            });
+            act(e.currentTarget, () => watchOfficialReplay(a));
       } catch (e) {
         if (g !== generation) return;
         app.innerHTML =

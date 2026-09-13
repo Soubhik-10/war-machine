@@ -1442,7 +1442,11 @@ async function attemptView(db, attemptId, viewer) {
       settlementDeadline: Number(bounty.escrow_attempt_deadline || 0),
     };
   }
-  if (done && (challenger || creator))
+  if (
+    (done ||
+      ["awaiting-signatures", "ready-to-settle"].includes(attempt.status)) &&
+    (challenger || creator)
+  )
     value.replay = {
       challenger: parse(attempt.blueprint),
       defender: parse(bounty.blueprint),

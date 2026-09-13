@@ -321,6 +321,18 @@ test("paid bounty actions establish a Tempo session only when payment starts", a
   assert.match(source, /!runtime\.paid && !me/);
 });
 
+test("official bounty trials replay before the signing result is shown", async () => {
+  const [client, app] = await Promise.all([
+    readFile(new URL("../dist/bounties.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../dist/app.mjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(client, /wm-watched-official-replay-/);
+  assert.match(client, /await watchOfficialReplay\(a\);/);
+  assert.match(client, /id="watch-official-replay"/);
+  assert.match(app, /Continue to result/);
+  assert.match(app, /bountyUI\.attempt\(officialAttemptId\)/);
+});
+
 test("direct escrow intents bind exact terms to the confirmed create and entry events", async (t) => {
   const DB = new D1Mock();
   await DB.migrate();
@@ -537,14 +549,23 @@ test("direct escrow intents bind exact terms to the confirmed create and entry e
     seed: 42,
   });
   assert.equal(anonymousPractice.status, 403);
-  const deployed = await post(
-    "/api/attempts/" + entered.body.id + "/deploy",
-    { blueprint: packChallenge(PRESETS[1], "foundry", 0, blueprint.q) },
-    "direct_deploy_fixture_0001",
-    challengerSession,
-  );
+  const challengerBlueprint = packChallenge(
+      PRESETS[1],
+      "foundry",
+      0,
+      blueprint.q,
+    ),
+    deployed = await post(
+      "/api/attempts/" + entered.body.id + "/deploy",
+      { blueprint: challengerBlueprint },
+      "direct_deploy_fixture_0001",
+      challengerSession,
+    );
   assert.equal(deployed.status, 200, JSON.stringify(deployed.body));
   assert.equal(deployed.body.status, "awaiting-signatures");
+  assert.deepEqual(deployed.body.replay.challenger, challengerBlueprint);
+  assert.deepEqual(deployed.body.replay.defender, blueprint);
+  assert.equal(deployed.body.replay.seed, deployed.body.result.seed);
   assert.equal(deployed.body.result.settlement.bountyId, "7");
   assert.equal(deployed.body.result.settlement.signatures.length, 0);
   const settlement = DB.sqlite
