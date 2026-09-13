@@ -303,13 +303,13 @@ function catalog(config) {
       "browse",
       "validate",
       "practice",
+      "create and fund a bounty with Tempo Wallet",
+      "enter a bounty with Tempo Wallet",
     ],
     loginRequired: [
-      "create bounty",
-      "enter official trial",
       "save bounty",
       "save account builds",
-      "account history",
+      "private account history",
     ],
     walletAuth: paid
       ? {
@@ -375,7 +375,8 @@ function catalog(config) {
       timeLimitSeconds: 100,
       drawIntegrityThreshold: 0.025,
       entryRefund: "Technical failure only",
-      spending: "Entry cap and daily account budget",
+      spending:
+        "No application spending cap. Each bounty reward and entry amount is separately confirmed in Tempo Wallet.",
       paidReveal:
         "Public scouts expose only cost, mass, part count, weapon count, arena and limits. A confirmed entry reveals the exact defender to that challenger only.",
       payments: paid

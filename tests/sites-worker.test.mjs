@@ -240,6 +240,17 @@ test("browser wallet client uses Tempo Wallet rather than an injected provider",
   assert.doesNotMatch(source, /window\.ethereum/);
 });
 
+test("paid bounty actions establish a Tempo session only when payment starts", async () => {
+  const source = await readFile(
+    new URL("../dist/bounties.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /async function ensurePaidWalletSession\(\)/);
+  assert.match(source, /await ensurePaidWalletSession\(\);/);
+  assert.match(source, /runtime\.paid \|\| me \? create\(\) : profile\(\)/);
+  assert.match(source, /!runtime\.paid && !me/);
+});
+
 test("direct escrow intents bind exact terms to the confirmed create and entry events", async (t) => {
   const DB = new D1Mock();
   await DB.migrate();
