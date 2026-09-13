@@ -655,7 +655,7 @@ async function account(db, accountId) {
   check(row, "Account not found.", 404);
   const reserveRows = await db
     .prepare(
-      "SELECT reward_units FROM bounties WHERE owner=? AND status IN ('open','busy') AND reward_units IS NOT NULL",
+      "SELECT reward_units FROM bounties WHERE owner=? AND status IN ('open','busy','completed') AND reward_units IS NOT NULL",
     )
     .bind(accountId)
     .all();
@@ -767,7 +767,7 @@ async function bountyView(db, row, viewer = null, history = false) {
     activeAttempt: row.active_attempt,
     attempts: count.total,
     funded:
-      ["open", "busy"].includes(row.status) &&
+      ["open", "busy", "completed"].includes(row.status) &&
       row.reserve_units === row.reward_units,
   };
   if (revealed) value.blueprint = blueprint;
@@ -2617,8 +2617,8 @@ async function directControlIntent(
       403,
     );
     check(
-      row.status === "open",
-      "An active bounty cannot be closed. Settle its result or wait for its published expiry.",
+      ["open", "completed"].includes(row.status),
+      "An active bounty cannot be deleted. Settle its result or wait for its published expiry.",
       409,
     );
   } else if (action === "timeout-forfeit") {
@@ -2812,7 +2812,7 @@ async function confirmDirectControl(db, auth, intentId, hash, config) {
         .bind(json(result), hash, updated, attempt.id),
       db
         .prepare(
-          "UPDATE bounties SET status='open',active_attempt=NULL,escrow_attempt_deadline=NULL,updated=? WHERE id=?",
+          "UPDATE bounties SET status='completed',active_attempt=NULL,escrow_attempt_deadline=NULL,updated=? WHERE id=?",
         )
         .bind(updated, row.id),
       db
@@ -3053,7 +3053,7 @@ async function confirmSettlement(db, attemptId, hash, config) {
     };
   const updated = now(),
     attemptStatus = outcome === 2 ? "refunded" : "settled",
-    bountyStatus = outcome === 0 ? "claimed" : "open";
+    bountyStatus = outcome === 0 ? "claimed" : "completed";
   await db.batch([
     db
       .prepare(
@@ -3228,11 +3228,40 @@ async function finalizeExpiredV3Builds(db) {
   }
 }
 
+// V3 used to reopen a reward after a defended or timed-out trial. Bounties
+// now represent one official challenge: keep the untouched reward reserved
+// for its creator to return, but remove the resolved target from active play.
+export async function completeResolvedBounties(db) {
+  const rows = (
+    await db
+      .prepare(
+        "SELECT b.id,a.result FROM bounties b JOIN attempts a ON a.bounty=b.id WHERE b.status='open' AND b.active_attempt IS NULL AND a.status='settled' AND a.escrow_settlement_tx IS NOT NULL",
+      )
+      .all()
+  ).results;
+  for (const row of rows) {
+    let result;
+    try {
+      result = row.result ? parse(row.result) : null;
+    } catch {
+      continue;
+    }
+    if (!['loss', 'draw'].includes(result?.outcome) || result.payoutStatus !== 'settled-onchain') continue;
+    await db
+      .prepare(
+        "UPDATE bounties SET status='completed',updated=? WHERE id=? AND status='open' AND active_attempt IS NULL",
+      )
+      .bind(now(), row.id)
+      .run();
+  }
+}
+
 export async function runAutomaticSettlement(env) {
   const config = runtimeConfig(env, "https://service.internal");
   if (!config.enabled || !config.automaticSettlementReady || !env.DB) return;
   try {
     v3SettlementAccount(env);
+    await completeResolvedBounties(env.DB);
     await finalizeExpiredV3Builds(env.DB);
     const jobs = (
       await env.DB
@@ -3668,7 +3697,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     if (path === "/api/bounties" && method === "GET") {
       const rows = await db
         .prepare(
-          "SELECT * FROM bounties WHERE (listed=1 OR owner=?) AND entry_units IS NOT NULL ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'busy' THEN 1 ELSE 2 END, created DESC LIMIT 100",
+          "SELECT * FROM bounties WHERE ((listed=1 AND status IN ('open','busy')) OR owner=?) AND entry_units IS NOT NULL ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'busy' THEN 1 ELSE 2 END, created DESC LIMIT 100",
         )
         .bind(auth?.account || "")
         .all();

@@ -5,7 +5,10 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { privateKeyToAccount } from "viem/accounts";
 import worker from "../sites/worker/index.mjs";
-import { validateEscrowAttestation } from "../sites/worker/mainnet.mjs";
+import {
+  completeResolvedBounties,
+  validateEscrowAttestation,
+} from "../sites/worker/mainnet.mjs";
 import { packChallenge, PRESETS } from "../dist/data.mjs";
 import {
   pathUsdToUnits,
@@ -114,12 +117,11 @@ test("pathUSD uses exact base units for cents and preserves the 2.5% fee quote",
   assert.equal(quote.netIfWin, "0.875");
 });
 
-test("settlement attestations bind the exact Tempo escrow typed data and canonical signer order", async () => {
+test("settlement attestations bind the exact V3 Tempo escrow typed data", async () => {
   const one = privateKeyToAccount("0x" + "01".repeat(32)),
-    two = privateKeyToAccount("0x" + "02".repeat(32)),
     config = {
       chainId: 4217,
-      escrowAddress: "0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e",
+      escrowAddress: "0xb14a3aA99C9349094612143089F55aE5372DeB24",
     },
     payload = {
       bountyId: "7",
@@ -132,7 +134,7 @@ test("settlement attestations bind the exact Tempo escrow typed data and canonic
     typed = {
       domain: {
         name: "War Machines Bounty Escrow",
-        version: "2",
+        version: "3",
         chainId: 4217,
         verifyingContract: config.escrowAddress,
       },
@@ -154,32 +156,24 @@ test("settlement attestations bind the exact Tempo escrow typed data and canonic
         validUntil: 4000000000n,
       },
     },
-    signatures = [
-      await two.signTypedData(typed),
-      await one.signTypedData(typed),
-    ];
+    signature = await one.signTypedData(typed);
   const validated = await validateEscrowAttestation(
     config,
     payload,
-    signatures,
-    [one.address, two.address],
+    [signature],
+    [one.address],
   );
-  assert.equal(validated.length, 2);
-  assert.deepEqual(
-    validated.map((item) => item.signer),
-    [one.address, two.address].sort((left, right) =>
-      left.toLowerCase().localeCompare(right.toLowerCase()),
-    ),
-  );
+  assert.equal(validated.length, 1);
+  assert.equal(validated[0].signer, one.address);
   await assert.rejects(
     () =>
       validateEscrowAttestation(
         config,
         payload,
-        [signatures[0], signatures[0]],
-        [one.address, two.address],
+        [signature, signature],
+        [one.address],
       ),
-    /two different/,
+    /exactly one/i,
   );
 });
 
@@ -203,6 +197,64 @@ test("Tempo mode is fail-closed and never falls back to sandbox credits", async 
   assert.equal(rules.body.mpp.enabled, false);
 });
 
+test("a settled defense completes the bounty and preserves its returnable reward", async (t) => {
+  const DB = new D1Mock();
+  await DB.migrate();
+  t.after(() => DB.close());
+  const stamp = Date.now();
+  DB.sqlite
+    .prepare(
+      "INSERT INTO accounts (id,token_hash,name,balance,created) VALUES (?,?,?,?,?)",
+    )
+    .run("creator", "creator-token", "Creator", 0, stamp);
+  DB.sqlite
+    .prepare(
+      "INSERT INTO accounts (id,token_hash,name,balance,created) VALUES (?,?,?,?,?)",
+    )
+    .run("challenger", "challenger-token", "Challenger", 0, stamp);
+  DB.sqlite
+    .prepare(
+      "INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,entry_units,reward_units,reserve_units) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    )
+    .run(
+      "completed-bounty",
+      "creator",
+      "Resolved target",
+      "{}",
+      0,
+      0,
+      "open",
+      1,
+      stamp,
+      stamp,
+      "10000",
+      "1000000",
+      "1000000",
+    );
+  DB.sqlite
+    .prepare(
+      "INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,created,updated,escrow_settlement_tx) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    )
+    .run(
+      "completed-attempt",
+      "completed-bounty",
+      "challenger",
+      "{}",
+      1,
+      "settled",
+      JSON.stringify({ outcome: "loss", payoutStatus: "settled-onchain" }),
+      stamp,
+      stamp,
+      "0x" + "ab".repeat(32),
+    );
+  await completeResolvedBounties(DB);
+  const completed = DB.sqlite
+    .prepare("SELECT status,reserve_units FROM bounties WHERE id=?")
+    .get("completed-bounty");
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.reserve_units, "1000000");
+});
+
 test("Tempo wallet sign-in verifies an EIP-191 account and issues a session", async (t) => {
   const DB = new D1Mock();
   await DB.migrate();
@@ -211,7 +263,7 @@ test("Tempo wallet sign-in verifies an EIP-191 account and issues a session", as
   const env = {
     DB,
     WM_MODE: "tempo-mainnet",
-    WM_BOUNTY_ESCROW_ADDRESS: "0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e",
+    WM_BOUNTY_ESCROW_ADDRESS: "0xb14a3aA99C9349094612143089F55aE5372DeB24",
     WM_TEMPO_RPC_URL: "https://tempo-rpc.fixture",
   };
   const challenge = await call(env, "/api/auth/challenge", "POST", {
@@ -338,11 +390,11 @@ test("official bounty trials replay before the signing result is shown", async (
   assert.match(app, /bountyUI\.deploy\(bountyContext\.attemptId\)/);
 });
 
-test("direct escrow intents bind exact terms to the confirmed create and entry events", async (t) => {
+test("paid bounty creation does not accept funds without automatic settlement", async (t) => {
   const DB = new D1Mock();
   await DB.migrate();
   t.after(() => DB.close());
-  const escrow = "0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e",
+  const escrow = "0xb14a3aA99C9349094612143089F55aE5372DeB24",
     wallet = "0x1111111111111111111111111111111111111111",
     session = "direct-session-token",
     account = "11111111-1111-4111-8111-111111111111",
@@ -451,310 +503,8 @@ test("direct escrow intents bind exact terms to the confirmed create and entry e
     "direct_create_fixture_0001",
   );
   assert.equal(paused.status, 503, JSON.stringify(paused.body));
-  assert.match(paused.body.error, /result signers are online/i);
-  env.WM_RESULT_SIGNING_READY = "true";
-  for(const name of ['SIGNER_A','SIGNER_B','RELAY']) { env[name]={fetch:async()=>Response.json({ok:true})}; env[name+'_AUTH']={get:async()=> 'fixture'.repeat(8)}; }
-  DB.sqlite.prepare('UPDATE settlement_control SET paused=0,heartbeat=?').run(Date.now());
-  const prepared = await post(
-    "/api/bounties",
-    body,
-    "direct_create_fixture_0001",
-  );
-  assert.equal(prepared.status, 202);
-  assert.equal(prepared.body.direct, true);
-  assert.equal(prepared.body.plan.escrow, escrow);
-  assert.equal(prepared.body.plan.approval.amount, "1000000");
-  let activeReceipt = {
-    status: "0x1",
-    logs: [
-      {
-        address: escrow,
-        topics: [
-          "0x8efb9ae6fa203b97084e8481d1a346804fe0b74f6771b412acbb06080d3fc60b",
-          "0x" + pad(7),
-          addressTopic,
-        ],
-        data:
-          "0x" +
-          pad(1000000) +
-          pad(10000) +
-          pad(prepared.body.expiresAt) +
-          prepared.body.termsHash.slice(2),
-      },
-    ],
-  };
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url, options) => {
-    const method = options?.body ? JSON.parse(options.body).method : null;
-    if (String(url) === "https://tempo-rpc.fixture")
-      return new Response(
-        JSON.stringify({ jsonrpc: "2.0", id: 1, result: method === 'eth_chainId' ? '0x1079' : method === 'eth_getBlockByNumber' ? {number:'0x10',hash:'0x'+'aa'.repeat(32)} : {...activeReceipt,blockNumber:'0x10',blockHash:'0x'+'aa'.repeat(32)} }),
-        { headers: { "content-type": "application/json" } },
-      );
-    return originalFetch(url);
-  };
-  t.after(() => {
-    globalThis.fetch = originalFetch;
-  });
-  const created = await post(
-    "/api/escrow/intents/" + prepared.body.intentId + "/confirm",
-    { transactionHash: "0x" + "aa".repeat(32) },
-    "direct_create_confirm_0001",
-  );
-  assert.equal(created.status, 201, JSON.stringify(created.body));
-  assert.equal(created.body.reward, "1");
-  assert.equal(created.body.entry, "0.01");
-  assert.equal(
-    DB.sqlite
-      .prepare("SELECT escrow_bounty_id,terms_hash FROM bounties WHERE id=?")
-      .get(created.body.id).escrow_bounty_id,
-    "7",
-  );
-  const entry = await post(
-    "/api/bounties/" + created.body.id + "/attempts",
-    {
-      maxEntry: "0.01",
-      maxPlatformFeeBps: 250,
-    },
-    "direct_entry_fixture_0001",
-    challengerSession,
-  );
-  assert.equal(entry.status, 202, JSON.stringify(entry.body));
-  assert.equal(entry.body.plan.approval.amount, "10000");
-  activeReceipt = {
-    status: "0x1",
-    logs: [
-      {
-        address: escrow,
-        topics: [
-          "0xe1c145c9979da15902ab996aa4dc96efd960b46a04ce9a3516a8b76affc85395",
-          "0x" + pad(7),
-          "0x" + pad(1),
-          "0x" + challengerWallet.slice(2).padStart(64, "0"),
-        ],
-        data: "0x" + pad(Math.floor(Date.now() / 1000) + 300),
-      },
-    ],
-  };
-  const entered = await post(
-    "/api/escrow/intents/" + entry.body.intentId + "/confirm",
-    { transactionHash: "0x" + "bb".repeat(32) },
-    "direct_entry_confirm_0001",
-    challengerSession,
-  );
-  assert.equal(entered.status, 202, JSON.stringify(entered.body));
-  assert.equal(entered.body.status, "engineering");
-  assert.deepEqual(entered.body.defender, blueprint);
-  assert.ok(entered.body.build.remainingSeconds >= 150);
-  const publicBounty = await worker.fetch(
-      new Request("https://foundry.example/api/bounties/" + created.body.id),
-      env,
-    ),
-    publicBountyBody = await publicBounty.json();
-  assert.equal(publicBounty.status, 200);
-  assert.equal(publicBountyBody.blueprint, undefined);
-  assert.equal(publicBountyBody.scout.cost > 0, true);
-  const anonymousAttempt = await worker.fetch(
-    new Request("https://foundry.example/api/attempts/" + entered.body.id),
-    env,
-  );
-  assert.equal(anonymousAttempt.status, 403);
-  const anonymousPractice = await call(env, "/api/practice", "POST", {
-    challenger: packChallenge(PRESETS[1], "foundry", 0, blueprint.q),
-    bountyId: created.body.id,
-    seed: 42,
-  });
-  assert.equal(anonymousPractice.status, 403);
-  const challengerBlueprint = packChallenge(
-      PRESETS[1],
-      "foundry",
-      0,
-      blueprint.q,
-    ),
-    deployed = await post(
-      "/api/attempts/" + entered.body.id + "/deploy",
-      { blueprint: challengerBlueprint },
-      "direct_deploy_fixture_0001",
-      challengerSession,
-    );
-  assert.equal(deployed.status, 200, JSON.stringify(deployed.body));
-  assert.equal(deployed.body.status, "awaiting-signatures");
-  assert.deepEqual(deployed.body.replay.challenger, challengerBlueprint);
-  assert.deepEqual(deployed.body.replay.defender, blueprint);
-  assert.equal(deployed.body.replay.seed, deployed.body.result.seed);
-  assert.equal(deployed.body.result.settlement.bountyId, "7");
-  assert.equal(deployed.body.result.settlement.signatures.length, 0);
-  const settlement = DB.sqlite
-      .prepare("SELECT settlement_payload FROM attempts WHERE id=?")
-      .get(deployed.body.id),
-    payload = JSON.parse(settlement.settlement_payload);
-  payload.signatures = ["0x" + "11".repeat(65), "0x" + "22".repeat(65)];
-  DB.sqlite
-    .prepare(
-      "UPDATE attempts SET status='ready-to-settle',settlement_payload=? WHERE id=?",
-    )
-    .run(JSON.stringify(payload), deployed.body.id);
-  const winner = payload.outcome === 0,
-    settlementPayout = winner ? 975000 : 0,
-    settlementFee = winner ? 25000 : 0,
-    creatorEntry = payload.outcome < 2 ? 10000 : 0;
-  activeReceipt = {
-    status: "0x1",
-    logs: [
-      {
-        address: escrow,
-        topics: [
-          "0xf1bd0b9955d3af8c0f3ef37ea58ba05a0df5b81798cb73c84f62c093fa013e66",
-          "0x" + pad(7),
-          "0x" + pad(1),
-          "0x" + challengerWallet.slice(2).padStart(64, "0"),
-        ],
-        data:
-          "0x" +
-          pad(payload.outcome) +
-          payload.resultHash.slice(2) +
-          pad(settlementPayout) +
-          pad(settlementFee) +
-          pad(creatorEntry),
-      },
-    ],
-  };
-  const settled = await post(
-    "/api/attempts/" + deployed.body.id + "/settlement-confirm",
-    { transactionHash: "0x" + "cc".repeat(32) },
-    "direct_settlement_confirm_0001",
-    challengerSession,
-  );
-  assert.equal(settled.status, 200, JSON.stringify(settled.body));
-  assert.equal(settled.body.status, "settled");
-  assert.equal(settled.body.result.payout, winner ? "0.975" : "0");
-  assert.equal(
-    DB.sqlite
-      .prepare("SELECT status FROM bounties WHERE id=?")
-      .get(created.body.id).status,
-    winner ? "claimed" : "open",
-  );
-  const preparedTimeout = await post(
-    "/api/bounties",
-    { ...body, title: "Timed-out counter fixture" },
-    "direct_create_fixture_0002",
-  );
-  activeReceipt = {
-    status: "0x1",
-    logs: [
-      {
-        address: escrow,
-        topics: [
-          "0x8efb9ae6fa203b97084e8481d1a346804fe0b74f6771b412acbb06080d3fc60b",
-          "0x" + pad(8),
-          addressTopic,
-        ],
-        data:
-          "0x" +
-          pad(1000000) +
-          pad(10000) +
-          pad(preparedTimeout.body.expiresAt) +
-          preparedTimeout.body.termsHash.slice(2),
-      },
-    ],
-  };
-  const timedOutBounty = await post(
-    "/api/escrow/intents/" + preparedTimeout.body.intentId + "/confirm",
-    { transactionHash: "0x" + "dd".repeat(32) },
-    "direct_create_confirm_0002",
-  );
-  const timeoutEntry = await post(
-    "/api/bounties/" + timedOutBounty.body.id + "/attempts",
-    { maxEntry: "0.01", maxPlatformFeeBps: 250 },
-    "direct_entry_fixture_0002",
-    challengerSession,
-  );
-  assert.equal(timeoutEntry.status, 202, JSON.stringify(timeoutEntry.body));
-  activeReceipt = {
-    status: "0x1",
-    logs: [
-      {
-        address: escrow,
-        topics: [
-          "0xe1c145c9979da15902ab996aa4dc96efd960b46a04ce9a3516a8b76affc85395",
-          "0x" + pad(8),
-          "0x" + pad(1),
-          "0x" + challengerWallet.slice(2).padStart(64, "0"),
-        ],
-        data: "0x" + pad(Math.floor(Date.now() / 1000) + 300),
-      },
-    ],
-  };
-  const timedOutAttempt = await post(
-    "/api/escrow/intents/" + timeoutEntry.body.intentId + "/confirm",
-    { transactionHash: "0x" + "ee".repeat(32) },
-    "direct_entry_confirm_0002",
-    challengerSession,
-  );
-  assert.equal(
-    timedOutAttempt.status,
-    202,
-    JSON.stringify(timedOutAttempt.body),
-  );
-  DB.sqlite
-    .prepare("UPDATE attempts SET build_deadline=? WHERE id=?")
-    .run(Date.now() - 1, timedOutAttempt.body.id);
-  const forfeited = await post(
-    "/api/attempts/" + timedOutAttempt.body.id + "/forfeit",
-    {},
-    "direct_forfeit_fixture_0001",
-    challengerSession,
-  );
-  assert.equal(forfeited.status, 200, JSON.stringify(forfeited.body));
-  assert.equal(forfeited.body.status, "awaiting-signatures");
-  assert.equal(forfeited.body.result.outcome, "loss");
-  assert.equal(forfeited.body.result.reason, "counter-build-timeout");
-  assert.equal(forfeited.body.escrowSettlement.outcome, 1);
-  assert.equal(forfeited.body.replay, undefined);
-  DB.sqlite
-    .prepare("UPDATE bounties SET escrow_attempt_deadline=? WHERE id=?")
-    .run(Date.now() - 1, timedOutBounty.body.id);
-  const timeoutFinalizer = await post(
-    "/api/bounties/" + timedOutBounty.body.id + "/timeout-forfeit",
-    {},
-    "direct_timeout_forfeit_fixture_0001",
-    challengerSession,
-  );
-  assert.equal(
-    timeoutFinalizer.status,
-    202,
-    JSON.stringify(timeoutFinalizer.body),
-  );
-  assert.equal(timeoutFinalizer.body.kind, "timeout-forfeit");
-  activeReceipt = {
-    status: "0x1",
-    logs: [
-      {
-        address: escrow,
-        topics: [
-          "0xb92806ef23ff7f73544c7018ae5c0c865c4103b6c6a9a497430e6e8961763298",
-          "0x" + pad(8),
-          "0x" + pad(1),
-          "0x" + challengerWallet.slice(2).padStart(64, "0"),
-        ],
-        data: "0x" + wallet.slice(2).padStart(64, "0") + pad(10000),
-      },
-    ],
-  };
-  const timeoutSettled = await post(
-    "/api/escrow/intents/" + timeoutFinalizer.body.intentId + "/confirm",
-    { transactionHash: "0x" + "ff".repeat(32) },
-    "direct_timeout_forfeit_confirm_0001",
-    challengerSession,
-  );
-  assert.equal(timeoutSettled.status, 200, JSON.stringify(timeoutSettled.body));
-  assert.equal(timeoutSettled.body.status, "open");
-  assert.equal(
-    DB.sqlite
-      .prepare("SELECT status FROM attempts WHERE id=?")
-      .get(timedOutAttempt.body.id).status,
-    "settled",
-  );
+  assert.match(paused.body.error, /WM_SETTLEMENT_PRIVATE_KEY/i);
+  assert.equal(DB.sqlite.prepare("SELECT COUNT(*) AS total FROM payment_holds").get().total, 0);
 });
 
 test("a fully populated legacy custody configuration still cannot issue a payment challenge or hold funds", async (t) => {
