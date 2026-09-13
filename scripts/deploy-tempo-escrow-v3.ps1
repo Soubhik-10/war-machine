@@ -52,13 +52,13 @@ $signer = Require-Address 'WM_ESCROW_SETTLEMENT_SIGNER'
 if ($guardian -eq $signer) { throw 'The pause guardian and settlement signer must be different addresses.' }
 $window = [int][Environment]::GetEnvironmentVariable('WM_ESCROW_ATTEMPT_WINDOW_SECONDS', 'Process')
 if ($window -lt 480 -or $window -gt 3600) { throw 'WM_ESCROW_ATTEMPT_WINDOW_SECONDS must be between 480 and 3600.' }
-if ($DeployerAddress.ToLowerInvariant() -in @($guardian, $signer)) { throw 'The deployer must be distinct from the guardian and settlement signer.' }
+if ($DeployerAddress.ToLowerInvariant() -eq $guardian) { throw 'The deployer and pause guardian must be different addresses.' }
 
 Write-Host 'Tempo Mainnet V3 bounty escrow configuration'
 Write-Host "  deployer: $DeployerAddress"
 Write-Host '  token:    0x20C0000000000000000000000000000000000000 (pathUSD)'
 Write-Host "  guardian: $guardian"
-Write-Host "  signer:   $signer (1-of-1 automatic settlement)"
+Write-Host "  signer:   $signer (1-of-1 automatic settlement; may match deployer)"
 Write-Host "  window:   $window seconds"
 Write-Host '  fee:      fixed at 2.5% of a winning reward to 0xc20131e9132888993de6519D486E5558A5DbCb7A'
 Write-Host '  timeout:  no challenger refund; entry is forfeited to the bounty creator'
