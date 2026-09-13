@@ -8,7 +8,7 @@ import {unpackChallenge} from '../dist/data.mjs';
 import {request,durablePost,base} from './agent-client.mjs';
 async function main(){
  const args=process.argv.slice(2),opts={};for(let i=0;i<args.length;i++){const key=args[i];if(key==='--enter'||key==='--help')opts[key]=true;else if(['--bounty','--candidates','--out','--max-entry','--max-platform-fee-bps'].includes(key)&&args[i+1])opts[key]=args[++i];else throw Error('Unknown or incomplete argument: '+key);}
- if(opts['--help']||!opts['--bounty']){console.log('node examples/engineer-loop.mjs --bounty ID [--candidates DIRECTORY] [--out NEW_DIRECTORY] [--enter --max-entry INTEGER --max-platform-fee-bps 250]\nDefault: dry run; factory candidates if no directory is supplied. Files are readable validation requests or packed blueprints. --enter authorizes ONE demo-credit attempt.');return;}
+ if(opts['--help']||!opts['--bounty']){console.log('node examples/engineer-loop.mjs --bounty ID [--candidates DIRECTORY] [--out NEW_DIRECTORY] [--enter --max-entry INTEGER --max-platform-fee-bps 250]\nDefault: dry run; factory candidates if no directory is supplied. Files are readable validation requests or packed blueprints. --enter authorizes ONE local-sandbox attempt.');return;}
  if(opts['--enter']&&(!process.env.WAR_MACHINE_TOKEN||!/^\d+$/.test(opts['--max-entry']||'')||!/^\d+$/.test(opts['--max-platform-fee-bps']||'')))throw Error('--enter requires WAR_MACHINE_TOKEN and explicit --max-entry / --max-platform-fee-bps caps.');
  const bounty=await request('/api/bounties/'+opts['--bounty']),catalog=await request('/api/rules');
  const hash=simulationHash();

@@ -75,9 +75,9 @@ test('fee policy version is stored with the bounty instead of derived from a fut
  const terms=s.bounty(b.id);assert.equal(terms.feePolicyVersion,'preserved-policy-v0');const a=enter(s,entrant,terms),job=s.claim();s.finish(job,result(job));
  assert.equal(s.attempt(a.id).economics.feePolicyVersion,'preserved-policy-v0');assert.equal(s.attempt(a.id).result.feePolicyVersion,'preserved-policy-v0');
 });
-test('discovery exposes the downloadable skill, fee policy and disabled payment prerequisites to guests',async t=>{
+test('discovery exposes the downloadable skill and fee policy to guests',async t=>{
  const app=await startServer({port:0,database:':memory:',seed:false,workers:false});t.after(()=>app.close());
  const d=await (await fetch(app.url+'/.well-known/war-machines.json')).json(),r=await (await fetch(app.url+'/api/rules')).json();
  assert.equal(d.payments.enabled,false);assert.equal(d.payments.mpp,false);assert.equal(d.payments.tempoMainnet,false);assert.ok(d.payments.prerequisitesForPaidMode.some(x=>x.includes('Tempo')));assert.equal(r.economics.platformFee.basisPoints,250);
- const res=await fetch(app.url+d.skill),text=await res.text();assert.equal(res.status,200);assert.match(res.headers.get('content-type'),/text\/plain/);assert.match(text,/^---\nname: war-machines-engineer/);assert.match(text,/97\.5%/);assert.match(text,/MPP and Tempo are required prerequisites/);assert.match(text,/Today's implementation is demo only/);
+ const res=await fetch(app.url+d.skill),text=await res.text();assert.equal(res.status,200);assert.match(res.headers.get('content-type'),/text\/plain/);assert.match(text,/^---\nname: war-machines-engineer/);assert.match(text,/0\.975/);assert.match(text,/direct Tempo escrow/i);assert.match(text,/MPP never creates, enters or settles a bounty/i);
 });

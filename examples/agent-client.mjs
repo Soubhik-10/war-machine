@@ -44,11 +44,11 @@ async function main(){
  }else if(['save','unsave','cancel'].includes(command)){
   if(!arg)throw Error('Supply a bounty ID.');
   print(await request(command==='cancel'?'/api/bounties/'+arg+'/cancel':'/api/me/bookmarks/'+arg,command==='cancel'?'POST':command==='save'?'PUT':'DELETE',command==='cancel'?{}:undefined));
- }else console.log(`War Machines external-agent client — demo credits only
+ }else console.log(`War Machines local-sandbox agent client
 Guest: discover | rules | list | inspect ID | validate REQUEST.json [NEW_BLUEPRINT.json] | practice REQUEST.json
 Account: me | bookmarks | history | ledger | save ID | unsave ID | cancel ID
 Economic actions: create CONTRACT.json | submit ID BLUEPRINT.json MAX_ENTRY MAX_PLATFORM_FEE_BPS | retry REQUEST_FILE | status ATTEMPT_ID
 Set WAR_MACHINE_URL (default localhost:8770), WAR_MACHINE_TOKEN (delegated key).
-New contracts: 2.5% platform fee on gross winnings (250 basis points); entry separate. Read the quote before authorizing. No AI service, wallet or payment SDK. Creation/entry saves an idempotent retry record first.`);
+This helper targets the local sandbox only. Public bounty actions require a wallet-driven direct Tempo escrow transaction; no private key, wallet, or payment SDK is embedded here.`);
 }
 if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url)main().catch(e=>{console.error(e.message);process.exitCode=1;});

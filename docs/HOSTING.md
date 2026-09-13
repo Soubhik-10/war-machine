@@ -1,38 +1,53 @@
-# Hosting and cost boundary
+# Hosting operations
 
-User request, 12 September 2026: deploy an owner-private ChatGPT Sites release after the backend is production-ready. Do not purchase credits, enable automatic paid overages, or expose a paid bounty flow solely because a Site exists. A Site deployment remains separate from Tempo mainnet activation.
+## Public deployment
 
-This implementation runs on the user's computer with Node and a local SQLite database. It has no OpenAI API calls, remote model inference, hosted database dependency, analytics, external asset CDN, or automatic deployment step. The optional Tempo/MPP SDKs do not provision hosting or transact in default demo mode. Browser API requests go to `/api` on the same game server.
+The public deployment is [war-machine.sssmpp.chatgpt.site](https://war-machine.sssmpp.chatgpt.site).
 
-The old **War Machines — The Foundry** Site was checked on 12 September 2026. It is still active, version 1, and accessible only to its owner. No access, deployment, billing or deletion settings were changed. Keeping source local does not delete that earlier Site. The current Sites tools expose no account invoice or hosting spend-cap control, so this check does not certify an invoice balance. Current official guidance says public-beta Sites usage is included up to plan-specific limits; it is not a permanent pricing guarantee. Source: https://help.openai.com/en/articles/20001339
+It runs the bundled Worker with D1 binding `DB` and the following live runtime configuration:
 
-## Run the complete game locally
+```text
+WM_MODE=tempo-mainnet
+WM_BOUNTY_ESCROW_ADDRESS=0x461eefD1c4bcbE76C470487cF18b892fCD76d494
+```
 
-Use Node 22.21.1 or a compatible newer runtime with `node:sqlite` and worker threads, then run `npm ci` for the pinned authentication/payment dependencies.
+The Worker serves the game, account build vault, bounty metadata, wallet identity flow, direct escrow transaction plans, receipt verification, deterministic simulations, and result-attestation state. It does not store a private key or hold pathUSD.
+
+## Deploying a change
+
+1. Run `npm test`, `npm run build:sites`, and `npm run package:sites`.
+2. Push the exact commit to the registered Sites source repository.
+3. Save and deploy the matching archive through the Sites connector.
+4. Confirm the deployment has succeeded and preserve the D1 binding.
+5. After any runtime environment change, deploy a saved version so that the new revision applies.
+
+The site is public. Keep the audience unchanged unless the owner explicitly chooses a different audience.
+
+## Local development
 
 ```sh
 npm ci
 node server.mjs
 ```
 
-Open `http://127.0.0.1:8770/`. By default the server listens only on loopback and stores demo accounts, bounties, attempts and the credit ledger in `var/war-machines.sqlite`. Back up this database before replacing a running installation. Never commit or publicly serve `var/`.
+This starts a loopback-only local sandbox at `http://127.0.0.1:8770/` with SQLite data in `var/war-machines.sqlite`. It is useful for workshop and simulation development, but it is not the public Tempo payment rail.
 
-## Later self-hosting
+For a static-only workshop preview:
 
-Choose a host separately. The complete game requires a persistent Node process, worker threads and a durable writable disk for SQLite. A static host supports the workshop and ordinary machine links, but cannot verify official bounties or maintain shared balances. Sites/Cloudflare Workers/Appwrite are not drop-in hosts for this Node/SQLite server; they need a deliberate runtime/database adapter.
+```sh
+python serve.py --open
+```
 
-ChatGPT Sites deployment is authorized for an owner-private release. It must not be used to publish the present Node/SQLite server as if it were a working backend: Sites expects a Worker-compatible server and durable bindings, while this server uses Node's SQLite and worker threads. Port account, ledger and queue storage to D1 (or use a separate production Node host) before deploying verified bounties or any payment path. Confirm the provider's actual limits, sleep/expiry behavior, persistence, hard spending cap and overage policy before accepting funds.
+Static hosting supports local saves, exports, ordinary challenge links, and free practice. Shared bounties require the Worker/D1 deployment.
 
-For a user-approved deployment: terminate HTTPS in a reverse proxy, retain the original Host header, configure `HOST=0.0.0.0` only when intentionally exposing the service, set `PORT`, and point `DATABASE_PATH` at a persistent volume. Use one application instance per SQLite database. Set proxy request/body/rate limits, add robust identity and abuse controls before public competition, and budget CPU for the bounded simulation worker. Demo sign-up intentionally grants play credits; it is not resistant to multiple-account farming and must never back real money.
+## Mainnet safeguards
 
-Deploy engine changes through a restart, never by editing a live process's simulation files. Engine-incompatible idle bounties are archived and their reserves returned. Accepted incompatible jobs are refunded. Historical receipts remain readable; exact old replay playback requires retaining that engine release.
+- Keep `WM_BOUNTY_ESCROW_ADDRESS` pinned to the verified deployed escrow.
+- Never add a backend custody key, signer private key, or wallet seed phrase to Site runtime variables, D1, Git, or browser storage.
+- Keep the two result signers independent and encrypted; see [PAYMENTS-OPERATIONS.md](PAYMENTS-OPERATIONS.md).
+- MPP service charging is off until every `WM_AGENT_MPP_*` value and `MPP_SECRET_KEY` have been intentionally configured. It is separate from bounty funds.
+- Use controlled small amounts while the manual two-signer settlement operation is in place.
 
-Tempo wallet and MPP code is available only behind the fail-closed configuration in [TEMPO-MAINNET.md](TEMPO-MAINNET.md). A deployment does not authorize mainnet activation. Demo credits have no monetary value and must never be converted into tokens.
+## Release compatibility
 
-## Releasing simulation changes
-
-After editing `dist/engine.mjs` or `dist/data.mjs`, run `node scripts/stamp-release.mjs`, then run the tests and restart the server. Commit the generated `dist/release.mjs` with the source. Startup refuses a mismatched stamp; stale browser tabs must reload before using the new bounty engine. This guards replay consistency and does not publish or deploy anything.
-
-## Agent season 02 resource boundaries
-
-Source changes and a GitHub push do not publish or configure hosting. Guest API practice shares the bounded single worker with official trials, is limited to four requests/minute/IP and yields to pending official work. Agent candidate searches run on the agent owner’s own computer. No AI calls, managed wallets, relayers, fee sponsors, paid RPC or hosting purchase is enabled. Production HTTPS, durable disk, backups and host sizing remain a separate user-controlled deployment task.
+After editing `dist/engine.mjs` or `dist/data.mjs`, run `node scripts/stamp-release.mjs`, run the tests, rebuild the Site bundle, and deploy the generated `dist/release.mjs`. This keeps result commitments and replays tied to the correct engine release.

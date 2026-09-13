@@ -42,10 +42,10 @@ test('settlement attestations bind the exact Tempo escrow typed data and canonic
  const validated=await validateEscrowAttestation(config,payload,signatures,[one.address,two.address]);assert.equal(validated.length,2);assert.deepEqual(validated.map(item=>item.signer),[one.address,two.address].sort((left,right)=>left.toLowerCase().localeCompare(right.toLowerCase())));await assert.rejects(()=>validateEscrowAttestation(config,payload,[signatures[0],signatures[0]],[one.address,two.address]),/two different/);
 });
 
-test('Tempo mode is fail-closed and never falls back to demo credits',async t=>{
+test('Tempo mode is fail-closed and never falls back to sandbox credits',async t=>{
  const DB=new D1Mock();await DB.migrate();t.after(()=>DB.close());const env={DB,WM_MODE:'tempo-mainnet'};
  const health=await call(env,'/api/health');assert.equal(health.status,200);assert.equal(health.body.mode,'tempo-mainnet');assert.equal(health.body.paymentsEnabled,false);
- const session=await call(env,'/api/session','POST',{name:'No demo'});assert.equal(session.status,503);assert.match(session.body.error,/WM_BOUNTY_ESCROW_ADDRESS/i);
+ const session=await call(env,'/api/session','POST',{name:'No sandbox'});assert.equal(session.status,503);assert.match(session.body.error,/WM_BOUNTY_ESCROW_ADDRESS/i);
  const rules=await call(env,'/api/rules');assert.equal(rules.status,200);assert.equal(rules.body.startingCredits,0);assert.equal(rules.body.mpp.enabled,false);
 });
 
@@ -82,7 +82,7 @@ test('a fully populated legacy custody configuration still cannot issue a paymen
  assert.equal(res.status,503,raw);assert.match(raw,/WM_BOUNTY_ESCROW_ADDRESS/i);assert.equal(res.headers.get('www-authenticate'),null);assert.equal(DB.sqlite.prepare('SELECT COUNT(*) AS total FROM payment_holds').get().total,0);
 });
 
-test('Sites Worker + D1 supports private build vaults and authoritative demo bounty settlement',async t=>{
+test('Sites Worker + D1 supports private build vaults and authoritative sandbox settlement',async t=>{
  const DB=new D1Mock();await DB.migrate();t.after(()=>DB.close());const env={DB,ASSETS:{fetch:()=>new Response('asset')}};
  const home=await worker.fetch(new Request('https://foundry.example/'),env);assert.equal(home.status,200);assert.match(await home.text(),/WAR MACHINES/);
  const owner=(await call(env,'/api/session','POST',{name:'Owner'})).body,challenger=(await call(env,'/api/session','POST',{name:'Challenger'})).body;

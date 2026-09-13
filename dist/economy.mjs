@@ -1,4 +1,4 @@
-// One demo credit = 1,000 integer units. No floating-point ledger arithmetic.
+// One sandbox credit = 1,000 integer units. No floating-point ledger arithmetic.
 export const CREDIT_SCALE=1000;
 export const PLATFORM_FEE_BPS=250;
 export const FEE_POLICY_VERSION='winning-reward-v1';

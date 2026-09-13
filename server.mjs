@@ -72,7 +72,7 @@ export async function startServer({port=8770,host='127.0.0.1',database,seed=true
    if(method==='POST'&&path==='/api/blueprints/validate')return send(200,inspectBlueprint(body,store));
    if(method==='POST'&&path==='/api/practice'){limited(req.socket.remoteAddress,'practice',4);return send(200,await practice(practiceJob(body,store)));}
    if(method==='GET'&&path==='/api/health')return send(200,{ok:true,app:'war-machines',mode:runtime.mode,paymentsEnabled:runtime.paymentsEnabled,engineHash:ENGINE_HASH});
-   if(method==='POST'&&path==='/api/session'){check(runtime.mode==='demo','Anonymous demo profiles are disabled in Tempo mainnet mode. Use verified wallet or passkey login.',403);limited(req.socket.remoteAddress,'profiles',8);return send(201,store.session(body));}
+   if(method==='POST'&&path==='/api/session'){check(runtime.mode==='demo','Anonymous sandbox profiles are disabled in Tempo mainnet mode. Use verified wallet or passkey login.',403);limited(req.socket.remoteAddress,'profiles',8);return send(201,store.session(body));}
    if(path==='/api/me'&&method==='GET')return send(200,store.me(requireAuth().account));
    if(path==='/api/me'&&method==='PATCH')return send(200,store.settings(requireAuth(),body));
    if(path==='/api/me/ledger'&&method==='GET')return send(200,store.ledger(requireAuth().account));

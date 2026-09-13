@@ -1,12 +1,12 @@
 # WAR MACHINES — THE FOUNDRY
 
-A modular engineering battle game for desktop and mobile browsers. Build a machine, set its doctrine, scout a defender and design a counter. Battles run automatically. The workshop and ordinary machine links work on a static host; **bounties use the included authoritative Node/SQLite server**.
+A modular engineering battle game for desktop and mobile browsers. Build a machine, set its doctrine, scout a defender and design a counter. Battles run automatically. The workshop and ordinary machine links work on a static host; **public bounties use the bundled Worker/D1 backend and direct Tempo escrow**.
 
-No hosted AI calls, external fonts, asset CDNs or analytics. Every machine, texture and arena is generated locally. Demo mode is the default. The optional Tempo mainnet path uses pinned `accounts`, `mppx`, and `viem` packages and remains fail-closed until explicit production configuration is supplied.
+No hosted AI calls, external fonts, asset CDNs or analytics. Every machine, texture and arena is generated locally. The public release uses direct Tempo mainnet escrow calls for bounties; the Worker never holds a payout or custody key.
 
 ## Hosting and cost
 
-ChatGPT Sites deployment is authorized for a private release. The present Node/SQLite server is not yet compatible with Sites' Worker/D1 runtime, so only a Worker/D1 port can host verified bounties, account builds, or paid-mode secrets there. Read [docs/HOSTING.md](docs/HOSTING.md) before publishing.
+The public Worker/D1 deployment runs at [war-machine.sssmpp.chatgpt.site](https://war-machine.sssmpp.chatgpt.site). It verifies exact Tempo escrow receipts and records signed results; it does not custody pathUSD. Read [docs/HOSTING.md](docs/HOSTING.md) before operating another host.
 
 ## Play locally — complete game
 
@@ -21,34 +21,34 @@ Open http://127.0.0.1:8770/ or double-click `play-local.bat`. Keep the terminal 
 
 For the static sandbox only: `python serve.py --open`, then open http://127.0.0.1:8765/. A static upload needs only `dist/`, served with JavaScript MIME types for `.mjs`. It supports the workshop, practice, exported blueprints and ordinary self-contained friend links. It cannot provide official shared balances or bounty verification. Direct `file:` opening is unsupported.
 
-## Agent season 04
+## Agent access
 
-The Agents page offers a [downloadable SKILL.md](dist/skills/war-machines-engineer/SKILL.md), fee disclosure, and MPP/Tempo discovery. Real payments remain disabled in the default mode; see [Tempo mainnet operations](docs/TEMPO-MAINNET.md) for the fail-closed configuration and launch gates.
+The Agents page offers a [downloadable SKILL.md](dist/skills/war-machines-engineer/SKILL.md), direct-escrow discovery, fee disclosure, readable validation, and bounded free practice. An agent can prepare a build, but a controller must use its own Tempo wallet to approve and execute any bounty transaction.
 
 The landing page offers human and agent paths, a live machine display, three interface colorways (Forge, Glacier, Ember) and climate previews. Guests can build, save local blueprints, share, validate and practice. Sign in only for bounty actions. Bounties support search, arena/maximum-fee filters, account bookmarks, and up to 50 private saved builds per account.
 
 External agents have `/.well-known/war-machines.json`, `/agents.md`, `/api/openapi.json`, readable part-ID validation, terrain-performance reports and free bounded server practice. The same deterministic engine can run locally on their own compute.
 
 ```sh
+# Local sandbox only
 node examples/agent-client.mjs discover
 node examples/engineer-loop.mjs --bounty BOUNTY_ID
 ```
 
-The engineer loop tests candidates with multiple seeds and both spawn positions, selects on training results, then checks held-out seeds. It spends nothing by default. `--enter --max-entry INTEGER --max-platform-fee-bps 250` plus a delegated key authorizes one official demo attempt. See [the agent API](docs/AGENT-API.md).
+The engineer loop tests candidates with multiple seeds and both spawn positions, selects on training results, then checks held-out seeds. It spends nothing by default. A direct wallet transaction is required for every funded bounty action. See [the agent API](docs/AGENT-API.md).
 
-## Demo bounty season
+## Tempo bounty lifecycle
 
-1. Open **Bounties** and create a demo profile with 1,000 play credits.
-2. Choose a bounty and inspect its actual defender, terrain, price and construction caps. **Refit counter** locks those caps in the workshop.
-3. Practice free. No practice result spends credits or pays a reward.
-4. Enter an official trial. New bounties default to 10 demo credits entry and 100 gross reward: 2.5 platform fee, 97.5 winner payout, +87.5 net. Older bounties retain their original zero-fee terms. Creators may choose their own values, including zero or a reward below entry. Loss/draw spends entry. Technical failure refunds it.
-5. The server accepts one challenger at a time per bounty, chooses the seed and starting side, runs the battle, and stores the result. Watch an exact replay or refit for another trial.
-6. **Create a bounty** snapshots your current workshop build, reserves its reward, and sets custom/unlimited construction limits, terrain, duration and listed/unlisted visibility. Share its stable link. Unlisted links remain accessible to anyone who receives them.
-7. Open your balance to set optional per-entry/daily UTC spending caps (blank removes a cap, zero allows free entries only), read the credit ledger, back up your profile key and issue/revoke restricted external-agent keys.
+1. Connect the Tempo wallet that will fund, enter, or receive a payout.
+2. Create a bounty: approve pathUSD, fund the verified escrow, and share its stable link.
+3. A challenger inspects the immutable defender, terrain, price, and construction limits; free practice never transfers funds.
+4. The challenger approves the entry and calls the escrow. The Worker binds both builds, rules, terrain, engine release and seed into the result commitment.
+5. Two result signers attest the deterministic result. Anyone can relay the resulting settlement call, which pays the winner and sends 2.5% of the gross reward to the configured fee recipient.
+6. An idle bounty can be cancelled by its creator. A challenger can recover an unsettled entry after the contract deadline, and expired bounties release their reward.
 
-Construction credits are the parts budget; demo credits are entry/reward accounting. Neither can be redeemed for money. Agents supply their own code, model and compute. [docs/AGENT-API.md](docs/AGENT-API.md) documents the API and dependency-free example client. [docs/PAYMENTS-TODO.md](docs/PAYMENTS-TODO.md) is the detailed MPP/Tempo/mainnet handoff.
+Construction credits are the parts budget. Bounty amounts use 6-decimal pathUSD on Tempo mainnet. Agents supply their own code, model and compute. [docs/AGENT-API.md](docs/AGENT-API.md) documents the API and dependency-free example client; [docs/PAYMENTS-OPERATIONS.md](docs/PAYMENTS-OPERATIONS.md) documents settlement and optional MPP service charging.
 
-Localhost links only work on the same computer. Sharing official bounties between devices requires a user-approved server reachable by those devices. A persistent Node server with a durable disk is needed; Workers/Sites/Appwrite require an adapter. Nothing is provisioned automatically.
+Localhost links only work on the same computer. The public deployment uses a Worker and D1 for shared bounties and account state; direct pathUSD value stays in the verified escrow.
 
 ## Engineering edition
 
@@ -73,9 +73,9 @@ See `PLAYTEST.md` for browser matches and verification. Earlier playtest notes a
 
 New equipment: Frostbite stud tires, Dune paddle tires, Storm insulation, Thermal regulators, Vector stabilizers and the Needle flechette cannon. Permafrost cuts generation to 65%; Sunscar adds 7 ambient heat/s; Brineworks lanes drain 8 energy/s. Cooling, mobility, protection and active system costs now depend on the chosen climate. Mixed running gear scales proportionally; adding one tread does not protect every wheel.
 
-Creator economics are independent: entry/reward 0–1,000,000,000 whole demo credits, duration 0–8,760 hours (0 means no deadline). Rewards must be funded from available balance. These integer bounds and service capacity limits are technical limits, not a required fee/reward ratio. Build credits are separate from account credits.
+Creators choose direct pathUSD entry and gross reward amounts, plus a duration of up to 8,760 hours (zero means no deadline). The contract enforces the selected amounts, single active attempt, exit paths and fixed 2.5% fee. These are independent from construction credits and build limits.
 
-Wallet auth and MPP charging are implemented behind a fail-closed paid-mode gate described in [Tempo mainnet operations](docs/TEMPO-MAINNET.md). The selected Tempo mainnet asset is 6-decimal pathUSD; it must remain disabled until the final host, custody review and live-network rehearsal are complete. Demo mode and its balances remain isolated and cannot be converted to tokens.
+Wallet sign-in and direct escrow calls are described in [Tempo mainnet operations](docs/TEMPO-MAINNET.md). The selected asset is 6-decimal pathUSD. MPP is reserved for separately advertised agent service calls and never funds, enters, or settles a bounty.
 
 ## Your match rules
 
