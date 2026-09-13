@@ -630,9 +630,9 @@ test("direct escrow intents bind exact terms to the confirmed create and entry e
       .get(created.body.id).status,
     winner ? "claimed" : "open",
   );
-  const preparedCancel = await post(
+  const preparedTimeout = await post(
     "/api/bounties",
-    { ...body, title: "Cancellable fixture" },
+    { ...body, title: "Timed-out counter fixture" },
     "direct_create_fixture_0002",
   );
   activeReceipt = {
@@ -649,43 +649,64 @@ test("direct escrow intents bind exact terms to the confirmed create and entry e
           "0x" +
           pad(1000000) +
           pad(10000) +
-          pad(preparedCancel.body.expiresAt) +
-          preparedCancel.body.termsHash.slice(2),
+          pad(preparedTimeout.body.expiresAt) +
+          preparedTimeout.body.termsHash.slice(2),
       },
     ],
   };
-  const cancellable = await post(
-    "/api/escrow/intents/" + preparedCancel.body.intentId + "/confirm",
+  const timedOutBounty = await post(
+    "/api/escrow/intents/" + preparedTimeout.body.intentId + "/confirm",
     { transactionHash: "0x" + "dd".repeat(32) },
     "direct_create_confirm_0002",
   );
-  const cancel = await post(
-    "/api/bounties/" + cancellable.body.id + "/cancel",
-    {},
-    "direct_cancel_fixture_0001",
+  const timeoutEntry = await post(
+    "/api/bounties/" + timedOutBounty.body.id + "/attempts",
+    { maxEntry: "0.01", maxPlatformFeeBps: 250 },
+    "direct_entry_fixture_0002",
+    challengerSession,
   );
-  assert.equal(cancel.status, 202, JSON.stringify(cancel.body));
+  assert.equal(timeoutEntry.status, 202, JSON.stringify(timeoutEntry.body));
   activeReceipt = {
     status: "0x1",
     logs: [
       {
         address: escrow,
         topics: [
-          "0x329fa6d5d5547698be130ca491e4fc9476ab88b3c2a44f412d1670585daeadf3",
+          "0xe1c145c9979da15902ab996aa4dc96efd960b46a04ce9a3516a8b76affc85395",
           "0x" + pad(8),
-          addressTopic,
+          "0x" + pad(1),
+          "0x" + challengerWallet.slice(2).padStart(64, "0"),
         ],
-        data: "0x" + pad(1000000),
+        data: "0x" + pad(Math.floor(Date.now() / 1000) + 300),
       },
     ],
   };
-  const cancelled = await post(
-    "/api/escrow/intents/" + cancel.body.intentId + "/confirm",
+  const timedOutAttempt = await post(
+    "/api/escrow/intents/" + timeoutEntry.body.intentId + "/confirm",
     { transactionHash: "0x" + "ee".repeat(32) },
-    "direct_cancel_confirm_0001",
+    "direct_entry_confirm_0002",
+    challengerSession,
   );
-  assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
-  assert.equal(cancelled.body.status, "cancelled");
+  assert.equal(
+    timedOutAttempt.status,
+    202,
+    JSON.stringify(timedOutAttempt.body),
+  );
+  DB.sqlite
+    .prepare("UPDATE attempts SET build_deadline=? WHERE id=?")
+    .run(Date.now() - 1, timedOutAttempt.body.id);
+  const forfeited = await post(
+    "/api/attempts/" + timedOutAttempt.body.id + "/forfeit",
+    {},
+    "direct_forfeit_fixture_0001",
+    challengerSession,
+  );
+  assert.equal(forfeited.status, 200, JSON.stringify(forfeited.body));
+  assert.equal(forfeited.body.status, "awaiting-signatures");
+  assert.equal(forfeited.body.result.outcome, "loss");
+  assert.equal(forfeited.body.result.reason, "counter-build-timeout");
+  assert.equal(forfeited.body.escrowSettlement.outcome, 1);
+  assert.equal(forfeited.body.replay, undefined);
 });
 
 test("a fully populated legacy custody configuration still cannot issue a payment challenge or hold funds", async (t) => {

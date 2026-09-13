@@ -300,7 +300,7 @@ export function createBountyUI(adapter) {
     return `<div class="terrain-tags">${arena.climate ? `<span class="terrain-tag climate" title="${esc(arena.desc)}">${esc(arena.climate.name)}</span>` : ""}${types.map((t) => `<span class="terrain-tag ${t}" title="${esc(TERRAIN_INFO[t]?.effect || "")}">${esc(TERRAIN_INFO[t]?.name || t)}</span>`).join("")}</div>`;
   }
   function feeNotice(b) {
-    return `<div class="notice fee-disclosure"><strong>${b.platformFeeBps ? money(b.platformFeeBps / 100) + "% platform fee on a win" : "No platform fee · original bounty terms"}</strong><br>Gross reward ${money(b.reward)} − platform fee ${money(b.platformFee)} = <strong>${money(b.payout)} paid to the winner</strong>. Entry costs ${money(b.entry)} separately. Net if you win: ${signed(b.netIfWin)} ${esc(runtime.currency)}. No payout fee on a loss, draw, refund or cancellation.</div>`;
+    return `<div class="notice fee-disclosure"><strong>${b.platformFeeBps ? money(b.platformFeeBps / 100) + "% platform fee on a win" : "No platform fee · original bounty terms"}</strong><br>Gross reward ${money(b.reward)} − platform fee ${money(b.platformFee)} = <strong>${money(b.payout)} paid to the winner</strong>. Entry costs ${money(b.entry)} separately. On a loss, draw, or missed counter deadline, that entry is paid to the <strong>bounty creator</strong>. Net if you win: ${signed(b.netIfWin)} ${esc(runtime.currency)}.</div>`;
   }
   function card(b) {
     const s = scout(b),
@@ -743,9 +743,14 @@ export function createBountyUI(adapter) {
           : "Official loss settled. The bounty is open for the next challenger.",
       );
     }
-    async function refund(a) {
-      const bounty = await mutate("/attempts/" + a.id + "/refund", {});
-      await open(bounty.id);
+    async function forfeitTimeout(a) {
+      const ended = await api(
+        "/attempts/" + a.id + "/forfeit",
+        "POST",
+        {},
+        uid(),
+      );
+      await attempt(ended.id);
     }
     async function watchOfficialReplay(a) {
       const catalog = await api("/rules");
@@ -785,26 +790,18 @@ export function createBountyUI(adapter) {
               "The paid defender reveal is unavailable. Reopen this attempt with the wallet that paid the entry.",
             );
           if (!seconds) {
-            const recoverySeconds = Math.max(
-                0,
-                Math.ceil(
-                  (Number(a.build?.settlementDeadline || 0) - Date.now()) /
-                    1000,
-                ),
-              ),
-              recoveryClock = `${Math.floor(recoverySeconds / 60)}:${String(recoverySeconds % 60).padStart(2, "0")}`;
             app.innerHTML =
               header(
                 "ENGINEERING WINDOW CLOSED.",
-                "No counter was deployed before the result-attestation reserve began.",
+                "No counter was deployed before the deadline.",
               ) +
-              `<section class="panel trial-wait"><span class="eyebrow">ESCROW TIMEOUT PROTECTION</span><h2>Counter not committed.</h2><p>The direct escrow still protects your entry if no signed result settles. ${recoverySeconds ? `Recovery opens in <strong>${recoveryClock}</strong> when the on-chain attempt deadline passes.` : "The on-chain recovery window is open."}</p><div class="bounty-actions"><button id="refund-attempt" ${recoverySeconds ? "disabled" : ""}>Recover entry onchain</button><button id="pending-contract">View bounty</button></div><p id="bounty-error" class="error-message"></p></section>`;
+              `<section class="panel trial-wait"><span class="eyebrow">COUNTER CLOCK EXPIRED</span><h2>Finalizing loss.</h2><p>No counter was committed in time. The ${money(a.economics?.entry ?? 0)} ${esc(runtime.currency)} entry is due to the bounty creator; this bounty will reopen after its signed escrow settlement.</p><div class="bounty-actions"><button id="pending-contract">View bounty</button></div><p id="bounty-error" class="error-message"></p></section>`;
             wireHeader();
             $("#pending-contract").onclick = () => open(a.bounty);
-            if (!recoverySeconds)
-              $("#refund-attempt").onclick = (e) =>
-                act(e.currentTarget, () => refund(a));
-            else schedule(poll, g, 1000);
+            void forfeitTimeout(a).catch((error) => {
+              if (g === generation)
+                $("#bounty-error").textContent = error.message;
+            });
             return;
           }
           app.innerHTML =
@@ -869,7 +866,7 @@ export function createBountyUI(adapter) {
                 : "RESULT AWAITING ATTESTATION.",
               "The game result is deterministic. The escrow releases funds only after two independent signatures.",
             ) +
-            `<section class="panel trial-wait"><span class="eyebrow">${ready ? "TWO SIGNATURES VERIFIED" : "RESULT RECORDED"}</span><h2>${r?.outcome === "win" ? "YOU BROKE THE MACHINE." : r?.outcome === "loss" ? "THE DEFENSE HELD." : "DRAW OR TECHNICAL RESULT."}</h2><p>${r?.integrity ? `Your integrity: ${(r.integrity[0] * 100).toFixed(1)}% · Defender: ${(r.integrity[1] * 100).toFixed(1)}%. ` : ""}Result hash: <code>${esc(s?.resultHash || "pending")}</code></p><p class="hint">${expires ? "The result window elapsed. Return the entry directly from escrow." : ready ? "Relay the signed verdict from Tempo Wallet. A win pays from escrow; a loss returns this bounty to the board." : "The exact battle has completed. Result settlement is paused while the independent signer service is offline; if this window expires, the challenger can return the entry onchain."}</p><div class="bounty-actions">${a.replay ? '<button id="watch-official-replay">▶ Watch exact battle</button>' : ""}${ready ? '<button class="primary" id="settle-attempt">Settle & return to bounty</button>' : ""}${expires ? '<button id="refund-attempt">Return expired entry onchain</button>' : ""}<button id="pending-contract">View bounty</button></div><p id="bounty-error" class="error-message"></p></section>`;
+            `<section class="panel trial-wait"><span class="eyebrow">${ready ? "TWO SIGNATURES VERIFIED" : "RESULT RECORDED"}</span><h2>${r?.reason === "counter-build-timeout" ? "COUNTER TIME EXPIRED." : r?.outcome === "win" ? "YOU BROKE THE MACHINE." : r?.outcome === "loss" ? "THE DEFENSE HELD." : "DRAW OR TECHNICAL RESULT."}</h2><p>${r?.reason === "counter-build-timeout" ? `No counter was committed. The ${money(r.entry)} ${esc(runtime.currency)} entry is due to the bounty creator. ` : r?.integrity ? `Your integrity: ${(r.integrity[0] * 100).toFixed(1)}% · Defender: ${(r.integrity[1] * 100).toFixed(1)}%. ` : ""}Result hash: <code>${esc(s?.resultHash || "pending")}</code></p><p class="hint">${expires ? "The immutable escrow's signing window elapsed before settlement. It can no longer transfer this entry." : ready ? "Relay the signed verdict from Tempo Wallet. A win pays the challenger; a loss or timeout sends the entry to the bounty creator and returns this bounty to the board." : "The result is final. The independent signers must attest it before the escrow can distribute the entry or reward."}</p><div class="bounty-actions">${a.replay ? '<button id="watch-official-replay">▶ Watch exact battle</button>' : ""}${ready ? '<button class="primary" id="settle-attempt">Settle & return to bounty</button>' : ""}<button id="pending-contract">View bounty</button></div><p id="bounty-error" class="error-message"></p></section>`;
           wireHeader();
           $("#pending-contract").onclick = () => open(a.bounty);
           if ($("#watch-official-replay"))
@@ -878,9 +875,6 @@ export function createBountyUI(adapter) {
           if ($("#settle-attempt"))
             $("#settle-attempt").onclick = (e) =>
               act(e.currentTarget, () => settle(a));
-          if ($("#refund-attempt"))
-            $("#refund-attempt").onclick = (e) =>
-              act(e.currentTarget, () => refund(a));
           if (!ready && !expires) schedule(poll, g, 5000);
           return;
         }

@@ -17,7 +17,7 @@ War Machines uses a non-upgradeable pathUSD bounty escrow on Tempo Mainnet. The 
 2. A challenger approves the exact entry and calls `enterBounty` directly from their wallet. That confirmed entry reveals the defender only to the challenger; public routes retain a cost, mass, part-count, weapon-count, terrain and limit summary.
 3. The challenger gets the current three-minute construction window, can practice for free against the revealed defender, then deploys one counter. The worker records the deterministic replay and its hash.
 4. Two result keystores sign the escrow's exact EIP-712 settlement payload. Anyone can relay `settleAttempt`; the escrow verifies both signatures and sends the winner payout, platform fee, and entry recipient payment itself.
-5. A creator can cancel an idle bounty. A challenger can recover a timed-out entry. Anyone can expire a bounty after its published expiry. These are direct contract calls and do not need an operator.
+5. A creator can cancel an idle bounty. A loss, draw, or missed counter-build deadline pays the entry to the bounty creator once two result signatures attest it. Anyone can expire a bounty after its published expiry.
 
 ## Local result signing
 
@@ -29,7 +29,7 @@ After an attempt reaches **awaiting signatures**, run this from the desktop repo
 .\scripts\attest-escrow-result.ps1 -AttemptId <attempt UUID> -Origin https://your-site.example
 ```
 
-Then the browser shows **Settle onchain**, which submits the verified contract call from a wallet. If signing does not finish before the 300-second window, use **Recover entry onchain**. No server action is required to return that entry.
+Then the browser shows **Settle onchain**, which submits the verified contract call from a wallet. The signer service must attest before the escrow deadline; a missed counter-build clock records a loss and sends the entry to the bounty creator.
 
 This manual operation is acceptable only for an extremely small private rehearsal. A public release needs separate signer operators, a reviewed replay/attestation service, monitoring, and an independent Solidity/security review.
 

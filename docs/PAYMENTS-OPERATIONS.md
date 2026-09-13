@@ -20,11 +20,11 @@ The browser prepares the exact approval and escrow calls. The Worker verifies re
 5. Both result signers run `scripts/attest-escrow-result.ps1` using their independent encrypted keystores.
 6. Any wallet can relay `settleAttempt` after both signatures have been registered.
 
-The current deployment uses a five-minute settlement window. It reserves two minutes for result signatures, so the paid construction window is currently about three minutes. The Worker already calculates a cost-scaled three-to-five-minute window for a later escrow with a longer attempt window; do not advertise five minutes until that escrow is deployed and pinned. An idle bounty can be cancelled by its creator. A challenger can reclaim an unsettled entry after its deadline, and an expired bounty releases its reward.
+The current deployment uses a five-minute settlement window. It reserves two minutes for result signatures, so the paid construction window is currently about three minutes. The Worker already calculates a cost-scaled three-to-five-minute window for a later escrow with a longer attempt window; do not advertise five minutes until that escrow is deployed and pinned. An idle bounty can be cancelled by its creator. A loss, draw, or missed counter deadline settles the entry to the bounty creator; an expired bounty releases its reward.
 
 ## Operating limits
 
-Use small amounts until the two-wallet flow has been rehearsed for creation, win, loss, draw, cancellation, expiry, timeout recovery, wrong-token approval, wrong-event receipt, and paused-contract behavior. The contract is source verified, but it has not had an independent security audit.
+Use small amounts until the two-wallet flow has been rehearsed for creation, win, loss, draw, cancellation, expiry, missed counter deadline, wrong-token approval, wrong-event receipt, and paused-contract behavior. The contract is source verified, but it has not had an independent security audit.
 
 Keep the two result signer keystores separate from each other, the Site runtime, Git, D1, and the browser. The Worker must remain receipt-verifying and non-custodial.
 

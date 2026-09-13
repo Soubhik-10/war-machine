@@ -265,13 +265,14 @@ export function runtimeConfig(env, origin) {
     // The deployed escrow needs two independent attestations before it can
     // settle a result. This worker intentionally has no signer keys and no
     // signing service yet, so accepting another paid bounty would strand new
-    // entries at the same point. Keep account access and recovery online,
+    // entries at the same point. Keep account access and existing-bounty
+    // settlement status online,
     // while failing closed for new funding and entries. A reviewed signer
     // service must explicitly set this readiness flag only after both
     // independent signers are live.
     acceptingNewBounties: env.WM_RESULT_SIGNING_READY === "true",
     settlementReason:
-      "New paid bounties are paused until the two independent result signers are online. Existing timed-out entries can still be recovered onchain.",
+      "New paid bounties are paused until the two independent result signers are online.",
     reason: null,
   };
 }
@@ -319,7 +320,7 @@ function catalog(config) {
             "create and fund a bounty with Tempo Wallet",
             "enter a bounty with Tempo Wallet",
           ]
-        : ["recover an expired direct-escrow entry with Tempo Wallet"]),
+        : ["inspect existing direct-escrow bounties"]),
     ],
     loginRequired: [
       "save bounty",
@@ -366,7 +367,6 @@ function catalog(config) {
             "createBounty",
             "enterBounty",
             "cancelBounty",
-            "refundTimedOutAttempt",
             "expireBounty",
             "settleAttempt",
           ],
@@ -397,11 +397,14 @@ function catalog(config) {
       combat: "auto",
       timeLimitSeconds: 100,
       drawIntegrityThreshold: 0.025,
-      entryRefund: "Technical failure only",
+      entryRefund:
+        "Technical simulation failure only. Losses, draws and missed counter deadlines pay the entry to the bounty creator.",
       spending:
         "No application spending cap. Each bounty reward and entry amount is separately confirmed in Tempo Wallet.",
       paidReveal:
         "Public scouts expose only cost, mass, part count, weapon count, arena and limits. A confirmed entry reveals the exact defender to that challenger only.",
+      timeout:
+        "Missing the counter-build deadline is a loss. The signed escrow settlement sends the entry to the bounty creator and reopens the bounty.",
       payments: paid
         ? acceptingNewBounties
           ? "Direct Tempo mainnet pathUSD escrow. Agents may separately use MPP only for explicitly priced API work; MPP never funds or enters a bounty."
@@ -479,6 +482,8 @@ const discovery = (config) => ({
     paidReveal:
       "The defender blueprint is not served until this account has a confirmed escrow entry.",
     results: "deterministic replay; two escrow signer attestations required",
+    timeout:
+      "counter-build expiry settles as a loss; entry goes to bounty creator",
     practicePays: false,
     officialSeed: "server chosen",
   },
@@ -1472,6 +1477,7 @@ async function attemptView(db, attemptId, viewer) {
     };
   }
   if (
+    attempt.blueprint &&
     (done ||
       ["awaiting-signatures", "ready-to-settle"].includes(attempt.status)) &&
     (challenger || creator)
@@ -2446,7 +2452,7 @@ async function deployCounter(db, auth, attemptId, body, key) {
   check(
     now() < Number(attempt.build_deadline) &&
       now() < Number(bounty.escrow_attempt_deadline),
-    "The engineering window closed. The escrow timeout returns the entry if no signed result settles.",
+    "The engineering window closed. The entry is forfeited to the bounty creator.",
     409,
   );
   const old = await prior(db, auth.account, key, "deploy:" + attemptId, body);
@@ -2538,14 +2544,106 @@ async function deployCounter(db, auth, attemptId, body, key) {
   return attemptView(db, attempt.id, auth.account);
 }
 
+async function forfeitExpiredEngineeringAttempt(db, auth, attemptId, key) {
+  requireOwner(auth);
+  const old = await prior(db, auth.account, key, "forfeit:" + attemptId, {});
+  if (old) return attemptView(db, old, auth.account);
+  const attempt = await db
+    .prepare("SELECT * FROM attempts WHERE id=?")
+    .bind(attemptId)
+    .first();
+  check(attempt, "Attempt not found.", 404);
+  check(
+    attempt.account === auth.account,
+    "Only the paid challenger can finalize this timed-out attempt.",
+    403,
+  );
+  const bounty = await bountyRow(db, attempt.bounty);
+  if (
+    ["awaiting-signatures", "ready-to-settle", "settled"].includes(
+      attempt.status,
+    )
+  )
+    return attemptView(db, attempt.id, auth.account);
+  check(
+    attempt.status === "engineering",
+    "This attempt has already ended.",
+    409,
+  );
+  const buildDeadline = Number(attempt.build_deadline || 0),
+    settlementDeadline = Math.floor(
+      Number(bounty.escrow_attempt_deadline || 0) / 1000,
+    );
+  check(
+    buildDeadline > 0 && now() >= buildDeadline,
+    "The counter clock is still running.",
+    409,
+  );
+  check(
+    settlementDeadline > Math.floor(now() / 1000),
+    "The escrow attestation window has elapsed. This immutable escrow can no longer transfer the entry to the creator.",
+    409,
+  );
+  const resultHash =
+      "0x" +
+      (await hex(
+        json({
+          version: "war-machines-settlement-v2",
+          engineHash: CLIENT_ENGINE_HASH,
+          bountyId: bounty.escrow_bounty_id,
+          attemptNonce: bounty.escrow_attempt_nonce,
+          outcome: 1,
+          challenger: null,
+          defender: parse(bounty.blueprint),
+          reason: "counter-build-timeout",
+          buildDeadline,
+          seed: attempt.seed,
+        }),
+      )),
+    settlement = {
+      bountyId: bounty.escrow_bounty_id,
+      attemptNonce: String(bounty.escrow_attempt_nonce),
+      outcome: 1,
+      resultHash,
+      validUntil: Math.max(0, settlementDeadline - 1),
+      signatures: [],
+    },
+    result = {
+      seed: attempt.seed,
+      winner: 1,
+      outcome: "loss",
+      reason: "counter-build-timeout",
+      time: 0,
+      damage: [0, 0],
+      integrity: [0, 1],
+      entry: display(bounty.entry_units),
+      grossReward: "0",
+      reward: "0",
+      payout: "0",
+      platformFee: "0",
+      platformFeeBps: bounty.platform_fee_bps ?? PLATFORM_FEE_BPS,
+      net: "-" + display(bounty.entry_units),
+      verifiedAt: now(),
+      settlement,
+    };
+  const applied = await db
+    .prepare(
+      "UPDATE attempts SET status='awaiting-signatures',result=?,settlement_payload=?,error=NULL,updated=? WHERE id=? AND status='engineering'",
+    )
+    .bind(json(result), json(settlement), now(), attempt.id)
+    .run();
+  check(
+    applied.meta.changes === 1,
+    "This timed-out attempt was already finalized.",
+    409,
+  );
+  await remember(db, auth.account, key, "forfeit:" + attemptId, {}, attempt.id);
+  return attemptView(db, attempt.id, auth.account);
+}
+
 function directControlPlan(config, row, action) {
   const bountyId = BigInt(row.escrow_bounty_id);
-  const functionName =
-    action === "cancel"
-      ? "cancelBounty"
-      : action === "timeout-refund"
-        ? "refundTimedOutAttempt"
-        : "expireBounty";
+  const functionName = action === "cancel" ? "cancelBounty" : "expireBounty";
   return directPlan(
     config,
     encodeFunctionData({ abi: ESCROW_ABI, functionName, args: [bountyId] }),
@@ -2577,23 +2675,8 @@ async function directControlIntent(
     );
     check(
       row.status === "open",
-      "An active bounty cannot be closed. Settle, refund after the deadline, or wait for expiry.",
+      "An active bounty cannot be closed. Settle its result or wait for its published expiry.",
       409,
-    );
-  } else if (action === "timeout-refund") {
-    check(
-      row.status === "busy" && row.active_attempt,
-      "No active attempt can be refunded.",
-      409,
-    );
-    const attempt = await db
-      .prepare("SELECT * FROM attempts WHERE id=?")
-      .bind(row.active_attempt)
-      .first();
-    check(
-      attempt?.account === auth.account,
-      "Only the active challenger can recover a timed-out entry.",
-      403,
     );
   } else {
     check(
@@ -2678,7 +2761,7 @@ async function confirmDirectControl(db, auth, intentId, hash, config) {
   requireOwner(auth);
   const hold = await db
     .prepare(
-      "SELECT * FROM payment_holds WHERE id=? AND account=? AND purpose IN ('direct-cancel','direct-timeout-refund','direct-expire')",
+      "SELECT * FROM payment_holds WHERE id=? AND account=? AND purpose IN ('direct-cancel','direct-expire')",
     )
     .bind(intentId, auth.account)
     .first();
@@ -2717,49 +2800,6 @@ async function confirmDirectControl(db, auth, intentId, hash, config) {
       db
         .prepare(
           "UPDATE bounties SET status='cancelled',active_attempt=NULL,reserve_units='0',updated=? WHERE id=?",
-        )
-        .bind(updated, row.id),
-      db
-        .prepare(
-          "UPDATE payment_holds SET status='accepted',provider_ref=?,updated=? WHERE id=?",
-        )
-        .bind(hash, updated, hold.id),
-    ]);
-  } else if (action === "timeout-refund") {
-    const log = eventLog(receiptValue, config, ESCROW_EVENTS.timedOut);
-    check(
-      log.topics?.length === 4 &&
-        BigInt(log.topics[1]).toString() === row.escrow_bounty_id &&
-        BigInt(log.topics[2]).toString() === String(row.escrow_attempt_nonce),
-      "Escrow refund event targets a different attempt.",
-      409,
-    );
-    const attempt = await db
-      .prepare("SELECT * FROM attempts WHERE id=?")
-      .bind(row.active_attempt)
-      .first();
-    check(
-      attempt &&
-        topicAddress(log.topics[3]) ===
-          (await payoutAddress(db, attempt.account)) &&
-        word(log.data, 0) === BigInt(row.entry_units),
-      "Escrow refund event does not match the active challenger.",
-      409,
-    );
-    await db.batch([
-      db
-        .prepare(
-          "UPDATE attempts SET status='refunded',result=NULL,error=?,escrow_settlement_tx=?,updated=? WHERE id=?",
-        )
-        .bind(
-          "The attestation window elapsed; your entry was returned onchain.",
-          hash,
-          updated,
-          attempt.id,
-        ),
-      db
-        .prepare(
-          "UPDATE bounties SET status='open',active_attempt=NULL,escrow_attempt_deadline=NULL,updated=? WHERE id=?",
         )
         .bind(updated, row.id),
       db
@@ -2934,7 +2974,7 @@ async function attestSettlement(db, attemptId, body, config) {
   const { attempt, payload } = await settlementRecord(db, attemptId);
   check(
     Number(payload.validUntil) >= Math.floor(now() / 1000),
-    "The attestation window has elapsed. The challenger can recover their entry onchain.",
+    "The attestation window has elapsed. This immutable escrow cannot settle the recorded result.",
     409,
   );
   const recovered = await validateEscrowAttestation(
@@ -3474,7 +3514,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       );
     }
     match = path.match(
-      /^\/api\/bounties\/([a-f0-9-]{36})(?:\/(attempts|cancel|timeout-refund|expire))?$/,
+      /^\/api\/bounties\/([a-f0-9-]{36})(?:\/(attempts|cancel|expire))?$/,
     );
     if (match) {
       const [, bountyId, action] = match;
@@ -3493,18 +3533,6 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
           auth,
           bountyId,
           "cancel",
-          body,
-          request.headers.get("idempotency-key"),
-          config,
-        );
-        return result.final ? response(result.value) : response(result, 202);
-      }
-      if (action === "timeout-refund" && method === "POST") {
-        const result = await directControlIntent(
-          db,
-          auth,
-          bountyId,
-          "timeout-refund",
           body,
           request.headers.get("idempotency-key"),
           config,
@@ -3538,7 +3566,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       }
     }
     match = path.match(
-      /^\/api\/attempts\/([a-f0-9-]{36})\/(settlement|attestations|settlement-plan|settlement-confirm|refund)$/,
+      /^\/api\/attempts\/([a-f0-9-]{36})\/(settlement|attestations|settlement-plan|settlement-confirm|forfeit)$/,
     );
     if (match) {
       const [, attemptId, action] = match;
@@ -3556,23 +3584,15 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
           await confirmSettlement(db, attemptId, body.transactionHash, config),
         );
       }
-      if (action === "refund" && method === "POST") {
-        const attempt = await db
-          .prepare("SELECT bounty FROM attempts WHERE id=?")
-          .bind(attemptId)
-          .first();
-        check(attempt, "Attempt not found.", 404);
-        const result = await directControlIntent(
-          db,
-          auth,
-          attempt.bounty,
-          "timeout-refund",
-          body,
-          request.headers.get("idempotency-key"),
-          config,
+      if (action === "forfeit" && method === "POST")
+        return response(
+          await forfeitExpiredEngineeringAttempt(
+            db,
+            auth,
+            attemptId,
+            request.headers.get("idempotency-key"),
+          ),
         );
-        return result.final ? response(result.value) : response(result, 202);
-      }
     }
     match = path.match(/^\/api\/attempts\/([a-f0-9-]{36})\/deploy$/);
     if (match && method === "POST")
