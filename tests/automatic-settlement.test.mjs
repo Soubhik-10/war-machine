@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { encodeEventTopics, encodeAbiParameters, sha256, stringToHex, createWalletClient, http, keccak256, decodeFunctionData } from 'viem';
+import { encodeEventTopics, encodeAbiParameters, sha256, stringToHex, createWalletClient, custom, keccak256, decodeFunctionData } from 'viem';
 import { tempo } from 'viem/chains';
 import { Transaction } from 'viem/tempo';
 import { canonical, evaluate, verifyPayload, digest, typedData, quorum, ABI, ESCROW } from '../settlement/protocol.mjs';
@@ -156,7 +156,10 @@ test('separately deployed signers independently read, replay, validate chain ter
   relayDb.sqlite.exec(readFileSync(new URL('../settlement/service-schema.sql',import.meta.url),'utf8').replaceAll('CREATE TABLE ','CREATE TABLE IF NOT EXISTS '));
   const relayKey=generatePrivateKey(),relayAccount=privateKeyToAccount(relayKey),map=new Map(),sent=[];
   const storage={get:async key=>map.get(key),put:async(key,value)=>map.set(key,value)};
-  const actualWallet=createWalletClient({account:relayAccount,chain:tempo,transport:http()});
+  const actualWallet=createWalletClient({account:relayAccount,chain:tempo,transport:custom({request:async({method})=>{
+    if(method==='eth_chainId') return '0x1079';
+    throw Error('Unexpected test-wallet RPC '+method);
+  }})});
   const wallet={signTransaction:actualWallet.signTransaction,prepareTransactionRequest:async request=>({...request,gas:300000n,maxFeePerGas:100000000000n,maxPriorityFeePerGas:0n})};
   const relayClient={...client,getContractEvents:async()=>[],sendRawTransaction:async({serializedTransaction})=>{sent.push(serializedTransaction);return keccak256(serializedTransaction);},readContract:async args=>args.functionName==='settlementQuorum'?2:args.functionName==='balanceOf'?10000000n:client.readContract(args)};
   const relayEnv={DB:relayDb,RELAY_KEY:{get:async()=>relayKey},RELAY_ADDRESS:relayAccount.address,COORDINATOR_AUTH:credential,API_AUTH:credential,MAX_FEE_PER_GAS:'100000000000',SIGNER_ADDRESSES:JSON.stringify(signed.map(x=>x.address)),API:{fetch:async request=>{await authenticate(request,relayDb,{relay:credential},'api');return Response.json(new URL(request.url).pathname.endsWith('/record')?{record:r,payload,signatures:signed.map(x=>x.signature),paused:false}:{paused:false});}}};
