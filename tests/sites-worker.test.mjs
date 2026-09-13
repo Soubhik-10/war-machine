@@ -278,6 +278,12 @@ test("browser wallet client uses Tempo Wallet rather than an injected provider",
   );
   assert.match(source, /tempoWallet/);
   assert.match(source, /stringToHex\(message\)/);
+  assert.match(
+    source,
+    /calls: calls\.map\(\(\{ to, data \}\) => \(\{ to, data \}\)\)/,
+  );
+  assert.match(source, /feeToken,/);
+  assert.match(source, /calls\.push\(plan\.approval\)/);
   assert.doesNotMatch(source, /window\.ethereum/);
 });
 

@@ -76,17 +76,30 @@ async function directWallet() {
   return selected;
 }
 
-async function sendDirect(selected, call) {
-  if (!call || typeof call.to !== "string" || typeof call.data !== "string")
+async function sendDirect(selected, calls) {
+  if (
+    !Array.isArray(calls) ||
+    !calls.length ||
+    calls.some(
+      (call) =>
+        !call || typeof call.to !== "string" || typeof call.data !== "string",
+    )
+  )
     throw Error("The escrow transaction plan is malformed.");
+  const feeToken = discovery?.payments?.token;
+  if (typeof feeToken !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(feeToken))
+    throw Error("The verified pathUSD fee token is unavailable.");
   const hash = await wallet().request({
     method: "eth_sendTransaction",
     params: [
       {
         from: selected,
-        to: call.to,
-        data: call.data,
         chainId: chainHex(),
+        // Tempo batches these calls atomically, so an approval cannot be mined
+        // without its matching escrow action. Explicit pathUSD also avoids an
+        // account-level fee-token preference with no FeeAMM liquidity.
+        feeToken,
+        calls: calls.map(({ to, data }) => ({ to, data })),
       },
     ],
   });
@@ -121,15 +134,17 @@ export async function executeEscrowPlan(plan) {
     plan.call?.to?.toLowerCase() !== expected
   )
     throw Error("The bounty plan does not match the verified Tempo escrow.");
+  const calls = [];
   if (plan.approval) {
     if (
       plan.approval.to?.toLowerCase() !==
       discovery.payments.token?.toLowerCase()
     )
       throw Error("The approval token does not match pathUSD.");
-    await sendDirect(selected, plan.approval);
+    calls.push(plan.approval);
   }
-  return sendDirect(selected, plan.call);
+  calls.push(plan.call);
+  return sendDirect(selected, calls);
 }
 
 export async function logout() {
