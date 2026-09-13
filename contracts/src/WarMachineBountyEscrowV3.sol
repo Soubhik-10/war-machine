@@ -4,8 +4,9 @@ pragma solidity 0.8.30;
 import {IERC20} from "./WarMachineBountyEscrow.sol";
 
 /// @notice A non-upgradeable, pathUSD bounty escrow for War Machines.
-/// @dev It holds reserves itself. The settlement quorum only attests an already-running attempt;
-///      it cannot choose an amount, recipient, fee, or withdraw unrelated reserves.
+/// @dev It holds only the reward reserve. Entry is paid directly to the bounty creator when the
+///      challenger enters; settlement cannot choose an amount, recipient, fee, or withdraw a
+///      different bounty's reward.
 contract WarMachineBountyEscrowV3 {
     uint16 public constant PLATFORM_FEE_BPS = 250;
     uint16 public constant BPS_DENOMINATOR = 10_000;
@@ -125,7 +126,7 @@ contract WarMachineBountyEscrowV3 {
         uint64 indexed attemptNonce,
         address indexed challenger,
         address creator,
-        uint128 entry
+        uint128 entryPaidAtEntry
     );
     event NewBountiesPauseSet(bool paused);
     event NewEntriesPauseSet(bool paused);
@@ -222,7 +223,8 @@ contract WarMachineBountyEscrowV3 {
         emit BountyCreated(bountyId, msg.sender, reward, entry, expiresAt, termsHash);
     }
 
-    /// @notice Escrows one entry payment and starts the oracle settlement window.
+    /// @notice Pays one non-refundable entry directly to the bounty creator and starts the
+    ///         automatic settlement window. Only the reward is held by this contract.
     ///         The creator cannot enter their own bounty.
     function enterBounty(uint256 bountyId) external nonReentrant {
         if (newEntriesPaused) revert NewEntriesPaused();
@@ -230,7 +232,7 @@ contract WarMachineBountyEscrowV3 {
         if (msg.sender == bounty.creator) revert CallerIsCreator();
 
         uint128 entry = bounty.entry;
-        if (entry != 0) _pullExact(msg.sender, entry);
+        if (entry != 0) _transferFromExact(msg.sender, bounty.creator, entry);
 
         bounty.challenger = msg.sender;
         unchecked {
@@ -250,7 +252,9 @@ contract WarMachineBountyEscrowV3 {
         Bounty storage bounty = bounties[settlement.bountyId];
         if (bounty.status != BountyStatus.Active) revert InvalidStatus();
         if (settlement.attemptNonce != bounty.attemptNonce) revert InvalidStatus();
-        if (uint8(settlement.outcome) > uint8(Outcome.TechnicalRefund)) revert InvalidOutcome();
+        if (uint8(settlement.outcome) > uint8(Outcome.ChallengerLostOrDrew)) {
+            revert InvalidOutcome();
+        }
         if (settlement.validUntil < block.timestamp) revert SignatureExpired();
         // No result can be manufactured after the active-attempt deadline.
         // The public timeout finalizer below settles that liveness failure as
@@ -266,7 +270,6 @@ contract WarMachineBountyEscrowV3 {
 
         address challenger = bounty.challenger;
         uint128 reward = bounty.reward;
-        uint128 entry = bounty.entry;
         bounty.challenger = address(0);
         bounty.attemptDeadline = 0;
 
@@ -276,7 +279,6 @@ contract WarMachineBountyEscrowV3 {
             bounty.status = BountyStatus.Claimed;
             _pushExact(challenger, payout);
             if (fee != 0) _pushExact(PLATFORM_FEE_RECIPIENT, fee);
-            if (entry != 0) _pushExact(bounty.creator, entry);
             emit AttemptSettled(
                 settlement.bountyId,
                 settlement.attemptNonce,
@@ -285,16 +287,15 @@ contract WarMachineBountyEscrowV3 {
                 settlement.resultHash,
                 payout,
                 fee,
-                entry
+                0
             );
             return;
         }
 
         if (settlement.outcome == Outcome.ChallengerLostOrDrew) {
-            // The bounty stays funded and may be attempted again. The creator receives the
-            // explicitly disclosed entry amount; it is never silently retained by the platform.
+            // The bounty stays funded and may be attempted again. The entry was already paid to
+            // the creator atomically with entry, so settlement makes no additional transfer.
             bounty.status = BountyStatus.Open;
-            if (entry != 0) _pushExact(bounty.creator, entry);
             emit AttemptSettled(
                 settlement.bountyId,
                 settlement.attemptNonce,
@@ -303,28 +304,15 @@ contract WarMachineBountyEscrowV3 {
                 settlement.resultHash,
                 0,
                 0,
-                entry
+                0
             );
             return;
         }
-
-        bounty.status = BountyStatus.Open;
-        if (entry != 0) _pushExact(challenger, entry);
-        emit AttemptSettled(
-            settlement.bountyId,
-            settlement.attemptNonce,
-            challenger,
-            settlement.outcome,
-            settlement.resultHash,
-            0,
-            0,
-            0
-        );
     }
 
-    /// @notice Finalizes an unsigned active attempt after its immutable deadline.
-    ///         Anybody may call it; it never pays the caller. The entry follows the
-    ///         disclosed loss/draw route to the bounty creator and the reward stays funded.
+    /// @notice Finalizes an unsigned active attempt after its immutable deadline. Anybody may
+    ///         call it; it never pays the caller. The entry was paid directly at entry and the
+    ///         reward remains funded for a future challenger.
     function forfeitTimedOutAttempt(uint256 bountyId) external nonReentrant {
         Bounty storage bounty = bounties[bountyId];
         if (bounty.status != BountyStatus.Active) revert InvalidStatus();
@@ -337,7 +325,6 @@ contract WarMachineBountyEscrowV3 {
         bounty.challenger = address(0);
         bounty.attemptDeadline = 0;
         bounty.status = BountyStatus.Open;
-        if (entry != 0) _pushExact(creator, entry);
         emit TimedOutAttemptForfeited(bountyId, attemptNonce, challenger, creator, entry);
     }
 
@@ -452,6 +439,14 @@ contract WarMachineBountyEscrowV3 {
         uint256 beforeBalance = token.balanceOf(address(this));
         _callToken(abi.encodeCall(IERC20.transferFrom, (from, address(this), amount)));
         if (token.balanceOf(address(this)) != beforeBalance + amount) {
+            revert TokenBalanceMismatch();
+        }
+    }
+
+    function _transferFromExact(address from, address to, uint128 amount) private {
+        uint256 beforeBalance = token.balanceOf(to);
+        _callToken(abi.encodeCall(IERC20.transferFrom, (from, to, amount)));
+        if (token.balanceOf(to) != beforeBalance + amount) {
             revert TokenBalanceMismatch();
         }
     }

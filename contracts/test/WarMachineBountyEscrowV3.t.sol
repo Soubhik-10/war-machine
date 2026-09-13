@@ -63,6 +63,29 @@ contract WarMachineBountyEscrowV3Test {
         escrow.settleAttempt(settlement, extra);
     }
 
+    function testEntryPaysCreatorImmediatelyAndIsNotPaidAgainOnLoss() public {
+        uint256 bountyId = _createAndEnter();
+        _eq(token.balanceOf(CHALLENGER), 9_900_000, "entry was not charged at entry");
+        _eq(token.balanceOf(CREATOR), 9_100_000, "creator did not receive entry immediately");
+        _eq(token.balanceOf(address(escrow)), 1_000_000, "escrow must hold reward only");
+
+        WarMachineBountyEscrowV3.Settlement memory settlement = _settlement(bountyId);
+        settlement.outcome = WarMachineBountyEscrowV3.Outcome.ChallengerLostOrDrew;
+        escrow.settleAttempt(settlement, _oneSignature(settlement));
+
+        _eq(token.balanceOf(CREATOR), 9_100_000, "loss paid the entry twice");
+        _eq(token.balanceOf(address(escrow)), 1_000_000, "loss released the reward");
+    }
+
+    function testTechnicalRefundIsNotAnEntryRefundPath() public {
+        uint256 bountyId = _createAndEnter();
+        WarMachineBountyEscrowV3.Settlement memory settlement = _settlement(bountyId);
+        settlement.outcome = WarMachineBountyEscrowV3.Outcome.TechnicalRefund;
+        bytes[] memory signature = _oneSignature(settlement);
+        vm.expectRevert();
+        escrow.settleAttempt(settlement, signature);
+    }
+
     function testDeploymentRejectsAnythingButOneSignerAndOneQuorum() public {
         address[] memory noSigners = new address[](0);
         vm.expectRevert();
