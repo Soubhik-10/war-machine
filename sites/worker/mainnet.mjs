@@ -238,15 +238,26 @@ export function runtimeConfig(env, origin) {
         "Set WM_BOUNTY_ESCROW_ADDRESS to the verified War Machines Tempo escrow before enabling direct bounty transactions.",
     };
   const settlementKey = String(env.WM_SETTLEMENT_PRIVATE_KEY || "");
-  let automaticSettlementReady = false;
-  try {
-    automaticSettlementReady =
-      /^0x[0-9a-fA-F]{64}$/.test(settlementKey) &&
-      getAddress(privateKeyToAccount(settlementKey).address) ===
-        ESCROW_SETTLEMENT_SIGNERS[0] &&
-      env.WM_RESULT_SIGNING_READY === "true" &&
-      env.WM_EMERGENCY_PAUSE !== "true";
-  } catch {}
+  let automaticSettlementReady = false,
+    settlementReason = "Automatic payouts are paused until the server-side V3 settlement key is configured.";
+  if (!/^0x[0-9a-fA-F]{64}$/.test(settlementKey)) {
+    settlementReason =
+      "WM_SETTLEMENT_PRIVATE_KEY must be one raw 0x-prefixed, 64-hex-character private key. Do not use a wallet address, JSON keystore, quotes, or spaces.";
+  } else if (env.WM_RESULT_SIGNING_READY !== "true") {
+    settlementReason = "Set WM_RESULT_SIGNING_READY to true before enabling automatic payouts.";
+  } else if (env.WM_EMERGENCY_PAUSE === "true") {
+    settlementReason = "Automatic payouts are paused by WM_EMERGENCY_PAUSE.";
+  } else {
+    try {
+      const account = getAddress(privateKeyToAccount(settlementKey).address);
+      automaticSettlementReady = account === ESCROW_SETTLEMENT_SIGNERS[0];
+      if (!automaticSettlementReady)
+        settlementReason =
+          `The settlement key must derive ${ESCROW_SETTLEMENT_SIGNERS[0]}, but it derives ${account}.`;
+    } catch {
+      settlementReason = "WM_SETTLEMENT_PRIVATE_KEY could not be decoded as an EVM private key.";
+    }
+  }
   const mppRecipient = String(env.WM_AGENT_MPP_RECIPIENT || ""),
     mppPrice = String(env.WM_AGENT_MPP_PRICE || "");
   let mppPriceUnits = null;
@@ -278,8 +289,7 @@ export function runtimeConfig(env, origin) {
     mppSecret: agentMppEnabled ? env.MPP_SECRET_KEY : null,
     acceptingNewBounties: automaticSettlementReady,
     automaticSettlementReady,
-    settlementReason:
-      "Automatic payouts are paused until the server-side V3 settlement key is configured.",
+    settlementReason,
     reason: null,
   };
 }
