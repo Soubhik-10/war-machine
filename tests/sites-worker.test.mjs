@@ -444,6 +444,14 @@ test("direct escrow intents bind exact terms to the confirmed create and entry e
       hours: 1,
       listed: true,
     };
+  const paused = await post(
+    "/api/bounties",
+    body,
+    "direct_create_fixture_0001",
+  );
+  assert.equal(paused.status, 503, JSON.stringify(paused.body));
+  assert.match(paused.body.error, /result signers are online/i);
+  env.WM_RESULT_SIGNING_READY = "true";
   const prepared = await post(
     "/api/bounties",
     body,

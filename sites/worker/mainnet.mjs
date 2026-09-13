@@ -262,12 +262,23 @@ export function runtimeConfig(env, origin) {
     agentMppRecipient: agentMppEnabled ? getAddress(mppRecipient) : null,
     agentMppPriceUnits: mppPriceUnits,
     mppSecret: agentMppEnabled ? env.MPP_SECRET_KEY : null,
+    // The deployed escrow needs two independent attestations before it can
+    // settle a result. This worker intentionally has no signer keys and no
+    // signing service yet, so accepting another paid bounty would strand new
+    // entries at the same point. Keep account access and recovery online,
+    // while failing closed for new funding and entries. A reviewed signer
+    // service must explicitly set this readiness flag only after both
+    // independent signers are live.
+    acceptingNewBounties: env.WM_RESULT_SIGNING_READY === "true",
+    settlementReason:
+      "New paid bounties are paused until the two independent result signers are online. Existing timed-out entries can still be recovered onchain.",
     reason: null,
   };
 }
 
 function catalog(config) {
-  const paid = config.enabled;
+  const paid = config.enabled,
+    acceptingNewBounties = paid && config.acceptingNewBounties;
   return {
     mode: "tempo-mainnet",
     apiVersion: "3.2-direct-escrow",
@@ -303,8 +314,12 @@ function catalog(config) {
       "browse",
       "validate",
       "practice",
-      "create and fund a bounty with Tempo Wallet",
-      "enter a bounty with Tempo Wallet",
+      ...(acceptingNewBounties
+        ? [
+            "create and fund a bounty with Tempo Wallet",
+            "enter a bounty with Tempo Wallet",
+          ]
+        : ["recover an expired direct-escrow entry with Tempo Wallet"]),
     ],
     loginRequired: [
       "save bounty",
@@ -339,6 +354,10 @@ function catalog(config) {
     directEscrow: paid
       ? {
           enabled: true,
+          acceptingNewBounties,
+          settlement: acceptingNewBounties
+            ? { ready: true }
+            : { ready: false, reason: config.settlementReason },
           address: config.escrowAddress,
           token: config.token,
           chainId: config.chainId,
@@ -362,7 +381,11 @@ function catalog(config) {
           },
         }
       : null,
-    activation: paid ? undefined : { ready: false, reason: config.reason },
+    activation: paid
+      ? acceptingNewBounties
+        ? undefined
+        : { ready: false, reason: config.settlementReason }
+      : { ready: false, reason: config.reason },
     versions: { hash: CLIENT_ENGINE_HASH },
     startingCredits: 0,
     parts: PARTS.map((part) => ({ ...part, ...PART_GUIDANCE[part.id] })),
@@ -380,7 +403,9 @@ function catalog(config) {
       paidReveal:
         "Public scouts expose only cost, mass, part count, weapon count, arena and limits. A confirmed entry reveals the exact defender to that challenger only.",
       payments: paid
-        ? "Direct Tempo mainnet pathUSD escrow. Agents may separately use MPP only for explicitly priced API work; MPP never funds or enters a bounty."
+        ? acceptingNewBounties
+          ? "Direct Tempo mainnet pathUSD escrow. Agents may separately use MPP only for explicitly priced API work; MPP never funds or enters a bounty."
+          : config.settlementReason
         : "Payments are unavailable until escrow configuration is complete. No synthetic credits are issued.",
     },
   };
@@ -401,6 +426,10 @@ const discovery = (config) => ({
     ? {
         enabled: true,
         directEscrow: true,
+        acceptingNewBounties: !!config.acceptingNewBounties,
+        settlement: config.acceptingNewBounties
+          ? { ready: true }
+          : { ready: false, reason: config.settlementReason },
         mpp: !!config.agentMppEnabled,
         mppScope: config.agentMppEnabled
           ? "Priced agent API routes only; never bounty funding or entry."
@@ -1986,6 +2015,7 @@ function boundedUnits(value, allowZero = false) {
 }
 async function directCreateIntent(db, auth, body, key, config) {
   requireOwner(auth);
+  check(config.acceptingNewBounties, config.settlementReason, 503);
   fields(body, [
     "title",
     "blueprint",
@@ -2117,6 +2147,7 @@ function directPlanFromCreate(config, hold) {
 }
 async function directEntryIntent(db, auth, bountyId, body, key, config) {
   requireOwner(auth);
+  check(config.acceptingNewBounties, config.settlementReason, 503);
   fields(body, ["maxEntry", "maxPlatformFeeBps"]);
   validKey(key);
   const row = await bountyRow(db, bountyId);
@@ -3052,7 +3083,11 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         paymentsEnabled: config.enabled,
         directEscrow: !!config.directEscrow,
         mppAgentApi: !!config.agentMppEnabled,
-        activation: config.enabled ? "ready" : "locked",
+        activation: config.enabled
+          ? config.acceptingNewBounties
+            ? "ready"
+            : "recovery-only"
+          : "locked",
         engineHash: CLIENT_ENGINE_HASH,
       });
     if (path === "/api/blueprints/validate" && method === "POST")
