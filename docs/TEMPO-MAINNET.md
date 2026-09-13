@@ -6,10 +6,10 @@ War Machines uses a non-upgradeable pathUSD bounty escrow on Tempo Mainnet. The 
 | ------------ | ------------------------------------------------------------------------------ |
 | Chain        | Tempo Mainnet `4217`                                                           |
 | Token        | pathUSD `0x20C0000000000000000000000000000000000000` (6 decimals)              |
-| Escrow       | [Bounty Escrow v2](https://explore.tempo.xyz/address/0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e) — Sourcify verification in progress |
+| Escrow       | [Bounty Escrow v2](https://explore.tempo.xyz/address/0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e) — source verified |
 | Fee          | 2.5% of a winning gross reward to `0xc20131e9132888993de6519D486E5558A5DbCb7A` |
 | Settlement   | Two fixed EIP-712 result signatures within a 600-second attempt window         |
-| Verification | Must be completed after the v2 deployment                                      |
+| Verification | [Sourcify match](https://contracts.tempo.xyz/verify-ui/jobs/c14fe4d2-651b-4adc-9670-19b5e726ffb8) |
 
 ## Bounty flow
 

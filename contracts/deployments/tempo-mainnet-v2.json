@@ -7,7 +7,7 @@
   "deploymentTransaction": "0x7fa067cead9051465ad7f8a36d6b300c5c41ef4885245cc6517da749772aad67",
   "deploymentBlock": 39307749,
   "verificationUrl": "https://contracts.tempo.xyz/verify-ui/jobs/c14fe4d2-651b-4adc-9670-19b5e726ffb8",
-  "sourceVerified": false,
+  "sourceVerified": true,
   "token": {
     "symbol": "pathUSD",
     "address": "0x20C0000000000000000000000000000000000000",
