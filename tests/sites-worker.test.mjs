@@ -11,6 +11,7 @@ import {
   pathUsdToUnits,
   payoutQuote,
   unitsToPathUsd,
+  PATH_USD_TOKEN,
 } from "../sites/worker/pathusd.mjs";
 
 class Statement {
@@ -85,7 +86,11 @@ const json = (url, method = "GET", body, token, key) =>
   });
 const call = async (env, url, method, body, token, key) => {
   const response = await worker.fetch(json(url, method, body, token, key), env);
-  return { status: response.status, body: await response.json() };
+  return {
+    status: response.status,
+    body: await response.json(),
+    headers: response.headers,
+  };
 };
 
 test("pathUSD uses exact base units for cents and preserves the 2.5% fee quote", () => {
@@ -222,6 +227,42 @@ test("Tempo wallet sign-in verifies an EIP-191 account and issues a session", as
   });
   assert.equal(verified.status, 200, JSON.stringify(verified.body));
   assert.equal(verified.body.me.payoutAddress, signer.address);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), env.WM_TEMPO_RPC_URL);
+    const rpcRequest = JSON.parse(init.body);
+    assert.equal(rpcRequest.method, "eth_call");
+    assert.equal(
+      rpcRequest.params[0].to.toLowerCase(),
+      PATH_USD_TOKEN.toLowerCase(),
+    );
+    assert.match(rpcRequest.params[0].data, /^0x70a08231[0-9a-f]{64}$/i);
+    return new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        result: "0x" + 4125000n.toString(16).padStart(64, "0"),
+      }),
+      { headers: { "content-type": "application/json" } },
+    );
+  };
+  try {
+    const wallet = await worker.fetch(
+      new Request("https://foundry.example/api/me/wallet", {
+        headers: { cookie: verified.headers.get("set-cookie") },
+      }),
+      env,
+    );
+    assert.equal(wallet.status, 200);
+    assert.deepEqual(await wallet.json(), {
+      address: signer.address,
+      balance: "4.125",
+      currency: "pathUSD",
+      decimals: 6,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
   const replay = await call(env, "/api/auth/verify", "POST", {
     address: signer.address,
     message: challenge.body.message,

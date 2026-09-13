@@ -492,6 +492,12 @@ const openapi = {
           "Paid challenger submits one validated counter blueprint before the reported build deadline.",
       },
     },
+    "/me/wallet": {
+      get: {
+        description:
+          "Returns the signed-in wallet address and its live pathUSD token balance.",
+      },
+    },
     "/me/builds": { get: {}, post: {} },
   },
 };
@@ -1809,6 +1815,9 @@ async function reconcile(db, config) {
 // Direct escrow adapter -----------------------------------------------------
 // The Worker only creates immutable game-term intents and checks receipts. It
 // never signs token transfers, receives funds or controls a payout key.
+const TOKEN_ABI = parseAbi([
+  "function balanceOf(address account) view returns (uint256)",
+]);
 const ESCROW_ABI = parseAbi([
   "function approve(address spender,uint256 amount) returns (bool)",
   "function createBounty(bytes32 termsHash,uint128 reward,uint128 entry,uint64 expiresAt) returns (uint256)",
@@ -1915,6 +1924,22 @@ async function rpc(config, method, params) {
     502,
   );
   return value.result;
+}
+async function pathUsdBalance(config, address) {
+  const data = encodeFunctionData({
+    abi: TOKEN_ABI,
+    functionName: "balanceOf",
+    args: [getAddress(address)],
+  });
+  const result = await rpc(config, "eth_call", [
+    { to: config.token, data },
+    "latest",
+  ]);
+  try {
+    return display(BigInt(result));
+  } catch {
+    fail(502, "Tempo RPC returned an invalid pathUSD balance.");
+  }
 }
 async function receipt(config, hash) {
   check(validHash(hash), "Transaction hash is invalid.");
@@ -3087,6 +3112,16 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       });
       return response(await practice(db, body, actor.account), 200, {
         "payment-receipt": payment.receipt,
+      });
+    }
+    if (path === "/api/me/wallet" && method === "GET") {
+      const me = await account(db, requireAuth(auth).account),
+        address = me.payoutAddress;
+      return response({
+        address,
+        balance: await pathUsdBalance(config, address),
+        currency: "pathUSD",
+        decimals: PATH_USD_DECIMALS,
       });
     }
     if (path === "/api/me" && method === "GET")

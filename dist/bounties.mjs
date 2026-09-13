@@ -37,6 +37,10 @@ const read = (key, fallback) => {
   }
 };
 const save = (key, value) => localStorage.setItem(key, JSON.stringify(value));
+const shortAddress = (value) =>
+  value && value.length > 10
+    ? value.slice(0, 6) + "…" + value.slice(-4)
+    : value;
 export function createBountyUI(adapter) {
   let currentFeeBps = PLATFORM_FEE_BPS;
   let token = read("wm-sandbox-token", null),
@@ -50,6 +54,7 @@ export function createBountyUI(adapter) {
     arenaFilter = "",
     feeFilter = "",
     runtime = { mode: "sandbox", paid: false, currency: "sandbox credits" },
+    walletBalance = null,
     tempoClient = null;
   const app = $("#app");
   async function configureRuntime(catalog) {
@@ -184,9 +189,11 @@ export function createBountyUI(adapter) {
     return `<span class="contract-status ${s}">${esc(s === "busy" ? "IN TRIAL" : s.toUpperCase())}</span>`;
   }
   function header(title, subtitle) {
-    const account = me
+    const walletTitle =
+        runtime.paid && me?.payoutAddress ? me.payoutAddress : "",
+      account = me
         ? runtime.paid
-          ? "Wallet account"
+          ? `${shortAddress(me.payoutAddress)} · ${walletBalance ? money(walletBalance.balance) + " pathUSD" : "balance unavailable"}`
           : runtime.mode === "tempo-mainnet"
             ? "Payments unavailable"
             : money(me.balance) + " sandbox credits"
@@ -198,7 +205,7 @@ export function createBountyUI(adapter) {
         : runtime.mode === "tempo-mainnet"
           ? "MAINNET SETUP"
           : "SANDBOX SEASON";
-    return `<div class="page-heading bounty-heading"><div><span class="eyebrow">FOUNDRY BOUNTIES / ${season}</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><button id="contracts-home">All bounties</button>${me ? '<button id="build-vault">Build vault</button>' : ""}<button id="credits-btn">${account}</button></div></div>${read("wm-sandbox-outbox", null) ? '<div class="notice">A request was interrupted. Its idempotency key is saved. <button id="recover-request">Recover request</button></div>' : ""}`;
+    return `<div class="page-heading bounty-heading"><div><span class="eyebrow">FOUNDRY BOUNTIES / ${season}</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><button id="contracts-home">All bounties</button>${me ? '<button id="build-vault">Build vault</button>' : ""}<button id="credits-btn" title="${esc(walletTitle)}" aria-label="${esc(walletTitle ? "Connected Tempo Wallet " + walletTitle : account)}">${esc(account)}</button></div></div>${read("wm-sandbox-outbox", null) ? '<div class="notice">A request was interrupted. Its idempotency key is saved. <button id="recover-request">Recover request</button></div>' : ""}`;
   }
   function wireHeader() {
     if ($("#contracts-home")) $("#contracts-home").onclick = () => open();
@@ -235,6 +242,13 @@ export function createBountyUI(adapter) {
         me = null;
       }
     }
+    walletBalance = null;
+    if (runtime.paid && me?.payoutAddress)
+      try {
+        walletBalance = await api("/me/wallet");
+      } catch {
+        // The address remains visible if a public RPC is briefly unavailable.
+      }
     return me;
   }
   function thumb(canvas, packed) {
@@ -571,10 +585,20 @@ export function createBountyUI(adapter) {
       try {
         const r = rules(),
           issues = validate(build, r),
-          entry = +$("#contract-entry").value,
-          reward = +$("#contract-reward").value,
+          entryText = $("#contract-entry").value,
+          rewardText = $("#contract-reward").value,
+          entry = +entryText,
+          reward = +rewardText,
           a = ARENAS.find((a) => a.id === $("#contract-arena").value);
-        if (runtime.paid && (!(entry >= 0.01) || !(reward >= 0.01)))
+        if (
+          runtime.paid &&
+          (!/^\d+(?:\.\d+)?$/.test(entryText) ||
+            !/^\d+(?:\.\d+)?$/.test(rewardText))
+        )
+          issues.push(
+            "Enter entry and reward as decimals such as 0.10 or 1.00 pathUSD. Do not use commas, scientific notation, or currency symbols.",
+          );
+        else if (runtime.paid && (!(entry >= 0.01) || !(reward >= 0.01)))
           issues.push(
             "Mainnet bounties use a minimum of 0.01 pathUSD for entry and reward.",
           );
