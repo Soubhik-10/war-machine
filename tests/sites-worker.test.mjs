@@ -260,6 +260,26 @@ test("Tempo wallet sign-in verifies an EIP-191 account and issues a session", as
       currency: "pathUSD",
       decimals: 6,
     });
+    const logout = await worker.fetch(
+      new Request("https://foundry.example/api/auth/logout", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: verified.headers.get("set-cookie"),
+        },
+        body: "{}",
+      }),
+      env,
+    );
+    assert.equal(logout.status, 200);
+    assert.match(logout.headers.get("set-cookie"), /Max-Age=0/);
+    const signedOut = await worker.fetch(
+      new Request("https://foundry.example/api/me", {
+        headers: { cookie: verified.headers.get("set-cookie") },
+      }),
+      env,
+    );
+    assert.equal(signedOut.status, 401);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -286,6 +306,7 @@ test("browser wallet client uses Tempo Wallet rather than an injected provider",
   assert.match(source, /calls\.push\(plan\.approval\)/);
   assert.match(source, /method: "wallet_disconnect"/);
   assert.match(source, /walletProvider\?\.store\?\.disconnect\?\.\(\)/);
+  assert.match(source, /headers: \{ "Content-Type": "application\/json" \}/);
   assert.doesNotMatch(source, /window\.ethereum/);
 });
 

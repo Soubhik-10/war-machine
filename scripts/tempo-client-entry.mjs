@@ -152,7 +152,12 @@ export async function logout() {
   // state. `wallet_disconnect` is local to the accounts provider, so it does
   // not move funds or require an onchain transaction.
   try {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
   } finally {
     try {
       await walletProvider?.request({ method: "wallet_disconnect" });
