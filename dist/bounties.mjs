@@ -155,10 +155,11 @@ export function createBountyUI(adapter) {
   }
   function retryableConfirmation(error) {
     return (
-      error?.status === 409 &&
-      /not confirmed yet|awaiting finality|awaiting canonical finality/i.test(
-        error.message,
-      )
+      (error?.status === 409 &&
+        /not confirmed yet|awaiting finality|awaiting canonical finality/i.test(
+          error.message,
+        )) ||
+      (error?.status === 503 && /Tempo RPC/i.test(error.message))
     );
   }
   async function confirmDirectIntent(request) {

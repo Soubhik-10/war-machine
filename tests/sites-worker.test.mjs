@@ -447,6 +447,20 @@ test("paid bounty actions establish a Tempo session only when payment starts", a
   assert.match(source, /async function confirmDirectIntent\(request\)/);
   assert.match(source, /request\.intentId && request\.transactionHash/);
   assert.match(source, /Discard request/);
+  assert.match(source, /Tempo RPC/i);
+});
+
+test("Tempo RPC transport failures remain retry-safe payment errors", async () => {
+  const source = await readFile(
+    new URL("../sites/worker/mainnet.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /Tempo RPC could not be reached/);
+  assert.match(
+    source,
+    /Retry the saved request; do not submit another wallet payment/,
+  );
+  assert.match(source, /error\.status \|\| 503/);
 });
 
 test("official bounty trials replay before the signing result is shown", async () => {
