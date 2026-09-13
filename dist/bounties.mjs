@@ -680,6 +680,28 @@ export function createBountyUI(adapter) {
       });
     };
   }
+  async function deployCounter(id, savedBlueprint) {
+    const a = await api("/attempts/" + id);
+    if (a.status !== "engineering")
+      throw Error(
+        "This counter can no longer be changed. Reopen the attempt for its latest status.",
+      );
+    if (!a.defender)
+      throw Error(
+        "The paid defender reveal is unavailable. Reopen this attempt with the wallet that paid the entry.",
+      );
+    const source = savedBlueprint
+        ? unpackChallenge(savedBlueprint, true)
+        : adapter.getBuild(),
+      blueprint = packChallenge(source.machine, a.defender.a, 0, a.defender.q),
+      deployed = await api(
+        "/attempts/" + a.id + "/deploy",
+        "POST",
+        { blueprint },
+        uid(),
+      );
+    await attempt(deployed.id);
+  }
   async function attempt(id) {
     const g = begin();
     app.innerHTML =
@@ -737,7 +759,12 @@ export function createBountyUI(adapter) {
             seconds = Math.ceil(remaining / 1000),
             clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`,
             defender = a.defender
-              ? { id: a.bounty, title: a.bountyTitle, blueprint: a.defender }
+              ? {
+                  id: a.bounty,
+                  title: a.bountyTitle,
+                  blueprint: a.defender,
+                  attemptId: a.id,
+                }
               : null;
           if (!defender)
             throw Error(
@@ -771,28 +798,14 @@ export function createBountyUI(adapter) {
               "OPPONENT REVEALED.",
               "Build, test, then commit one counter before the engineering clock closes.",
             ) +
-            `<section class="panel trial-wait"><span class="eyebrow">PAID ENTRY CONFIRMED · DEFENDER UNSEALED</span><h2>${clock} to deploy.</h2><p><strong>${esc(defender.title)}</strong> is now available for free local practice. The current verified escrow leaves the remaining time for two independent result signatures after you deploy.</p><div class="notice fee-disclosure">Build limit: ${esc(rulesLabel(defender.blueprint.q))} · Arena: ${esc(bountyArena({ blueprint: defender.blueprint }).name)} · Your entry remains in the direct escrow until the signed result settles.</div><div class="bounty-actions"><button id="refit-counter" class="primary">Build counter</button><button id="free-practice">Free practice</button><button id="deploy-counter">Deploy current counter</button><button id="pending-contract">View bounty</button></div><p id="bounty-error" class="error-message"></p></section>`;
+            `<section class="panel trial-wait"><span class="eyebrow">PAID ENTRY CONFIRMED · DEFENDER UNSEALED</span><h2>${clock} to deploy.</h2><p><strong>${esc(defender.title)}</strong> is now available for free local practice. The current verified escrow leaves the remaining time for two independent result signatures after you deploy.</p><div class="notice fee-disclosure">Build limit: ${esc(rulesLabel(defender.blueprint.q))} · Arena: ${esc(bountyArena({ blueprint: defender.blueprint }).name)} · Your entry remains in the direct escrow until the signed result settles.</div><div class="bounty-actions"><button id="refit-counter" class="primary">Build counter</button><button id="select-counter">Use a saved build</button><button id="free-practice">Free practice</button><button id="deploy-counter">Deploy current counter</button><button id="pending-contract">View bounty</button></div><p id="bounty-error" class="error-message"></p></section>`;
           wireHeader();
           $("#refit-counter").onclick = () => adapter.edit(defender);
+          $("#select-counter").onclick = () => vault(a.id);
           $("#free-practice").onclick = () => adapter.practice(defender);
           $("#pending-contract").onclick = () => open(a.bounty);
           $("#deploy-counter").onclick = (e) =>
-            act(e.currentTarget, async () => {
-              const current = adapter.getBuild(),
-                blueprint = packChallenge(
-                  current.machine,
-                  defender.blueprint.a,
-                  0,
-                  defender.blueprint.q,
-                ),
-                deployed = await api(
-                  "/attempts/" + a.id + "/deploy",
-                  "POST",
-                  { blueprint },
-                  uid(),
-                );
-              await attempt(deployed.id);
-            });
+            act(e.currentTarget, () => deployCounter(a.id));
           schedule(poll, g, 1000);
           return;
         }
@@ -1061,13 +1074,15 @@ export function createBountyUI(adapter) {
       };
     }
   }
-  async function vault() {
+  async function vault(attemptId) {
     if (!me) return profile();
     const g = begin();
     app.innerHTML =
       header(
         "YOUR BUILD VAULT.",
-        "Keep up to 50 private blueprints with your account. Loading one replaces this device’s workshop draft.",
+        attemptId
+          ? "Choose a saved counter and deploy it directly to your active bounty."
+          : "Keep up to 50 private blueprints with your account. Loading one replaces this device’s workshop draft.",
       ) + '<div class="bounty-loading">Opening build vault…</div>';
     wireHeader();
     try {
@@ -1076,14 +1091,16 @@ export function createBountyUI(adapter) {
       const card = (b) => {
         const machine = unpackChallenge(b.blueprint, true).machine,
           s = stats(machine);
-        return `<div class="vault-row"><div><strong>${esc(b.name)}</strong><small>${s.cost} build credits · ${s.parts} fitted parts + core · saved ${time(b.updated)}</small></div><div class="bounty-actions"><button data-load-build="${b.id}">Load</button><button data-export-build="${b.id}">Export</button><button data-delete-build="${b.id}">Delete</button></div></div>`;
+        return `<div class="vault-row"><div><strong>${esc(b.name)}</strong><small>${s.cost} build credits · ${s.parts} fitted parts + core · saved ${time(b.updated)}</small></div><div class="bounty-actions">${attemptId ? `<button class="primary" data-deploy-build="${b.id}">Use & deploy</button>` : ""}<button data-load-build="${b.id}">Load</button><button data-export-build="${b.id}">Export</button><button data-delete-build="${b.id}">Delete</button></div></div>`;
       };
       app.innerHTML =
         header(
           "YOUR BUILD VAULT.",
-          "Private to your signed-in account. A load updates this device’s workshop draft.",
+          attemptId
+            ? "Choose a private saved blueprint to commit as your one official counter."
+            : "Private to your signed-in account. A load updates this device’s workshop draft.",
         ) +
-        `<section class="panel profile-form vault-panel"><span class="eyebrow">ACCOUNT BLUEPRINTS</span><h2>${builds.length} / 50 saved</h2><p>Save your current workshop machine, its arena and its construction rules. These builds are not public and do not affect a listed bounty.</p><button class="primary" id="save-account-build" ${builds.length >= 50 ? "disabled" : ""}>Save current workshop build</button><p id="bounty-error" class="error-message"></p><div class="vault-list">${builds.length ? builds.map(card).join("") : '<p class="hint">No account builds yet. Your local blueprint library remains available without signing in.</p>'}</div></section>`;
+        `<section class="panel profile-form vault-panel"><span class="eyebrow">ACCOUNT BLUEPRINTS</span><h2>${builds.length} / 50 saved</h2><p>${attemptId ? "Use & deploy checks the bounty’s locked limits and commits this saved machine. Deployment cannot be changed afterward." : "Save your current workshop machine, its arena and its construction rules. These builds are not public and do not affect a listed bounty."}</p><button class="primary" id="save-account-build" ${builds.length >= 50 ? "disabled" : ""}>Save current workshop build</button><p id="bounty-error" class="error-message"></p><div class="vault-list">${builds.length ? builds.map(card).join("") : '<p class="hint">No account builds yet. Your local blueprint library remains available without signing in.</p>'}</div></section>`;
       wireHeader();
       $("#save-account-build")?.addEventListener("click", (e) =>
         act(e.currentTarget, async () => {
@@ -1122,6 +1139,16 @@ export function createBountyUI(adapter) {
               adapter.toast("Build removed from your account vault.");
               await vault();
             })),
+      );
+      $$("[data-deploy-build]").forEach(
+        (button) =>
+          (button.onclick = () => {
+            const build = builds.find(
+              (row) => row.id === button.dataset.deployBuild,
+            );
+            if (build)
+              void act(button, () => deployCounter(attemptId, build.blueprint));
+          }),
       );
       $$("[data-load-build]").forEach(
         (button) =>
@@ -1191,5 +1218,5 @@ export function createBountyUI(adapter) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  return { open, leave, profile, attempt };
+  return { open, leave, profile, attempt, deploy: deployCounter };
 }

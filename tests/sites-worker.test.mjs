@@ -329,8 +329,12 @@ test("official bounty trials replay before the signing result is shown", async (
   assert.match(client, /wm-watched-official-replay-/);
   assert.match(client, /await watchOfficialReplay\(a\);/);
   assert.match(client, /id="watch-official-replay"/);
+  assert.match(client, /Use a saved build/);
+  assert.match(client, /data-deploy-build/);
   assert.match(app, /Continue to result/);
   assert.match(app, /bountyUI\.attempt\(officialAttemptId\)/);
+  assert.match(app, /deploy-official-counter/);
+  assert.match(app, /bountyUI\.deploy\(bountyContext\.attemptId\)/);
 });
 
 test("direct escrow intents bind exact terms to the confirmed create and entry events", async (t) => {
