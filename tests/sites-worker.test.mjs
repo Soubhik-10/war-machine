@@ -197,6 +197,48 @@ test("Tempo mode is fail-closed and never falls back to sandbox credits", async 
   assert.equal(rules.body.mpp.enabled, false);
 });
 
+test("Tempo wallet sign-in verifies an EIP-191 account and issues a session", async (t) => {
+  const DB = new D1Mock();
+  await DB.migrate();
+  t.after(() => DB.close());
+  const signer = privateKeyToAccount("0x" + "03".repeat(32));
+  const env = {
+    DB,
+    WM_MODE: "tempo-mainnet",
+    WM_BOUNTY_ESCROW_ADDRESS: "0x461eefD1c4bcbE76C470487cF18b892fCD76d494",
+    WM_TEMPO_RPC_URL: "https://tempo-rpc.fixture",
+  };
+  const challenge = await call(env, "/api/auth/challenge", "POST", {
+    chainId: 4217,
+  });
+  assert.equal(challenge.status, 200);
+  const signature = await signer.signMessage({
+    message: challenge.body.message,
+  });
+  const verified = await call(env, "/api/auth/verify", "POST", {
+    address: signer.address,
+    message: challenge.body.message,
+    signature,
+  });
+  assert.equal(verified.status, 200, JSON.stringify(verified.body));
+  assert.equal(verified.body.me.payoutAddress, signer.address);
+  const replay = await call(env, "/api/auth/verify", "POST", {
+    address: signer.address,
+    message: challenge.body.message,
+    signature,
+  });
+  assert.equal(replay.status, 401);
+});
+
+test("browser wallet client uses Tempo Wallet rather than an injected provider", async () => {
+  const source = await readFile(
+    new URL("../scripts/tempo-client-entry.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /tempoWallet/);
+  assert.doesNotMatch(source, /window\.ethereum/);
+});
+
 test("direct escrow intents bind exact terms to the confirmed create and entry events", async (t) => {
   const DB = new D1Mock();
   await DB.migrate();

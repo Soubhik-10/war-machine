@@ -76,6 +76,16 @@ const text = (value, max, label) => {
   );
   return value.trim();
 };
+const signInMessage = (value) => {
+  check(
+    typeof value === "string" &&
+      value.length > 0 &&
+      value.length <= 1000 &&
+      !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value),
+    "Invalid sign-in message.",
+  );
+  return value;
+};
 const parse = (value) => {
   try {
     return JSON.parse(value);
@@ -1600,15 +1610,23 @@ async function signInChallenge(db, body, origin) {
     .run();
   return { message };
 }
-async function verifyWallet(db, body) {
+async function verifyWallet(db, body, config) {
   fields(body, ["address", "message", "signature"]);
-  const message = text(body.message, 1000, "sign-in message"),
-    challenge = await db
-      .prepare(
-        "SELECT * FROM wallet_challenges WHERE message_hash=? AND expires>? AND used=0",
-      )
-      .bind(await hex(message), now())
-      .first();
+  const message = signInMessage(body.message),
+    signature = body.signature;
+  check(
+    typeof signature === "string" &&
+      /^0x[0-9a-fA-F]+$/.test(signature) &&
+      signature.length <= 20_000,
+    "Invalid wallet signature.",
+    400,
+  );
+  const challenge = await db
+    .prepare(
+      "SELECT * FROM wallet_challenges WHERE message_hash=? AND expires>? AND used=0",
+    )
+    .bind(await hex(message), now())
+    .first();
   check(
     challenge,
     "This sign-in challenge expired. Connect your wallet again.",
@@ -1617,11 +1635,20 @@ async function verifyWallet(db, body) {
   let address;
   try {
     address = getAddress(body.address);
-    const recovered = getAddress(
-      await recoverMessageAddress({ message, signature: body.signature }),
-    );
+    // Tempo Wallet may produce a WebAuthn/P256 signature envelope instead of a
+    // 65-byte ECDSA signature. Tempo's viem client verifies both formats and,
+    // for keychain accounts, also checks the active on-chain authorization.
+    const verified =
+      signature.length === 132
+        ? getAddress(await recoverMessageAddress({ message, signature })) ===
+          address
+        : await createClient({ transport: http(config.rpcUrl) }).verifyMessage({
+            address,
+            message,
+            signature,
+          });
     check(
-      recovered === address,
+      verified,
       "Wallet signature does not match the selected address.",
       401,
     );
@@ -3005,7 +3032,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     if (path === "/api/auth/challenge" && method === "POST")
       return response(await signInChallenge(db, body, url.origin));
     if (path === "/api/auth/verify" && method === "POST") {
-      const verified = await verifyWallet(db, body);
+      const verified = await verifyWallet(db, body, config);
       return response({ me: verified.me }, 200, verified.headers);
     }
     if (path === "/api/auth/logout" && method === "POST") {
