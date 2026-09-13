@@ -198,7 +198,7 @@ function renderThumbnail(canvas, machineOrPart) {
     if (!cached) {
       thumbCanvas ||= document.createElement("canvas");
       thumbCanvas.width = thumbCanvas.height = 220;
-      thumbRenderer ||= new Renderer(thumbCanvas);
+      thumbRenderer ||= new Renderer(thumbCanvas, { preserveDrawingBuffer: true, maxPixelRatio: 2 });
       const g = new Geometry();
       let params;
       if (typeof machineOrPart === "string") {
@@ -1455,13 +1455,15 @@ function startArenaIdle() {
 let hudTime = 0;
 function frame(t) {
   if (!running || view !== "arena") return;
+  if (document.hidden) { lastFrame = t; raf = requestAnimationFrame(frame); return; }
   if (!lastFrame) lastFrame = t;
   const delta = Math.min((t - lastFrame) / 1000, 0.12);
   lastFrame = t;
   if (!paused) {
     accumulator += delta * speed;
     let steps = 0;
-    while (accumulator >= DT && steps++ < 32 && !battle.result) {
+    const stepStart = performance.now();
+    while (accumulator >= DT && steps++ < 32 && !battle.result && (steps === 1 || performance.now() - stepStart < 6)) {
       battle.step();
       accumulator -= DT;
     }

@@ -48,7 +48,7 @@ function environment(arena){
  sceneCache.set(arena.id,g.vertices);return g.vertices;
 }
 export function battleScene(battle,{inspect=false,waypoint=true}={}){
- const g=new Geometry();g.material=4;g.vertices=environment(battle.arena).slice();const [,wall,trim]=battle.arena.palette;
+ const g=new Geometry();g.material=4;g.staticVertices=environment(battle.arena);const [,wall,trim]=battle.arena.palette;
  for(const b of battle.arena.obstacles){const x=wx(b.x+b.w/2),z=wz(b.y+b.h/2),w=b.w/CELL,d=b.h/CELL,h=b.height/CELL;
   if(b.hp<=0){for(let i=0;i<5;i++)g.bevel(x+(noise(i+b.x)-.5)*w,.1,z+(noise(i+b.y)-.5)*d,.35,.2,.32,wall);continue;}
   g.bevel(x,h*.5,z,w,h,d,wall);g.box(x,h+.02,z,w-.12,.045,d-.12,'#46535a');

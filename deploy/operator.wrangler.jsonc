@@ -1,0 +1,30 @@
+{
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "observability": {
+    "enabled": true
+  },
+  "limits": {
+    "cpu_ms": 300000
+  },
+  "name": "wm-operator",
+  "main": "../settlement/operator.mjs",
+  "services": [
+    {
+      "binding": "API",
+      "service": "wm-api"
+    }
+  ],
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com",
+    "ACCESS_AUDIENCE": "REPLACE_WITH_ACCESS_APP_AUDIENCE",
+    "OPERATOR_EMAILS": "REPLACE_WITH_APPROVED_OPERATOR_EMAILS"
+  },
+  "secrets_store_secrets": [
+    {
+      "binding": "OPERATOR_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-operator-auth"
+    }
+  ]
+}

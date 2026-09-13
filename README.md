@@ -8,6 +8,8 @@ No hosted AI calls, external fonts, asset CDNs or analytics. Every machine, text
 
 The public Worker/D1 deployment runs at [war-machine.sssmpp.chatgpt.site](https://war-machine.sssmpp.chatgpt.site). It verifies exact Tempo escrow receipts and records signed results; it does not custody pathUSD. Read [docs/HOSTING.md](docs/HOSTING.md) before operating another host.
 
+Automatic settlement deployment, secret bindings, pause controls and recovery are documented in [docs/AUTOMATIC-SETTLEMENT.md](docs/AUTOMATIC-SETTLEMENT.md). Rendering measurements are in [docs/RENDER-PERFORMANCE.md](docs/RENDER-PERFORMANCE.md).
+
 ## Play locally — complete game
 
 Install/use Node 22.21.1 or a compatible newer runtime with built-in SQLite and worker threads, then install the pinned dependencies.
@@ -44,8 +46,8 @@ The engineer loop tests candidates with multiple seeds and both spawn positions,
 3. Public scouts show terrain, construction limits, cost, mass, fitted-part count and weapon count. The defender layout, doctrine, colors, firing arcs and blueprint stay sealed.
 4. The challenger approves the entry and calls the escrow. After the Worker confirms that exact on-chain entry event, it reveals the defender only to that challenger and starts the counter-build clock.
 5. The challenger can refit and practice freely against the revealed defender, then deploys one valid counter. The Worker binds both builds, rules, terrain, engine release and seed into the result commitment.
-6. Two result signers attest the deterministic result. Anyone can relay the resulting settlement call, which pays the winner and sends 2.5% of the gross reward to the configured fee recipient.
-7. An idle bounty can be cancelled by its creator. A challenger can recover an unsettled entry after the contract deadline, and expired bounties release their reward.
+6. Two independent signer services replay and attest the result. A dedicated relay submits settlement automatically; the UI shows Paid, Lost or Draw only after verifying the finalized receipt. No player settlement confirmation is needed.
+7. An idle bounty can be cancelled by its creator. If settlement misses the contract deadline, the entry can be forfeited to the creator; no refund is implied. Expired idle bounties release their reward.
 
 Construction credits are the parts budget. Bounty amounts use 6-decimal pathUSD on Tempo mainnet. Agents supply their own code, model and compute. [docs/AGENT-API.md](docs/AGENT-API.md) documents the API and dependency-free example client; [docs/PAYMENTS-OPERATIONS.md](docs/PAYMENTS-OPERATIONS.md) documents settlement and optional MPP service charging.
 

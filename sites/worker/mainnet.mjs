@@ -1,3 +1,5 @@
+import { evaluate, canonical as canonicalSettlement } from '../../settlement/protocol.mjs';
+import { configured, materializeResult, ready as settlementReady, internalRoute, tick as settlementTick } from '../../settlement/coordinator.mjs';
 import * as Mppx from "../../node_modules/mppx/dist/server/Mppx.js";
 import { tempo } from "../../node_modules/mppx/dist/tempo/server/Methods.js";
 import { createClient, http } from "viem/tempo";
@@ -262,15 +264,7 @@ export function runtimeConfig(env, origin) {
     agentMppRecipient: agentMppEnabled ? getAddress(mppRecipient) : null,
     agentMppPriceUnits: mppPriceUnits,
     mppSecret: agentMppEnabled ? env.MPP_SECRET_KEY : null,
-    // The deployed escrow needs two independent attestations before it can
-    // settle a result. This worker intentionally has no signer keys and no
-    // signing service yet, so accepting another paid bounty would strand new
-    // entries at the same point. Keep account access and existing-bounty
-    // settlement status online,
-    // while failing closed for new funding and entries. A reviewed signer
-    // service must explicitly set this readiness flag only after both
-    // independent signers are live.
-    acceptingNewBounties: env.WM_RESULT_SIGNING_READY === "true",
+    acceptingNewBounties: env.WM_RESULT_SIGNING_READY === "true" && configured(env) && env.WM_EMERGENCY_PAUSE !== "true",
     settlementReason:
       "New paid bounties are paused until the two independent result signers are online.",
     reason: null,
@@ -1503,11 +1497,17 @@ async function attemptView(db, attemptId, viewer) {
       outcome: payload.outcome,
       resultHash: payload.resultHash,
       validUntil: payload.validUntil,
-      signatures: payload.signatures || [],
       state: attempt.status,
       transactionHash: attempt.escrow_settlement_tx || null,
     };
   }
+  const job = await db.prepare('SELECT state,tx_hash,error_code,updated FROM settlement_jobs WHERE attempt=?').bind(attempt.id).first();
+  const record = attempt.match_record ? parse(attempt.match_record) : null;
+  value.payment = { state: done ? 'complete' : job?.state || (attempt.status === 'engineering' && now() >= Number(bounty.escrow_attempt_deadline) ? 'timeout' : 'pending'),
+    transactionHash: attempt.escrow_settlement_tx || job?.tx_hash || null,
+    entryTransactionHash: attempt.escrow_entry_tx || null,
+    deadline: record?.deadline || Math.floor(Number(bounty.escrow_attempt_deadline || 0)/1000),
+    finalized: done && !!attempt.escrow_settlement_tx };
   return value;
 }
 
@@ -1998,6 +1998,11 @@ async function receipt(config, hash) {
     "The wallet transaction reverted; no bounty funds were accepted.",
     409,
   );
+  const finalized = await rpc(config, 'eth_getBlockByNumber', ['finalized', false]);
+  check(finalized && BigInt(value.blockNumber) <= BigInt(finalized.number), 'Transaction is awaiting finality.', 409);
+  const block = await rpc(config, 'eth_getBlockByNumber', [value.blockNumber, false]);
+  check(block?.hash === value.blockHash, 'Transaction is awaiting canonical finality.', 409);
+  check(BigInt(await rpc(config, 'eth_chainId', [])) === BigInt(config.chainId), 'RPC chain mismatch.', 503);
   return value;
 }
 function eventLog(receiptValue, config, topic) {
@@ -2434,6 +2439,18 @@ async function confirmDirectIntent(db, auth, intentId, hash, config) {
   };
 }
 
+async function immutableRecord(db, attempt, bounty, challenger, reason, committedAt) {
+  return { version: 1, engineHash: CLIENT_ENGINE_HASH, chainId: TEMPO_MAINNET_CHAIN_ID,
+    escrow: '0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e', attemptId: attempt.id,
+    bountyId: String(bounty.escrow_bounty_id), attemptNonce: String(bounty.escrow_attempt_nonce),
+    creator: await payoutAddress(db, bounty.owner), challengerAddress: await payoutAddress(db, attempt.account),
+    title: bounty.title, listed: !!bounty.listed, expiresAt: Math.floor(Number(bounty.expires || 0)/1000),
+    reward: bounty.reward_units, entry: bounty.entry_units, feeBps: 250,
+    defender: parse(bounty.blueprint), challenger, seed: attempt.seed, reason,
+    entryTx: attempt.escrow_entry_tx, deadline: Math.floor(Number(bounty.escrow_attempt_deadline)/1000),
+    buildDeadline: Number(attempt.build_deadline), committedAt };
+}
+
 async function deployCounter(db, auth, attemptId, body, key) {
   requireOwner(auth);
   fields(body, ["blueprint"]);
@@ -2449,6 +2466,14 @@ async function deployCounter(db, auth, attemptId, body, key) {
     "Only the paid challenger can deploy this counter.",
     403,
   );
+  const old = await prior(db, auth.account, key, 'deploy:' + attemptId, body);
+  if(old) return attemptView(db,old,auth.account);
+  if(attempt.match_record) {
+    const committed=parse(attempt.match_record);
+    check(canonicalSettlement(committed.challenger)===canonicalSettlement(canonicalBlueprint(body.blueprint,parse(bounty.blueprint))), 'This attempt already has a different committed counter.',409);
+    await remember(db,auth.account,key,'deploy:'+attemptId,body,attempt.id);
+    return attemptView(db,attempt.id,auth.account);
+  }
   check(
     attempt.status === "engineering",
     "This counter has already been deployed or the attempt has ended.",
@@ -2460,84 +2485,18 @@ async function deployCounter(db, auth, attemptId, body, key) {
     "The engineering window closed. The entry is forfeited to the bounty creator.",
     409,
   );
-  const old = await prior(db, auth.account, key, "deploy:" + attemptId, body);
-  if (old) return attemptView(db, old, auth.account);
   const defender = parse(bounty.blueprint),
     challenger = canonicalBlueprint(body.blueprint, defender),
     settlementDeadline = Math.floor(
       Number(bounty.escrow_attempt_deadline) / 1000,
     ),
     updated = now();
-  let simulation;
-  try {
-    const result = {
-        ...new Battle(
-          unpackChallenge(challenger).machine,
-          unpackChallenge(defender).machine,
-          defender.a,
-          attempt.seed,
-          { mode: "auto", swapSpawns: !!(attempt.seed & 1) },
-        ).run(),
-        seed: attempt.seed,
-      },
-      outcome = result.winner === 0 ? 0 : 1,
-      resultHash =
-        "0x" +
-        (await hex(
-          json({
-            version: "war-machines-settlement-v2",
-            engineHash: CLIENT_ENGINE_HASH,
-            bountyId: bounty.escrow_bounty_id,
-            attemptNonce: bounty.escrow_attempt_nonce,
-            outcome,
-            challenger,
-            defender,
-            result,
-          }),
-        ));
-    simulation = {
-      ...result,
-      outcome:
-        result.winner === 0 ? "win" : result.winner === 1 ? "loss" : "draw",
-      settlement: {
-        bountyId: bounty.escrow_bounty_id,
-        attemptNonce: String(bounty.escrow_attempt_nonce),
-        outcome,
-        resultHash,
-        validUntil: Math.max(0, settlementDeadline - 1),
-        signatures: [],
-      },
-    };
-  } catch {
-    simulation = {
-      outcome: "technical-refund",
-      settlement: {
-        bountyId: bounty.escrow_bounty_id,
-        attemptNonce: String(bounty.escrow_attempt_nonce),
-        outcome: 2,
-        resultHash: "0x" + (await hex("technical-refund:" + attempt.id)),
-        validUntil: Math.max(0, settlementDeadline - 1),
-        signatures: [],
-      },
-    };
-  }
-  const applied = await db
-    .prepare(
-      "UPDATE attempts SET blueprint=?,status='awaiting-signatures',result=?,settlement_payload=?,updated=? WHERE id=? AND status='engineering'",
-    )
-    .bind(
-      json(challenger),
-      json(simulation),
-      json(simulation.settlement),
-      updated,
-      attempt.id,
-    )
-    .run();
-  check(
-    applied.meta.changes === 1,
-    "This counter was already deployed in another request.",
-    409,
-  );
+  const record = await immutableRecord(db, attempt, bounty, challenger, 'battle', updated);
+  const applied = await db.prepare("UPDATE attempts SET blueprint=?,status='queued',match_record=?,updated=? WHERE id=? AND status='engineering'")
+    .bind(json(challenger),json(record),updated,attempt.id).run();
+  check(applied.meta.changes === 1, 'This counter was already deployed in another request.', 409);
+  // Compute only from the committed database record. A crash here is recovered by the polling worker.
+  try { await materializeResult(db,attempt.id); } catch { /* worker retries; no synthetic refund */ }
   await remember(
     db,
     auth.account,
@@ -2589,59 +2548,11 @@ async function forfeitExpiredEngineeringAttempt(db, auth, attemptId, key) {
     "The escrow attestation window has elapsed. This immutable escrow can no longer transfer the entry to the creator.",
     409,
   );
-  const resultHash =
-      "0x" +
-      (await hex(
-        json({
-          version: "war-machines-settlement-v2",
-          engineHash: CLIENT_ENGINE_HASH,
-          bountyId: bounty.escrow_bounty_id,
-          attemptNonce: bounty.escrow_attempt_nonce,
-          outcome: 1,
-          challenger: null,
-          defender: parse(bounty.blueprint),
-          reason: "counter-build-timeout",
-          buildDeadline,
-          seed: attempt.seed,
-        }),
-      )),
-    settlement = {
-      bountyId: bounty.escrow_bounty_id,
-      attemptNonce: String(bounty.escrow_attempt_nonce),
-      outcome: 1,
-      resultHash,
-      validUntil: Math.max(0, settlementDeadline - 1),
-      signatures: [],
-    },
-    result = {
-      seed: attempt.seed,
-      winner: 1,
-      outcome: "loss",
-      reason: "counter-build-timeout",
-      time: 0,
-      damage: [0, 0],
-      integrity: [0, 1],
-      entry: display(bounty.entry_units),
-      grossReward: "0",
-      reward: "0",
-      payout: "0",
-      platformFee: "0",
-      platformFeeBps: bounty.platform_fee_bps ?? PLATFORM_FEE_BPS,
-      net: "-" + display(bounty.entry_units),
-      verifiedAt: now(),
-      settlement,
-    };
-  const applied = await db
-    .prepare(
-      "UPDATE attempts SET status='awaiting-signatures',result=?,settlement_payload=?,error=NULL,updated=? WHERE id=? AND status='engineering'",
-    )
-    .bind(json(result), json(settlement), now(), attempt.id)
-    .run();
-  check(
-    applied.meta.changes === 1,
-    "This timed-out attempt was already finalized.",
-    409,
-  );
+  const record = await immutableRecord(db, attempt, bounty, null, 'counter-build-timeout', now());
+  const applied = await db.prepare("UPDATE attempts SET status='queued',match_record=?,updated=? WHERE id=? AND status='engineering'")
+    .bind(json(record),now(),attempt.id).run();
+  check(applied.meta.changes === 1, 'This timed-out attempt was already finalized.', 409);
+  try { await materializeResult(db,attempt.id); } catch { /* recover through the durable job */ }
   await remember(db, auth.account, key, "forfeit:" + attemptId, {}, attempt.id);
   return attemptView(db, attempt.id, auth.account);
 }
@@ -3059,6 +2970,11 @@ async function attestSettlement(db, attemptId, body, config) {
   return settlementPlan(config, payload);
 }
 async function confirmSettlement(db, attemptId, hash, config) {
+  const existing = await db.prepare('SELECT * FROM attempts WHERE id=?').bind(attemptId).first();
+  if (existing && ['settled','refunded'].includes(existing.status)) {
+    check(existing.escrow_settlement_tx === hash, 'Settlement already confirmed with another transaction.', 409);
+    return attemptView(db, attemptId, existing.account);
+  }
   const { attempt, payload, bounty } = await settlementRecord(db, attemptId);
   check(
     attempt.status === "ready-to-settle",
@@ -3102,7 +3018,7 @@ async function confirmSettlement(db, attemptId, hash, config) {
     result = {
       ...prior,
       outcome:
-        outcome === 0 ? "win" : outcome === 1 ? "loss" : "technical-refund",
+        outcome === 0 ? "win" : outcome === 1 ? (prior.outcome === "draw" ? "draw" : "loss") : "technical-refund",
       entry: display(bounty.entry_units),
       grossReward: outcome === 0 ? display(bounty.reward_units) : "0",
       payout: outcome === 0 ? quote.payout : "0",
@@ -3137,7 +3053,7 @@ async function confirmSettlement(db, attemptId, hash, config) {
       ),
     db
       .prepare(
-        "UPDATE bounties SET status=?,active_attempt=NULL,escrow_attempt_deadline=NULL,winner=?,reserve_units=?,updated=? WHERE id=?",
+        "UPDATE bounties SET status=?,active_attempt=NULL,escrow_attempt_deadline=NULL,winner=?,reserve_units=?,updated=? WHERE id=? AND active_attempt=?",
       )
       .bind(
         bountyStatus,
@@ -3145,15 +3061,53 @@ async function confirmSettlement(db, attemptId, hash, config) {
         outcome === 0 ? "0" : bounty.reward_units,
         updated,
         bounty.id,
+        attempt.id,
       ),
   ]);
   return await attemptView(db, attempt.id, attempt.account);
+}
+
+async function adoptLegacySettlements(env) {
+  const db=env.DB;
+  const rows=(await db.prepare("SELECT * FROM attempts WHERE match_record IS NULL AND status IN ('awaiting-signatures','ready-to-settle') AND settlement_payload IS NOT NULL AND id NOT IN (SELECT attempt FROM settlement_audit WHERE event='legacy-result-unverifiable') ORDER BY created LIMIT 20").all()).results;
+  for(const attempt of rows) {
+    try {
+      const bounty=await bountyRow(db,attempt.bounty), old=parse(attempt.settlement_payload), prior=attempt.result?parse(attempt.result):{};
+      const reason=prior.reason==='counter-build-timeout'?'counter-build-timeout':'battle';
+      // Preserve the original commitment time and message; re-run it before adoption.
+      const record={...await immutableRecord(db,attempt,bounty,reason==='battle'?parse(attempt.blueprint):null,reason,attempt.updated),legacy:true};
+      const verified=evaluate(record,Math.min(now(),record.deadline*1000-1));
+      const {bountyId,attemptNonce,outcome,resultHash,validUntil}=old;
+      check(canonicalSettlement(verified.payload)===canonicalSettlement({bountyId,attemptNonce,outcome,resultHash,validUntil}), 'Legacy result did not reproduce.');
+      await db.prepare('UPDATE attempts SET match_record=?,updated=? WHERE id=? AND match_record IS NULL').bind(json(record),now(),attempt.id).run();
+      await db.prepare("INSERT INTO settlement_audit(attempt,actor,event,created) VALUES(?,'migration','legacy-result-reverified',?)").bind(attempt.id,now()).run();
+    } catch {
+      await db.prepare("INSERT INTO settlement_audit(attempt,actor,event,created) VALUES(?,'migration','legacy-result-unverifiable',?)").bind(attempt.id,now()).run();
+      // Unverifiable legacy results stay visibly unresolved, with no fabricated refund.
+    }
+  }
+}
+
+export async function runAutomaticSettlement(env) {
+  const config=runtimeConfig(env,'https://service.internal');
+  if(!config.enabled) return;
+  await settlementTick(env,{
+    adoptLegacy:()=>adoptLegacySettlements(env),
+    attest:(attempt,signatures)=>attestSettlement(env.DB,attempt,{signatures},config),
+    confirm:(attempt,hash)=>confirmSettlement(env.DB,attempt,hash,config),
+    forfeit:attempt=>forfeitExpiredEngineeringAttempt(env.DB,{role:'owner',account:attempt.account},attempt.id,'auto-forfeit-'+attempt.id),
+  });
 }
 
 export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
   const url = new URL(request.url),
     path = url.pathname,
     config = runtimeConfig(env, url.origin);
+  if (path.startsWith('/api/internal/settlement/')) {
+    try { return await internalRoute(request,env,()=>runAutomaticSettlement(env)); }
+    catch { return response({error:'Settlement service request rejected.'},503); }
+  }
+  if(config.enabled) config.acceptingNewBounties = config.acceptingNewBounties && await settlementReady(env);
   if (path === "/.well-known/war-machines.json" && request.method === "GET")
     return response(discovery(config));
   if (!path.startsWith("/api/")) return serveStaticAsset(request);

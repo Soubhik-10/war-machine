@@ -1,0 +1,48 @@
+{
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "observability": {
+    "enabled": true
+  },
+  "limits": {
+    "cpu_ms": 300000
+  },
+  "name": "wm-signer-b",
+  "main": "../settlement/signer.mjs",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wm-signer-b",
+      "database_id": "REPLACE_WITH_DATABASE_ID"
+    }
+  ],
+  "vars": {
+    "SERVICE_ID": "signer-b",
+    "SIGNER_ADDRESS": "0x9fD9719d8DE2f92F49a00068dFEA59006f6FD902",
+    "WM_TEMPO_RPC_URL": "REPLACE_WITH_INDEPENDENT_HTTPS_RPC",
+    "WM_EMERGENCY_PAUSE": "false"
+  },
+  "services": [
+    {
+      "binding": "API",
+      "service": "wm-api"
+    }
+  ],
+  "secrets_store_secrets": [
+    {
+      "binding": "SIGNING_KEY",
+      "store_id": "REPLACE_WITH_SIGNER_STORE_ID",
+      "secret_name": "wm-signer-b-key"
+    },
+    {
+      "binding": "COORDINATOR_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-signer-b-auth"
+    },
+    {
+      "binding": "API_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-signer-b-api-auth"
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+import { sha256, stringToHex, parseAbi, recoverTypedDataAddress } from 'viem';
+import { Battle } from '../dist/engine.mjs';
+import { unpackChallenge } from '../dist/data.mjs';
+import { CLIENT_ENGINE_HASH } from '../dist/release.mjs';
+
+export const CHAIN_ID = 4217;
+export const ESCROW = '0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e';
+export const ABI = parseAbi([
+  'function getBounty(uint256) view returns ((address creator,address challenger,uint128 reward,uint128 entry,uint64 expiresAt,uint64 attemptDeadline,uint64 attemptNonce,uint8 status,bytes32 termsHash))',
+  'function isSettlementSigner(address) view returns (bool)',
+  'function settlementQuorum() view returns (uint8)',
+  'function settleAttempt((uint256 bountyId,uint64 attemptNonce,uint8 outcome,bytes32 resultHash,uint64 validUntil) settlement,bytes[] signatures)',
+  'event AttemptSettled(uint256 indexed bountyId,uint64 indexed attemptNonce,address indexed challenger,uint8 outcome,bytes32 resultHash,uint128 winnerPayout,uint128 platformFee,uint128 creatorEntry)',
+  'event AttemptEntered(uint256 indexed bountyId,uint64 indexed attemptNonce,address indexed challenger,uint64 attemptDeadline)',
+]);
+export function ensure(ok, code = 'INVALID_PAYLOAD') { if (!ok) throw Object.assign(Error(code), { code }); }
+export function canonical(value) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
+  if (typeof value === 'number') { ensure(Number.isFinite(value)); return JSON.stringify(value); }
+  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
+  ensure(value && Object.getPrototypeOf(value) === Object.prototype);
+  return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + canonical(value[k])).join(',') + '}';
+}
+export const digest = value => sha256(stringToHex(canonical(value)));
+export function typedData(payload) {
+  return { domain: { name: 'War Machines Bounty Escrow', version: '2', chainId: CHAIN_ID, verifyingContract: ESCROW },
+    primaryType: 'Settlement', types: { Settlement: [
+      {name:'bountyId',type:'uint256'}, {name:'attemptNonce',type:'uint64'}, {name:'outcome',type:'uint8'},
+      {name:'resultHash',type:'bytes32'}, {name:'validUntil',type:'uint64'},
+    ] }, message: { bountyId: BigInt(payload.bountyId), attemptNonce: BigInt(payload.attemptNonce), outcome: payload.outcome, resultHash: payload.resultHash, validUntil: BigInt(payload.validUntil) } };
+}
+export function evaluate(record, time = Date.now()) {
+  ensure(record.version === 1 && record.engineHash === CLIENT_ENGINE_HASH, 'ENGINE_MISMATCH');
+  ensure(record.chainId === CHAIN_ID && record.escrow.toLowerCase() === ESCROW.toLowerCase());
+  ensure(Number.isSafeInteger(record.seed) && record.seed >= 0);
+  ensure(Number.isSafeInteger(record.deadline) && record.deadline > 0);
+  for (const amount of [record.reward, record.entry]) ensure(typeof amount === 'string' && /^(0|[1-9][0-9]*)$/.test(amount) && BigInt(amount) < 2n ** 128n);
+  ensure(record.feeBps === 250 && BigInt(record.reward) > 0n);
+  ensure(time < record.deadline * 1000, 'EXPIRED');
+  const defender = unpackChallenge(record.defender);
+  let result;
+  if (record.reason === 'counter-build-timeout') {
+    ensure(record.challenger === null && record.buildDeadline <= time && record.committedAt >= record.buildDeadline);
+    result = { winner: 1, reason: record.reason, time: 0, seed: record.seed, integrity: [0,1], damage: [0,0] };
+  } else {
+    ensure(record.reason === 'battle' && record.committedAt < record.buildDeadline);
+    ensure(record.challenger.a === record.defender.a && canonical(record.challenger.q) === canonical(record.defender.q));
+    result = { ...new Battle(unpackChallenge(record.challenger).machine, defender.machine, defender.arena, record.seed, {mode:'auto',swapSpawns:!!(record.seed & 1)}).run(), seed: record.seed };
+  }
+  const outcome = result.winner === 0 ? 0 : 1;
+  const fee = outcome === 0 ? BigInt(record.reward) * 250n / 10000n : 0n;
+  const amounts = { winnerPayout: outcome === 0 ? (BigInt(record.reward)-fee).toString() : '0', platformFee: fee.toString(), creatorEntry: record.entry };
+  const payload = { bountyId: record.bountyId, attemptNonce: record.attemptNonce, outcome,
+    resultHash: digest({ protocol:'war-machines-auto-v1', record, result, amounts }), validUntil: record.deadline - 1 };
+  // Recovery only for results committed before migration 0005. The on-chain
+  // bounty ID binds their immutable amounts; new matches always hash amounts
+  // explicitly. Never change an already-issued legacy signature's message.
+  if(record.legacy === true) {
+    const commitment=record.reason==='battle'
+      ? {version:'war-machines-settlement-v2',engineHash:record.engineHash,bountyId:record.bountyId,attemptNonce:Number(record.attemptNonce),outcome,challenger:record.challenger,defender:record.defender,result}
+      : {version:'war-machines-settlement-v2',engineHash:record.engineHash,bountyId:record.bountyId,attemptNonce:Number(record.attemptNonce),outcome:1,challenger:null,defender:record.defender,reason:'counter-build-timeout',buildDeadline:record.buildDeadline,seed:record.seed};
+    payload.resultHash=sha256(stringToHex(JSON.stringify(commitment)));
+  }
+  return { payload, amounts, result: {...result, outcome: result.winner === 0 ? 'win' : result.winner === 1 ? 'loss' : 'draw'} };
+}
+export function verifyPayload(record, payload, time) {
+  const verified = evaluate(record, time);
+  ensure(canonical(payload) === canonical(verified.payload), 'PAYLOAD_MISMATCH');
+  return verified;
+}
+export async function quorum(payload, signatures, addresses) {
+  ensure(signatures?.length === 2 && addresses?.length === 2, 'QUORUM');
+  const recovered = await Promise.all(signatures.map(async signature => ({ signature, address: (await recoverTypedDataAddress({...typedData(payload),signature})).toLowerCase() })));
+  ensure(new Set(recovered.map(x=>x.address)).size === 2 && recovered.every(x=>addresses.map(a=>a.toLowerCase()).includes(x.address)), 'QUORUM');
+  return recovered.sort((a,b)=>a.address.localeCompare(b.address)).map(x=>x.signature);
+}

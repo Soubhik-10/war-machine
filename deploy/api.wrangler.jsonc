@@ -1,0 +1,93 @@
+{
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "observability": {
+    "enabled": true
+  },
+  "limits": {
+    "cpu_ms": 300000
+  },
+  "name": "wm-api",
+  "main": "../dist/server/index.js",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wm-api",
+      "database_id": "REPLACE_WITH_DATABASE_ID"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "vars": {
+    "WM_MODE": "tempo-mainnet",
+    "WM_BOUNTY_ESCROW_ADDRESS": "0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e",
+    "WM_TEMPO_RPC_URL": "https://rpc.tempo.xyz",
+    "WM_RESULT_SIGNING_READY": "false",
+    "WM_EMERGENCY_PAUSE": "false",
+    "SIGNER_ADDRESSES": "[\"0x39Af67Ee9700C62aAa5d87cCc34F937c47e6150a\",\"0x9fD9719d8DE2f92F49a00068dFEA59006f6FD902\"]"
+  },
+  "services": [
+    {
+      "binding": "SIGNER_A",
+      "service": "wm-signer-a"
+    },
+    {
+      "binding": "SIGNER_B",
+      "service": "wm-signer-b"
+    },
+    {
+      "binding": "RELAY",
+      "service": "wm-relay"
+    }
+  ],
+  "secrets_store_secrets": [
+    {
+      "binding": "SIGNER_A_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-signer-a-auth"
+    },
+    {
+      "binding": "SIGNER_B_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-signer-b-auth"
+    },
+    {
+      "binding": "RELAY_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-relay-auth"
+    },
+    {
+      "binding": "SIGNER_A_API_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-signer-a-api-auth"
+    },
+    {
+      "binding": "SIGNER_B_API_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-signer-b-api-auth"
+    },
+    {
+      "binding": "RELAY_API_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-relay-api-auth"
+    },
+    {
+      "binding": "OPERATOR_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-operator-auth"
+    },
+    {
+      "binding": "SCHEDULER_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-scheduler-auth"
+    },
+    {
+      "binding": "MONITOR_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-monitor-auth"
+    }
+  ]
+}

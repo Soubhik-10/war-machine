@@ -128,9 +128,9 @@ void main(){
  fragColor=vec4(pow(max(color,vec3(0.0)),vec3(.87)),1.0);
 }`;
 export class Renderer{
- constructor(canvas){
+ constructor(canvas,{preserveDrawingBuffer=false,maxPixelRatio=1.5}={}){
   this.canvas=canvas;
-  this.gl=canvas.getContext('webgl2',{alpha:true,antialias:true,preserveDrawingBuffer:true});
+  this.gl=canvas.getContext('webgl2',{alpha:true,antialias:true,preserveDrawingBuffer});
   if(!this.gl)throw Error('WebGL 2 is unavailable');
   const gl=this.gl;
   const compile=(src,type)=>{
@@ -150,37 +150,54 @@ export class Renderer{
   };
   this.program=program(FS);
   this.buffer=gl.createBuffer();
+  this.staticBuffer=gl.createBuffer();
+  this.staticVertices=null;
+  this.upload=new Float32Array(0);
+  this.maxPixelRatio=maxPixelRatio;
+  this.attributes=[['aPosition',3,0],['aNormal',3,12],['aColor',3,24],['aGlow',1,36],['aSurface',4,40]].map(([name,size,offset])=>[gl.getAttribLocation(this.program,name),size,offset]);
+  this.uniforms=Object.fromEntries(['uVP','uViewDir','uLightDir'].map(name=>[name,gl.getUniformLocation(this.program,name)]));
   this.params=null;
  }
  render(geo,{target=[0,0,0],yaw=-.64,elevation=.65,span=9,bg=[.065,.078,.083,0]}={}){
-  const gl=this.gl,c=this.canvas,cr=c.getBoundingClientRect(),r={left:cr.left,top:cr.top,width:cr.width||c.width,height:cr.height||c.height},dpr=cr.width?Math.min(window.devicePixelRatio||1,2):1,w=Math.max(1,Math.round(r.width*dpr)),h=Math.max(1,Math.round(r.height*dpr));
+  const gl=this.gl,c=this.canvas,cr=c.getBoundingClientRect(),r={left:cr.left,top:cr.top,width:cr.width||c.width,height:cr.height||c.height},dpr=cr.width?Math.min(window.devicePixelRatio||1,this.maxPixelRatio):1,w=Math.max(1,Math.round(r.width*dpr)),h=Math.max(1,Math.round(r.height*dpr));
   if(c.width!==w||c.height!==h){c.width=w;c.height=h;}
   const aspect=w/h,halfY=span*.5,halfX=halfY*aspect;
   const eye=[target[0]+Math.sin(yaw)*Math.cos(elevation)*30,target[1]+Math.sin(elevation)*30,target[2]+Math.cos(yaw)*Math.cos(elevation)*30];
   const vp=mul(ortho(-halfX,halfX,-halfY,halfY,.1,100),lookAt(eye,target));
   const lightEye=[-36,64,-24];
   this.params={target,eye,halfX,halfY,r,vp};
-  gl.bindBuffer(gl.ARRAY_BUFFER,this.buffer);
-  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(geo.vertices),gl.DYNAMIC_DRAW);
+
   gl.enable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);gl.depthFunc(gl.LEQUAL);
-  const setup=(p,matrix)=>{
-   gl.useProgram(p);
-   for(const [name,size,offset] of [['aPosition',3,0],['aNormal',3,12],['aColor',3,24],['aGlow',1,36],['aSurface',4,40]]){
-    const loc=gl.getAttribLocation(p,name);
-    if(loc>=0){gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,size,gl.FLOAT,false,VERTEX_STRIDE*4,offset);}
-   }
-   gl.uniformMatrix4fv(gl.getUniformLocation(p,'uVP'),false,matrix);
+  const setup=buffer=>{
+   gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
+   for(const [loc,size,offset] of this.attributes) if(loc>=0){gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,size,gl.FLOAT,false,VERTEX_STRIDE*4,offset);}
   };
   gl.viewport(0,0,w,h);
   gl.clearColor(...bg);
   gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
-  setup(this.program,vp);
-  gl.uniform3fv(gl.getUniformLocation(this.program,'uViewDir'),sub(eye,target));
-  gl.uniform3fv(gl.getUniformLocation(this.program,'uLightDir'),lightEye);
+  gl.useProgram(this.program);
+  gl.uniformMatrix4fv(this.uniforms.uVP,false,vp);
+  gl.uniform3fv(this.uniforms.uViewDir,sub(eye,target));
+  gl.uniform3fv(this.uniforms.uLightDir,lightEye);
+  if(geo.staticVertices){
+   setup(this.staticBuffer);
+   if(this.staticVertices!==geo.staticVertices){
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(geo.staticVertices),gl.STATIC_DRAW);
+    this.staticVertices=geo.staticVertices;
+   }
+   gl.drawArrays(gl.TRIANGLES,0,geo.staticVertices.length/VERTEX_STRIDE);
+  }
+  setup(this.buffer);
+  if(this.upload.length<geo.vertices.length){
+   this.upload=new Float32Array(Math.max(1024,2**Math.ceil(Math.log2(geo.vertices.length))));
+   gl.bufferData(gl.ARRAY_BUFFER,this.upload.byteLength,gl.DYNAMIC_DRAW);
+  }
+  this.upload.set(geo.vertices);
+  if(geo.vertices.length)gl.bufferSubData(gl.ARRAY_BUFFER,0,this.upload,0,geo.vertices.length);
   gl.drawArrays(gl.TRIANGLES,0,geo.vertices.length/VERTEX_STRIDE);
  }
  ray(clientX,clientY){const p=this.params;if(!p)return null;const f=norm(sub(p.target,p.eye)),right=norm(cross(f,[0,1,0])),up=cross(right,f),sx=((clientX-p.r.left)/p.r.width*2-1)*p.halfX,sy=(1-(clientY-p.r.top)/p.r.height*2)*p.halfY;return {origin:p.eye.map((v,i)=>v+right[i]*sx+up[i]*sy),direction:f};}
  pick(clientX,clientY,height=.5){const ray=this.ray(clientX,clientY);if(!ray||Math.abs(ray.direction[1])<1e-9)return null;const t=(height-ray.origin[1])/ray.direction[1];return {x:ray.origin[0]+ray.direction[0]*t,z:ray.origin[2]+ray.direction[2]*t};}
  project(point){const p=this.params;if(!p)return null;const v=[point[0],point[1],point[2],1],q=[0,0,0,0];for(let r=0;r<4;r++)for(let k=0;k<4;k++)q[r]+=p.vp[k*4+r]*v[k];return {x:p.r.left+(q[0]/q[3]+1)*.5*p.r.width,y:p.r.top+(1-q[1]/q[3])*.5*p.r.height};}
- dispose(){const gl=this.gl;gl.deleteBuffer(this.buffer);gl.deleteProgram(this.program);}
+ dispose(){const gl=this.gl;gl.deleteBuffer(this.buffer);gl.deleteBuffer(this.staticBuffer);gl.deleteProgram(this.program);}
 }

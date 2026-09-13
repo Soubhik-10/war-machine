@@ -1,0 +1,67 @@
+{
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "observability": {
+    "enabled": true
+  },
+  "limits": {
+    "cpu_ms": 300000
+  },
+  "name": "wm-relay",
+  "main": "../settlement/relay.mjs",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wm-relay",
+      "database_id": "REPLACE_WITH_DATABASE_ID"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RELAY_ACTOR",
+        "class_name": "SettlementRelay"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "SettlementRelay"
+      ]
+    }
+  ],
+  "vars": {
+    "WM_TEMPO_RPC_URL": "https://rpc.tempo.xyz",
+    "RELAY_ADDRESS": "REPLACE_WITH_RELAY_PUBLIC_ADDRESS",
+    "SIGNER_ADDRESSES": "[\"0x39Af67Ee9700C62aAa5d87cCc34F937c47e6150a\",\"0x9fD9719d8DE2f92F49a00068dFEA59006f6FD902\"]",
+    "MAX_RELAY_GAS": "1000000",
+    "MAX_FEE_PER_GAS": "100000000000",
+    "WM_EMERGENCY_PAUSE": "false",
+    "MIN_RELAY_FEE_BALANCE": "1000000"
+  },
+  "services": [
+    {
+      "binding": "API",
+      "service": "wm-api"
+    }
+  ],
+  "secrets_store_secrets": [
+    {
+      "binding": "RELAY_KEY",
+      "store_id": "REPLACE_WITH_RELAY_STORE_ID",
+      "secret_name": "wm-relay-key"
+    },
+    {
+      "binding": "COORDINATOR_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-relay-auth"
+    },
+    {
+      "binding": "API_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-relay-api-auth"
+    }
+  ]
+}

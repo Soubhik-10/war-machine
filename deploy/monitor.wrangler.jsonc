@@ -1,0 +1,48 @@
+{
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "observability": {
+    "enabled": true
+  },
+  "limits": {
+    "cpu_ms": 300000
+  },
+  "name": "wm-monitor",
+  "main": "../settlement/monitor.mjs",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wm-monitor",
+      "database_id": "REPLACE_WITH_DATABASE_ID"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "services": [
+    {
+      "binding": "API",
+      "service": "wm-api"
+    }
+  ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "METRICS",
+      "dataset": "wm_settlement_health"
+    }
+  ],
+  "secrets_store_secrets": [
+    {
+      "binding": "MONITOR_AUTH",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-monitor-auth"
+    },
+    {
+      "binding": "ALERT_WEBHOOK",
+      "store_id": "REPLACE_WITH_STORE_ID",
+      "secret_name": "wm-alert-webhook"
+    }
+  ]
+}

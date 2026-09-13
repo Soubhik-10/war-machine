@@ -1,3 +1,4 @@
+import { runAutomaticSettlement } from './mainnet.mjs';
 import {ARENAS,DEFAULT_RULES,MAX_MODULES,PARTS,PRESETS,clone,environmentProfile,normalizeRules,packChallenge,stats,terrainAt,unpackChallenge,validate} from '../../dist/data.mjs';
 import {Battle} from '../../dist/engine.mjs';
 import {engineeringReport} from '../../dist/engineering.mjs';
@@ -105,7 +106,7 @@ const discovery={name:'War Machines',version:'3.0',mode:'demo',description:'Engi
 const response=(value,status=200)=>new Response(json(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'}});
 async function bodyOf(request){const length=Number(request.headers.get('content-length')||0);check(length<=65536,'Request exceeds 64 KiB.',413);check(request.headers.get('content-type')?.split(';')[0]==='application/json','Use application/json.',415);try{return await request.json();}catch{fail(400,'Invalid JSON.');}}
 
-export default {async fetch(request,env,ctx){
+export default {async scheduled(event,env,ctx){ctx.waitUntil((async()=>{const until=Date.now()+50000;do{await runAutomaticSettlement(env);if(Date.now()+5000>=until)break;await new Promise(resolve=>setTimeout(resolve,5000));}while(Date.now()<until);})());},async fetch(request,env,ctx){
  if(env.WM_MODE==='tempo-mainnet')return mainnetFetch(request,env,ctx,serveStaticAsset);
  const url=new URL(request.url),path=url.pathname;
  if(path==='/.well-known/war-machines.json'&&request.method==='GET')return response(discovery);

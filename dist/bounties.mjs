@@ -1,3 +1,4 @@
+import { paymentPanel, paymentStatus, transactionLink } from './payment-status.mjs';
 import {
   ARENAS,
   TERRAIN_INFO,
@@ -719,46 +720,6 @@ export function createBountyUI(adapter) {
         "The deterministic arena result is settled by the verified Tempo escrow.",
       ) + '<div class="bounty-loading">Loading attempt…</div>';
     wireHeader();
-    async function settle(a) {
-      const key = "wm-settlement-" + a.id;
-      let pending = read(key, null);
-      if (!pending?.transactionHash) {
-        const prepared = await api("/attempts/" + a.id + "/settlement-plan");
-        pending = {
-          transactionHash: await tempoClient.executeEscrowPlan(prepared.plan),
-        };
-        save(key, pending);
-      }
-      await api(
-        "/attempts/" + a.id + "/settlement-confirm",
-        "POST",
-        { transactionHash: pending.transactionHash },
-        uid(),
-      );
-      localStorage.removeItem(key);
-      await open(a.bounty);
-      adapter.toast(
-        a.result?.outcome === "win"
-          ? "Bounty claimed and payout settled onchain."
-          : "Official loss settled. The bounty is open for the next challenger.",
-      );
-    }
-    async function forfeitTimeout(a) {
-      const ended = await api(
-        "/attempts/" + a.id + "/forfeit",
-        "POST",
-        {},
-        uid(),
-      );
-      await attempt(ended.id);
-    }
-    async function settleUnsignedTimeout(a) {
-      await mutate("/bounties/" + a.bounty + "/timeout-forfeit", {});
-      await open(a.bounty);
-      adapter.toast(
-        "Timeout finalized onchain. The entry was paid to the bounty creator.",
-      );
-    }
     async function watchOfficialReplay(a) {
       const catalog = await api("/rules");
       currentFeeBps = catalog.economics.platformFee.basisPoints;
@@ -797,18 +758,10 @@ export function createBountyUI(adapter) {
               "The paid defender reveal is unavailable. Reopen this attempt with the wallet that paid the entry.",
             );
           if (!seconds) {
-            app.innerHTML =
-              header(
-                "ENGINEERING WINDOW CLOSED.",
-                "No counter was deployed before the deadline.",
-              ) +
-              `<section class="panel trial-wait"><span class="eyebrow">COUNTER CLOCK EXPIRED</span><h2>Finalizing loss.</h2><p>No counter was committed in time. The ${money(a.economics?.entry ?? 0)} ${esc(runtime.currency)} entry is due to the bounty creator; this bounty will reopen after its signed escrow settlement.</p><div class="bounty-actions"><button id="pending-contract">View bounty</button></div><p id="bounty-error" class="error-message"></p></section>`;
+            app.innerHTML = header('ENGINEERING WINDOW CLOSED.', 'No counter was deployed before the deadline.') + paymentPanel(a) + '<button id="pending-contract">View bounty</button>';
             wireHeader();
-            $("#pending-contract").onclick = () => open(a.bounty);
-            void forfeitTimeout(a).catch((error) => {
-              if (g === generation)
-                $("#bounty-error").textContent = error.message;
-            });
+            $('#pending-contract').onclick = () => open(a.bounty);
+            schedule(poll, g, 5000);
             return;
           }
           app.innerHTML =
@@ -868,27 +821,13 @@ export function createBountyUI(adapter) {
               );
             }
           }
-          app.innerHTML =
-            header(
-              ready
-                ? "RESULT READY TO SETTLE."
-                : "RESULT AWAITING ATTESTATION.",
-              "The game result is deterministic. The escrow releases funds only after two independent signatures.",
-            ) +
-            `<section class="panel trial-wait"><span class="eyebrow">${ready ? "TWO SIGNATURES VERIFIED" : "RESULT RECORDED"}</span><h2>${r?.reason === "counter-build-timeout" ? "COUNTER TIME EXPIRED." : r?.outcome === "win" ? "YOU BROKE THE MACHINE." : r?.outcome === "loss" ? "THE DEFENSE HELD." : "DRAW OR TECHNICAL RESULT."}</h2><p>${r?.reason === "counter-build-timeout" ? `No counter was committed. The ${money(r.entry)} ${esc(runtime.currency)} entry is due to the bounty creator. ` : r?.integrity ? `Your integrity: ${(r.integrity[0] * 100).toFixed(1)}% · Defender: ${(r.integrity[1] * 100).toFixed(1)}%. ` : ""}Result hash: <code>${esc(s?.resultHash || "pending")}</code></p><p class="hint">${expires ? (timeoutFinalizerReady ? "The signer window elapsed. Finalize this onchain loss: the entry is paid to the bounty creator and the bounty reopens." : "The signing window has just closed. The onchain timeout finalizer will be ready in a moment.") : ready ? "Relay the signed verdict from Tempo Wallet. A win pays the challenger; a loss or timeout sends the entry to the bounty creator and returns this bounty to the board." : "The result is final. The independent signers must attest it before the escrow can distribute the entry or reward."}</p><div class="bounty-actions">${a.replay ? '<button id="watch-official-replay">▶ Watch exact battle</button>' : ""}${ready ? '<button class="primary" id="settle-attempt">Settle & return to bounty</button>' : ""}${expires && timeoutFinalizerReady ? '<button class="primary" id="finalize-timeout">Finalize loss & return to bounty</button>' : ""}<button id="pending-contract">View bounty</button></div><p id="bounty-error" class="error-message"></p></section>`;
+          app.innerHTML = header('OFFICIAL RESULT.', 'Your settlement continues automatically.') + paymentPanel(a) +
+            '<section class="panel trial-wait"><h2>' + esc(r?.outcome?.toUpperCase() || 'RESULT RECORDED') + '</h2><div class="bounty-actions">' +
+            (a.replay ? '<button id="watch-official-replay">Watch exact battle</button>' : '') + '<button id="pending-contract">View bounty</button></div></section>';
           wireHeader();
-          $("#pending-contract").onclick = () => open(a.bounty);
-          if ($("#watch-official-replay"))
-            $("#watch-official-replay").onclick = (e) =>
-              act(e.currentTarget, () => watchOfficialReplay(a));
-          if ($("#settle-attempt"))
-            $("#settle-attempt").onclick = (e) =>
-              act(e.currentTarget, () => settle(a));
-          if ($("#finalize-timeout"))
-            $("#finalize-timeout").onclick = (e) =>
-              act(e.currentTarget, () => settleUnsignedTimeout(a));
-          if (!ready && (!expires || !timeoutFinalizerReady))
-            schedule(poll, g, 1000);
+          $('#pending-contract').onclick = () => open(a.bounty);
+          if ($('#watch-official-replay')) $('#watch-official-replay').onclick = e => act(e.currentTarget, () => watchOfficialReplay(a));
+          schedule(poll, g, a.payment?.state === 'timeout' ? 15000 : 2500);
           return;
         }
         const r = a.result,
@@ -903,7 +842,7 @@ export function createBountyUI(adapter) {
                 ? "Recorded official result."
                 : "Your entry was returned onchain.",
           ) +
-          `<section class="panel official-result ${won ? "won" : ""}"><span class="eyebrow">${r?.payoutStatus === "settled-onchain" ? "ESCROW SETTLED" : technical ? "TECHNICAL REFUND" : "ON-CHAIN RESULT"}</span><h2>${won ? "BOUNTY CLAIMED." : technical ? "ENTRY RETURNED." : r?.outcome === "draw" ? "DEFENSE HELD." : r ? "BACK TO THE DRAWING BOARD." : "ENTRY RETURNED."}</h2><div class="contract-economy"><div><b>${r ? (Number(r.net) > 0 ? "+" : "") + r.net : "REFUND"}</b><small>${esc(runtime.currency).toUpperCase()} CHANGE</small></div><div><b>${r?.time ? Number(r.time).toFixed(1) + "s" : "—"}</b><small>TRIAL DURATION</small></div><div><b>${r?.payoutStatus === "settled-onchain" ? "✓" : "—"}</b><small>ESCROW</small></div></div><p>${r?.integrity ? `Your integrity: ${(r.integrity[0] * 100).toFixed(1)}% · Defender: ${(r.integrity[1] * 100).toFixed(1)}%. ${won ? "The payout was sent by the escrow after the 2.5% platform fee." : "The escrow processed this official result."}` : esc(a.error || "No server-side balance was held.")}</p>${r ? `<div class="notice fee-disclosure">Gross reward: ${money(r.grossReward ?? r.reward ?? 0)} · Platform fee: ${money(r.platformFee ?? 0)} (${money((r.platformFeeBps ?? 0) / 100)}% on wins) · Paid to challenger: ${money(r.payout ?? 0)} · Separate entry: ${money(r.entry ?? 0)} ${esc(runtime.currency)}.</div>` : ""}<div class="bounty-actions">${a.replay ? '<button id="verified-replay" class="primary">▶ Watch exact replay</button>' : ""}<button id="result-contract">Back to bounty</button><button id="result-refit">Refit counter</button></div><p class="hint">Attempt ${esc(a.id)} · ${time(a.updated)}<br>The replay reconstructs the committed machine pair, arena, seed and engine release.</p><p id="bounty-error" class="error-message"></p></section>`;
+          paymentPanel(a) + `<section class="panel official-result ${won ? "won" : ""}"><span class="eyebrow">${r?.payoutStatus === "settled-onchain" ? "ESCROW SETTLED" : technical ? "TECHNICAL REFUND" : "ON-CHAIN RESULT"}</span><h2>${won ? "BOUNTY CLAIMED." : technical ? "ENTRY RETURNED." : r?.outcome === "draw" ? "DEFENSE HELD." : r ? "BACK TO THE DRAWING BOARD." : "ENTRY RETURNED."}</h2><div class="contract-economy"><div><b>${r ? (Number(r.net) > 0 ? "+" : "") + r.net : "REFUND"}</b><small>${esc(runtime.currency).toUpperCase()} CHANGE</small></div><div><b>${r?.time ? Number(r.time).toFixed(1) + "s" : "—"}</b><small>TRIAL DURATION</small></div><div><b>${r?.payoutStatus === "settled-onchain" ? "✓" : "—"}</b><small>ESCROW</small></div></div><p>${r?.integrity ? `Your integrity: ${(r.integrity[0] * 100).toFixed(1)}% · Defender: ${(r.integrity[1] * 100).toFixed(1)}%. ${won ? "The payout was sent by the escrow after the 2.5% platform fee." : "The escrow processed this official result."}` : esc(a.error || "No server-side balance was held.")}</p>${r ? `<div class="notice fee-disclosure">Gross reward: ${money(r.grossReward ?? r.reward ?? 0)} · Platform fee: ${money(r.platformFee ?? 0)} (${money((r.platformFeeBps ?? 0) / 100)}% on wins) · Paid to challenger: ${money(r.payout ?? 0)} · Separate entry: ${money(r.entry ?? 0)} ${esc(runtime.currency)}.</div>` : ""}<div class="bounty-actions">${a.replay ? '<button id="verified-replay" class="primary">▶ Watch exact replay</button>' : ""}<button id="result-contract">Back to bounty</button><button id="result-refit">Refit counter</button></div><p class="hint">Attempt ${esc(a.id)} · ${time(a.updated)}<br>The replay reconstructs the committed machine pair, arena, seed and engine release.</p><p id="bounty-error" class="error-message"></p></section>`;
         wireHeader();
         $("#result-contract").onclick = () => open(a.bounty);
         $("#result-refit").onclick = (e) =>
@@ -925,6 +864,7 @@ export function createBountyUI(adapter) {
           '<section class="panel bounty-empty"><p>The accepted trial continues in the escrow workflow. Reopen My attempts to retrieve it.</p><button id="retry-attempt">Check again</button></section>';
         wireHeader();
         $("#retry-attempt").onclick = () => attempt(id);
+        schedule(poll, g, 5000);
       }
     }
     await poll();
@@ -941,7 +881,7 @@ export function createBountyUI(adapter) {
       if (g !== generation) return;
       app.innerHTML =
         header("YOUR TRIALS.", "Official attempts persist across reloads.") +
-        `<section class="panel contract-history">${rows.map((a) => `<button data-attempt="${a.id}" class="attempt-row"><span>${esc(a.result?.outcome || a.status)}</span><small>${time(a.created)}</small><strong>${a.result ? (a.result.net > 0 ? "+" : "") + a.result.net + (runtime.paid ? " pathUSD" : " credits") : "View status"} ↗</strong></button>`).join("") || "<p>No official trials yet. Choose an available bounty to start.</p>"}</section>`;
+        `<section class="panel contract-history">${rows.map((a) => `<button data-attempt="${a.id}" class="attempt-row"><span>${esc(runtime.paid ? paymentStatus(a).label : a.result?.outcome || a.status)}</span><small>${time(a.created)}</small><strong>${a.result?.net !== undefined ? esc(a.result.net) + (runtime.paid ? " pathUSD" : " credits") : "View status"} ↗</strong></button>${runtime.paid ? transactionLink(a.payment?.transactionHash, "Settlement transaction") : ""}`).join("") || "<p>No official trials yet. Choose an available bounty to start.</p>"}</section>`;
       wireHeader();
       $$("[data-attempt]").forEach(
         (b) => (b.onclick = () => attempt(b.dataset.attempt)),

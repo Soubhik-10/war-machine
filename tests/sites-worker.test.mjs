@@ -69,6 +69,7 @@ class D1Mock {
         "utf8",
       ),
     );
+    this.sqlite.exec(await readFile(new URL('../drizzle/0005_automatic_settlement.sql', import.meta.url), 'utf8'));
   }
   close() {
     this.sqlite.close();
@@ -452,6 +453,8 @@ test("direct escrow intents bind exact terms to the confirmed create and entry e
   assert.equal(paused.status, 503, JSON.stringify(paused.body));
   assert.match(paused.body.error, /result signers are online/i);
   env.WM_RESULT_SIGNING_READY = "true";
+  for(const name of ['SIGNER_A','SIGNER_B','RELAY']) { env[name]={fetch:async()=>Response.json({ok:true})}; env[name+'_AUTH']={get:async()=> 'fixture'.repeat(8)}; }
+  DB.sqlite.prepare('UPDATE settlement_control SET paused=0,heartbeat=?').run(Date.now());
   const prepared = await post(
     "/api/bounties",
     body,
@@ -481,10 +484,11 @@ test("direct escrow intents bind exact terms to the confirmed create and entry e
     ],
   };
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => {
+  globalThis.fetch = async (url, options) => {
+    const method = options?.body ? JSON.parse(options.body).method : null;
     if (String(url) === "https://tempo-rpc.fixture")
       return new Response(
-        JSON.stringify({ jsonrpc: "2.0", id: 1, result: activeReceipt }),
+        JSON.stringify({ jsonrpc: "2.0", id: 1, result: method === 'eth_chainId' ? '0x1079' : method === 'eth_getBlockByNumber' ? {number:'0x10',hash:'0x'+'aa'.repeat(32)} : {...activeReceipt,blockNumber:'0x10',blockHash:'0x'+'aa'.repeat(32)} }),
         { headers: { "content-type": "application/json" } },
       );
     return originalFetch(url);
