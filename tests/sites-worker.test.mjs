@@ -236,6 +236,7 @@ test("browser wallet client uses Tempo Wallet rather than an injected provider",
     "utf8",
   );
   assert.match(source, /tempoWallet/);
+  assert.match(source, /stringToHex\(message\)/);
   assert.doesNotMatch(source, /window\.ethereum/);
 });
 

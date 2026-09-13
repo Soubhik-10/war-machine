@@ -1,4 +1,5 @@
 import { Provider, tempoWallet } from "accounts";
+import { stringToHex } from "viem";
 import { tempo } from "viem/tempo/chains";
 
 let address = null;
@@ -54,7 +55,9 @@ export async function signInWallet() {
   const { message } = await json("/api/auth/challenge", { chainId: chainId() });
   const signature = await wallet().request({
     method: "personal_sign",
-    params: [message, selected],
+    // Tempo Wallet follows EIP-1193's hex-data form for personal_sign.
+    // The backend receives and verifies the original UTF-8 challenge text.
+    params: [stringToHex(message), selected],
   });
   await json("/api/auth/verify", { address: selected, message, signature });
   address = selected;
