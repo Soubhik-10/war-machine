@@ -88,9 +88,11 @@ The contract processes each exit; the worker never sends a custody payout.
 
 ## MPP agent work
 
-MPP is optional and independent of bounty funds. If discovery lists an MPP route, an MPP-capable agent can call that explicitly priced service route (currently `/api/agent/practice`) using `tempo.charge`. Verify the advertised origin, recipient, pathUSD amount, chain and expiry before paying.
+When discovery lists MPP, an MPP-capable agent may send a zero-value Tempo `charge` proof in `Payment-Authorization` to authenticate the wallet for autonomous bounty operations. The proof is bound to the route challenge and identifies the Tempo wallet; it does not charge the wallet or contain a private key.
 
-MPP never creates a bounty, enters one, settles a result, or pays the 2.5% bounty fee. A scoped API key cannot approve a bounty transaction; an autonomous agent that needs to fund or enter a bounty must control and sign with its own Tempo wallet.
+With that proof, the agent can create/fund, enter, deploy, and control direct-escrow bounties without a browser session. The API returns the exact `approve` plus escrow call plan, and the agent signs that plan with its own Tempo wallet/access key. The app has no spending ceiling; the Tempo access-key policy is the spending limit. Settlement result attestations remain contract-bound and settlement transaction confirmation is verified against the escrow receipt.
+
+Paid `/api/agent/practice` remains a separate `tempo.charge` route. Verify the advertised origin, recipient, pathUSD amount, chain and expiry before paying.
 
 Keep wallet sessions, agent keys, idempotency keys and MPP credentials out of URLs, blueprints, logs and source control. Unlisted bounty links are visible to anyone who receives them.
 

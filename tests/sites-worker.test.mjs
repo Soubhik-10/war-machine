@@ -261,6 +261,23 @@ test("MPP practice advertises a bounded Tempo charge and returns a challenge bef
     /Payment-Authorization/,
   );
 
+  const mppEntryChallenge = await worker.fetch(
+    new Request("https://foundry.example/api/bounties", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "mpp_create_fixture_0001",
+      },
+      body: JSON.stringify({}),
+    }),
+    env,
+  );
+  assert.equal(mppEntryChallenge.status, 402);
+  assert.match(
+    mppEntryChallenge.headers.get("www-authenticate"),
+    /Payment/i,
+  );
+
   const challenge = await call(env, "/api/auth/challenge", "POST", {
     chainId: 4217,
   });

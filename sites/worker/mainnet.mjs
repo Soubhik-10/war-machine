@@ -3,6 +3,8 @@ import {
   canonical as canonicalSettlement,
 } from "../../settlement/protocol.mjs";
 import * as Mppx from "../../node_modules/mppx/dist/server/Mppx.js";
+import * as MppCredential from "../../node_modules/mppx/dist/Credential.js";
+import * as MppProof from "../../node_modules/mppx/dist/tempo/Proof.js";
 import { tempo as tempoMpp } from "../../node_modules/mppx/dist/tempo/server/Methods.js";
 import { createClient, http } from "viem/tempo";
 import {
@@ -371,7 +373,7 @@ function catalog(config) {
       method: "tempo",
       intent: "charge",
       scope:
-        "Agent API routes only. Bounty reward and entry funding use direct escrow calls.",
+        "A zero-value Tempo proof authenticates the wallet for autonomous agent operations; paid practice remains a separate charge.",
       ...(config.agentMppEnabled
         ? {
             routes: [
@@ -381,6 +383,24 @@ function catalog(config) {
                 recipient: config.agentMppRecipient,
               },
             ],
+            agentProof: {
+              intent: "charge",
+              amount: "0",
+              currency: PATH_USD_TOKEN,
+              chainId: TEMPO_MAINNET_CHAIN_ID,
+              header: "Payment-Authorization",
+              scopes: ["create", "enter", "deploy", "settle", "control"],
+              routes: [
+                { path: "/api/bounties", method: "POST", scope: "create" },
+                { path: "/api/bounties/{id}/attempts", method: "POST", scope: "enter" },
+                { path: "/api/escrow/intents/{id}/confirm", method: "POST", scope: "create|enter|control" },
+                { path: "/api/attempts/{id}/deploy", method: "POST", scope: "deploy" },
+                { path: "/api/attempts/{id}/forfeit", method: "POST", scope: "deploy" },
+                { path: "/api/bounties/{id}/cancel", method: "POST", scope: "control" },
+                { path: "/api/bounties/{id}/expire", method: "POST", scope: "control" },
+                { path: "/api/bounties/{id}/timeout-forfeit", method: "POST", scope: "control" },
+              ],
+            },
           }
         : {}),
     },
@@ -468,7 +488,7 @@ const discovery = (config) => ({
           : { ready: false, reason: config.settlementReason },
         mpp: !!config.agentMppEnabled,
         mppScope: config.agentMppEnabled
-          ? "Priced agent API routes only; never bounty funding or entry."
+          ? "Zero-value Tempo proof authorizes the wallet for autonomous bounty operations; paid practice is separately priced."
           : "MPP agent billing is not configured.",
         ...(config.agentMppEnabled
           ? {
@@ -507,7 +527,7 @@ const discovery = (config) => ({
       "save builds",
       "history",
     ],
-    scheme: "Tempo wallet session",
+    scheme: "Tempo wallet session or Payment-Authorization zero-value Tempo proof",
   },
   invariants: {
     oneActiveAttemptPerBounty: true,
@@ -533,13 +553,27 @@ const openapi = {
   components: {
     securitySchemes: {
       bearerAuth: { type: "http", scheme: "bearer" },
+      mppProof: {
+        type: "apiKey",
+        in: "header",
+        name: "Payment-Authorization",
+        description:
+          "MPP Tempo charge proof. Send the exact credential returned for the route challenge; zero-value proof authenticates the wallet without charging it.",
+      },
     },
   },
   paths: {
     "/rules": { get: {} },
     "/auth/challenge": { post: {} },
     "/auth/verify": { post: {} },
-    "/bounties": { get: {}, post: {} },
+    "/bounties": {
+      get: {},
+      post: {
+        description:
+          "Prepares a direct createBounty funding plan. A wallet session or MPP zero-value Tempo proof may authorize this request; the returned approve plus createBounty calls must be signed by the same Tempo wallet.",
+        security: [{ bearerAuth: [] }, { mppProof: [] }],
+      },
+    },
     "/bounties/{id}": {
       get: {
         description:
@@ -549,14 +583,15 @@ const openapi = {
     "/bounties/{id}/attempts": {
       post: {
         description:
-          "Prepares direct enterBounty. Body: maxEntry and maxPlatformFeeBps only.",
+          "Prepares direct enterBounty. A wallet session or MPP zero-value Tempo proof may authorize this request. Body: maxEntry and maxPlatformFeeBps only. The returned transaction must still be signed by the same Tempo wallet.",
+        security: [{ bearerAuth: [] }, { mppProof: [] }],
       },
     },
     "/agent/practice": {
       post: {
         summary: "Run one MPP-paid practice battle",
         description:
-          "Available only when discovery payments.mpp is true. The first request returns an MPP 402 challenge; retry with the exact Payment-Authorization credential. This route never funds, enters, settles, or cancels a bounty.",
+          "Available only when discovery payments.mpp is true. The first request returns an MPP 402 challenge; retry with the exact Payment-Authorization credential. This route is paid separately from autonomous bounty operations and requires an existing wallet session or agent key.",
         security: [{ bearerAuth: [] }],
         parameters: [
           {
@@ -626,7 +661,8 @@ const openapi = {
     "/attempts/{id}/deploy": {
       post: {
         description:
-          "Paid challenger submits one validated counter blueprint before the reported build deadline.",
+          "Paid challenger submits one validated counter blueprint before the reported build deadline. A wallet session or MPP zero-value Tempo proof may authorize this request; the proof wallet must match the entry wallet.",
+        security: [{ bearerAuth: [] }, { mppProof: [] }],
       },
     },
     "/me/wallet": {
@@ -691,6 +727,16 @@ const requireOwner = (auth) =>
     "Tempo bounty funding and entry require the connected payout wallet.",
     403,
   );
+const requireScope = (auth, scope) => {
+  requireAuth(auth);
+  check(
+    auth.role === "owner" ||
+      (auth.role === "mpp-agent" && auth.scopes?.includes(scope)),
+    `This session does not have the ${scope} scope.`,
+    403,
+  );
+  return auth;
+};
 async function prior(db, account, key, kind, body) {
   validKey(key);
   const digest = await hex(json(body)),
@@ -963,42 +1009,77 @@ function mppStore(db) {
   };
 }
 function gateway(db, config) {
-  const method = tempoMpp.charge({
-    currency: config.token,
-    decimals: config.decimals,
-    chainId: config.chainId,
-    testnet: false,
-    store: mppStore(db),
-    waitForConfirmation: true,
-    sponsorBudget: false,
-  });
-  const mppx = Mppx.create({
-    methods: [method],
-    secretKey: config.mppSecret,
-    realm: new URL(config.origin).hostname,
-    requiresAuth: true,
-  });
   return async (
     request,
     { amountUnits, recipient, operation, description, meta, expires },
   ) => {
-    const handler = mppx.charge({
+    const payment = await mppCharge(db, config, request, {
+      amountUnits,
+      recipient,
+      operation,
+      description,
+      meta,
+      expires,
+    });
+    if (!payment.paid) return payment;
+    const receipt = payment.withReceipt(new Response(null, { status: 204 }));
+    return {
+      paid: true,
+      receipt: receipt.headers.get("payment-receipt") || null,
+      source: payment.source,
+    };
+  };
+}
+
+async function mppCharge(
+  db,
+  config,
+  request,
+  { amountUnits, recipient, operation, description, meta, expires },
+) {
+  const method = tempoMpp.charge({
+      currency: config.token,
+      decimals: config.decimals,
+      chainId: config.chainId,
+      testnet: false,
+      store: mppStore(db),
+      waitForConfirmation: true,
+      sponsorBudget: false,
+    }),
+    mppx = Mppx.create({
+      methods: [method],
+      secretKey: config.mppSecret,
+      realm: new URL(config.origin).hostname,
+      requiresAuth: true,
+    }),
+    result = await mppx.charge({
       amount: display(amountUnits),
       recipient,
       externalId: operation,
       description,
       meta,
       expires: new Date(expires).toISOString(),
-    });
-    const result = await handler(request);
-    if (result.status === 402)
-      return { paid: false, response: result.challenge };
-    const receipt = result.withReceipt(new Response(null, { status: 204 }));
-    return {
-      paid: true,
-      receipt: receipt.headers.get("payment-receipt") || null,
-    };
+    })(request);
+  if (result.status === 402) return { paid: false, response: result.challenge };
+  const source = mppCredentialSource(request);
+  return {
+    paid: true,
+    source,
+    withReceipt: (responseValue) => result.withReceipt(responseValue),
   };
+}
+function mppCredentialSource(request) {
+  try {
+    const credential = MppCredential.fromRequest(request, {
+      header: "Payment-Authorization",
+    });
+    const parsed = credential.source
+      ? MppProof.parsePkhSource(credential.source)
+      : null;
+    if (parsed && parsed.chainId === TEMPO_MAINNET_CHAIN_ID)
+      return getAddress(parsed.address);
+  } catch {}
+  return null;
 }
 
 const mppResultKey = (operation) => "mpp-result:" + operation;
@@ -1807,6 +1888,97 @@ async function signInChallenge(db, body, origin) {
     .run();
   return { message };
 }
+async function accountForTempoAddress(db, address) {
+  const normalized = getAddress(address);
+  let identity = await db
+      .prepare(
+        "SELECT account FROM identities WHERE scheme='tempo' AND chain=? AND address=?",
+      )
+      .bind(String(TEMPO_MAINNET_CHAIN_ID), normalized)
+      .first(),
+    accountId = identity?.account;
+  if (!accountId) {
+    accountId = id();
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO accounts (id,token_hash,name,balance,entry_cap,daily_cap,created,payout_address,entry_cap_units,daily_cap_units) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        )
+        .bind(
+          accountId,
+          "wallet:" + accountId,
+          "Tempo engineer",
+          0,
+          null,
+          null,
+          now(),
+          normalized,
+          null,
+          null,
+        ),
+      db
+        .prepare(
+          "INSERT INTO identities (scheme,chain,address,account,created) VALUES ('tempo',?,?,?,?)",
+        )
+        .bind(String(TEMPO_MAINNET_CHAIN_ID), normalized, accountId, now()),
+    ]);
+  } else {
+    await db
+      .prepare("UPDATE accounts SET payout_address=? WHERE id=?")
+      .bind(normalized, accountId)
+      .run();
+  }
+  return accountId;
+}
+async function mppAgentAuth(db, config, request, scope, operation) {
+  check(
+    config.agentMppEnabled,
+    "MPP agent access is not configured. Set the MPP recipient and secret first.",
+    503,
+  );
+  const payment = await mppCharge(db, config, request, {
+    amountUnits: 0n,
+    recipient: config.agentMppRecipient,
+    operation,
+    description: "War Machines agent authorization",
+    meta: {
+      kind: "agent-auth",
+      scope,
+      engineHash: CLIENT_ENGINE_HASH,
+    },
+    expires: now() + 5 * 60 * 1000,
+  });
+  if (!payment.paid) return { response: payment.response };
+  const source = check(
+    payment.source,
+    "MPP credential did not identify a Tempo wallet.",
+    401,
+  );
+  const accountId = await accountForTempoAddress(db, source);
+  const receipt = payment.withReceipt(new Response(null, { status: 204 }));
+  return {
+    auth: {
+      id: "mpp:" + source,
+      account: accountId,
+      name: "MPP agent",
+      payout_address: source,
+      role: "mpp-agent",
+      scopes: ["read", "create", "enter", "deploy", "settle", "control"],
+    },
+    receipt: receipt.headers.get("payment-receipt") || null,
+  };
+}
+async function ownerOrMppAgent(
+  db,
+  config,
+  request,
+  auth,
+  scope,
+  operation,
+) {
+  if (auth) return { auth: requireScope(auth, scope) };
+  return mppAgentAuth(db, config, request, scope, operation);
+}
 async function verifyWallet(db, body, config) {
   fields(body, ["address", "message", "signature"]);
   const message = signInMessage(body.message),
@@ -1862,43 +2034,7 @@ async function verifyWallet(db, body, config) {
     "This sign-in challenge was already used.",
     409,
   );
-  let identity = await db
-      .prepare(
-        "SELECT account FROM identities WHERE scheme='tempo' AND chain=? AND address=?",
-      )
-      .bind(String(TEMPO_MAINNET_CHAIN_ID), address)
-      .first(),
-    accountId = identity?.account;
-  if (!accountId) {
-    accountId = id();
-    await db.batch([
-      db
-        .prepare(
-          "INSERT INTO accounts (id,token_hash,name,balance,entry_cap,daily_cap,created,payout_address,entry_cap_units,daily_cap_units) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        )
-        .bind(
-          accountId,
-          "wallet:" + accountId,
-          "Tempo engineer",
-          0,
-          null,
-          null,
-          now(),
-          address,
-          null,
-          null,
-        ),
-      db
-        .prepare(
-          "INSERT INTO identities (scheme,chain,address,account,created) VALUES ('tempo',?,?,?,?)",
-        )
-        .bind(String(TEMPO_MAINNET_CHAIN_ID), address, accountId, now()),
-    ]);
-  } else
-    await db
-      .prepare("UPDATE accounts SET payout_address=? WHERE id=?")
-      .bind(address, accountId)
-      .run();
+  const accountId = await accountForTempoAddress(db, address);
   const token = randomSecret(),
     expires = now() + 30 * 24 * 60 * 60 * 1000;
   await db
@@ -2198,18 +2334,21 @@ function eventLog(receiptValue, config, topic) {
   );
   return found;
 }
+const MAX_ESCROW_TOKEN_UNITS = 2n ** 256n - 1n;
 function boundedUnits(value, allowZero = false) {
   try {
     return pathUsdToUnits(value, {
       allowZero,
-      maxUnits: 1_000_000_000_000_000n,
+      // The contract's uint256 range is the only application boundary. The
+      // connected Tempo wallet/access key remains the practical spending cap.
+      maxUnits: MAX_ESCROW_TOKEN_UNITS,
     });
   } catch (error) {
     fail(400, error.message);
   }
 }
 async function directCreateIntent(db, auth, body, key, config) {
-  requireOwner(auth);
+  requireScope(auth, "create");
   check(config.acceptingNewBounties, config.settlementReason, 503);
   fields(body, [
     "title",
@@ -2345,7 +2484,7 @@ function directPlanFromCreate(config, hold) {
   };
 }
 async function directEntryIntent(db, auth, bountyId, body, key, config) {
-  requireOwner(auth);
+  requireScope(auth, "enter");
   check(config.acceptingNewBounties, config.settlementReason, 503);
   fields(body, ["maxEntry", "maxPlatformFeeBps"]);
   validKey(key);
@@ -2436,7 +2575,6 @@ function directPlanFromEntry(config, hold, row) {
   };
 }
 async function confirmDirectIntent(db, auth, intentId, hash, config) {
-  requireOwner(auth);
   const hold = await db
     .prepare(
       "SELECT * FROM payment_holds WHERE id=? AND account=? AND purpose IN ('direct-create','direct-entry')",
@@ -2444,6 +2582,7 @@ async function confirmDirectIntent(db, auth, intentId, hash, config) {
     .bind(intentId, auth.account)
     .first();
   check(hold, "Direct escrow intent not found.", 404);
+  requireScope(auth, hold.purpose === "direct-create" ? "create" : "enter");
   if (hold.status === "accepted") {
     return hold.purpose === "direct-create"
       ? {
@@ -2688,7 +2827,7 @@ async function immutableRecord(
 }
 
 async function deployCounter(db, auth, attemptId, body, key) {
-  requireOwner(auth);
+  requireScope(auth, "deploy");
   fields(body, ["blueprint"]);
   validKey(key);
   const attempt = await db
@@ -2778,7 +2917,7 @@ async function deployCounter(db, auth, attemptId, body, key) {
 }
 
 async function forfeitExpiredEngineeringAttempt(db, auth, attemptId, key) {
-  requireOwner(auth);
+  requireScope(auth, "deploy");
   const old = await prior(db, auth.account, key, "forfeit:" + attemptId, {});
   if (old) return attemptView(db, old, auth.account);
   const attempt = await db
@@ -2867,7 +3006,7 @@ async function directControlIntent(
   key,
   config,
 ) {
-  requireOwner(auth);
+  requireScope(auth, "control");
   fields(body, []);
   validKey(key);
   const row = await bountyRow(db, bountyId);
@@ -2983,7 +3122,7 @@ async function directControlIntent(
   };
 }
 async function confirmDirectControl(db, auth, intentId, hash, config) {
-  requireOwner(auth);
+  requireScope(auth, "control");
   const hold = await db
     .prepare(
       "SELECT * FROM payment_holds WHERE id=? AND account=? AND purpose IN ('direct-cancel','direct-timeout-forfeit','direct-expire')",
@@ -4086,14 +4225,26 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       );
     }
     if (path === "/api/bounties" && method === "POST") {
+      const key = request.headers.get("idempotency-key"),
+        gate = await ownerOrMppAgent(
+          db,
+          config,
+          request,
+          auth,
+          "create",
+          "agent-create:" + (key || "missing"),
+        );
+      if (gate.response) return gate.response;
       const result = await directCreateIntent(
         db,
-        auth,
+        gate.auth,
         body,
-        request.headers.get("idempotency-key"),
+        key,
         config,
       );
-      return result.final ? response(result.value, 200) : response(result, 202);
+      return result.final
+        ? response(result.value, 200, gate.receipt ? { "payment-receipt": gate.receipt } : {})
+        : response(result, 202, gate.receipt ? { "payment-receipt": gate.receipt } : {});
     }
     match = path.match(/^\/api\/escrow\/intents\/([a-f0-9-]{36})\/confirm$/);
     if (match && method === "POST") {
@@ -4103,24 +4254,45 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         .bind(match[1])
         .first();
       check(hold, "Direct escrow intent not found.", 404);
+      const scope =
+          hold.purpose === "direct-create"
+            ? "create"
+            : hold.purpose === "direct-entry"
+              ? "enter"
+              : "control",
+        gate = await ownerOrMppAgent(
+          db,
+          config,
+          request,
+          auth,
+          scope,
+          "agent-confirm:" + match[1] + ":" + body.transactionHash,
+        );
+      if (gate.response) return gate.response;
       if (["direct-create", "direct-entry"].includes(hold.purpose)) {
         const result = await confirmDirectIntent(
           db,
-          auth,
+          gate.auth,
           match[1],
           body.transactionHash,
           config,
         );
-        return response(result.value, result.kind === "bounty" ? 201 : 202);
+        return response(
+          result.value,
+          result.kind === "bounty" ? 201 : 202,
+          gate.receipt ? { "payment-receipt": gate.receipt } : {},
+        );
       }
       return response(
         await confirmDirectControl(
           db,
-          auth,
+          gate.auth,
           match[1],
           body.transactionHash,
           config,
         ),
+        200,
+        gate.receipt ? { "payment-receipt": gate.receipt } : {},
       );
     }
     match = path.match(
@@ -4138,53 +4310,99 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
           ),
         );
       if (action === "cancel" && method === "POST") {
+        const key = request.headers.get("idempotency-key"),
+          gate = await ownerOrMppAgent(
+            db,
+            config,
+            request,
+            auth,
+            "control",
+            "agent-control:cancel:" + bountyId + ":" + (key || "missing"),
+          );
+        if (gate.response) return gate.response;
         const result = await directControlIntent(
           db,
-          auth,
+          gate.auth,
           bountyId,
           "cancel",
           body,
-          request.headers.get("idempotency-key"),
-          config,
-        );
-        return result.final ? response(result.value) : response(result, 202);
-      }
-      if (action === "expire" && method === "POST") {
-        const result = await directControlIntent(
-          db,
-          auth,
-          bountyId,
-          "expire",
-          body,
-          request.headers.get("idempotency-key"),
-          config,
-        );
-        return result.final ? response(result.value) : response(result, 202);
-      }
-      if (action === "timeout-forfeit" && method === "POST") {
-        const result = await directControlIntent(
-          db,
-          auth,
-          bountyId,
-          "timeout-forfeit",
-          body,
-          request.headers.get("idempotency-key"),
-          config,
-        );
-        return result.final ? response(result.value) : response(result, 202);
-      }
-      if (action === "attempts" && method === "POST") {
-        const result = await directEntryIntent(
-          db,
-          auth,
-          bountyId,
-          body,
-          request.headers.get("idempotency-key"),
+          key,
           config,
         );
         return result.final
-          ? response(result.value, 200)
-          : response(result, 202);
+          ? response(result.value, 200, gate.receipt ? { "payment-receipt": gate.receipt } : {})
+          : response(result, 202, gate.receipt ? { "payment-receipt": gate.receipt } : {});
+      }
+      if (action === "expire" && method === "POST") {
+        const key = request.headers.get("idempotency-key"),
+          gate = await ownerOrMppAgent(
+            db,
+            config,
+            request,
+            auth,
+            "control",
+            "agent-control:expire:" + bountyId + ":" + (key || "missing"),
+          );
+        if (gate.response) return gate.response;
+        const result = await directControlIntent(
+          db,
+          gate.auth,
+          bountyId,
+          "expire",
+          body,
+          key,
+          config,
+        );
+        return result.final
+          ? response(result.value, 200, gate.receipt ? { "payment-receipt": gate.receipt } : {})
+          : response(result, 202, gate.receipt ? { "payment-receipt": gate.receipt } : {});
+      }
+      if (action === "timeout-forfeit" && method === "POST") {
+        const key = request.headers.get("idempotency-key"),
+          gate = await ownerOrMppAgent(
+            db,
+            config,
+            request,
+            auth,
+            "control",
+            "agent-control:timeout-forfeit:" + bountyId + ":" + (key || "missing"),
+          );
+        if (gate.response) return gate.response;
+        const result = await directControlIntent(
+          db,
+          gate.auth,
+          bountyId,
+          "timeout-forfeit",
+          body,
+          key,
+          config,
+        );
+        return result.final
+          ? response(result.value, 200, gate.receipt ? { "payment-receipt": gate.receipt } : {})
+          : response(result, 202, gate.receipt ? { "payment-receipt": gate.receipt } : {});
+      }
+      if (action === "attempts" && method === "POST") {
+        const key = request.headers.get("idempotency-key"),
+          gate = await ownerOrMppAgent(
+            db,
+            config,
+            request,
+            auth,
+            "enter",
+            "agent-enter:" + bountyId + ":" + (key || "missing"),
+          );
+        if (gate.response) return gate.response;
+        const result = await directEntryIntent(
+          db,
+          gate.auth,
+          bountyId,
+          body,
+          key,
+          config,
+        );
+        return result.final
+          ? response(result.value, 200, gate.receipt ? { "payment-receipt": gate.receipt } : {})
+          : response(result, 202, gate.receipt ? { "payment-receipt": gate.receipt } : {});
       }
     }
     match = path.match(
@@ -4207,26 +4425,42 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         );
       }
       if (action === "forfeit" && method === "POST")
-        return response(
-          await forfeitExpiredEngineeringAttempt(
-            db,
-            auth,
-            attemptId,
-            request.headers.get("idempotency-key"),
-          ),
-        );
+        {
+          const key = request.headers.get("idempotency-key"),
+            gate = await ownerOrMppAgent(
+              db,
+              config,
+              request,
+              auth,
+              "deploy",
+              "agent-forfeit:" + attemptId + ":" + (key || "missing"),
+            );
+          if (gate.response) return gate.response;
+          return response(
+            await forfeitExpiredEngineeringAttempt(db, gate.auth, attemptId, key),
+            200,
+            gate.receipt ? { "payment-receipt": gate.receipt } : {},
+          );
+        }
     }
     match = path.match(/^\/api\/attempts\/([a-f0-9-]{36})\/deploy$/);
-    if (match && method === "POST")
-      return response(
-        await deployCounter(
+    if (match && method === "POST") {
+      const key = request.headers.get("idempotency-key"),
+        gate = await ownerOrMppAgent(
           db,
+          config,
+          request,
           auth,
-          match[1],
-          body,
-          request.headers.get("idempotency-key"),
-        ),
+          "deploy",
+          "agent-deploy:" + match[1] + ":" + (key || "missing"),
+        );
+      if (gate.response) return gate.response;
+      return response(
+        await deployCounter(db, gate.auth, match[1], body, key),
+        200,
+        gate.receipt ? { "payment-receipt": gate.receipt } : {},
       );
+    }
     match = path.match(/^\/api\/attempts\/([a-f0-9-]{36})$/);
     if (match && method === "GET")
       return response(await attemptView(db, match[1], auth?.account));
