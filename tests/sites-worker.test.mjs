@@ -367,6 +367,7 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
   const toolNames = listedBody.result.tools.map((item) => item.name);
   assert.ok(toolNames.includes("war_machines_create_bounty"));
   assert.ok(toolNames.includes("war_machines_settle_attempt"));
+  assert.ok(toolNames.includes("war_machines_get_activity"));
 
   const read = await worker.fetch(
     new Request("https://foundry.example/mcp", {
@@ -403,6 +404,99 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
   );
   assert.equal(mutation.status, 402);
   assert.match(mutation.headers.get("www-authenticate"), /Payment/i);
+});
+
+test("private activity view reports agent progress without private build data", async (t) => {
+  const DB = new D1Mock();
+  await DB.migrate();
+  t.after(() => DB.close());
+  const account = "activity-owner",
+    session = "activity-session-token",
+    stamp = Date.now();
+  DB.sqlite
+    .prepare(
+      "INSERT INTO accounts (id,token_hash,name,balance,created,payout_address,entry_cap_units,daily_cap_units) VALUES (?,?,?,?,?,?,?,?)",
+    )
+    .run(account, "unused", "Activity owner", 0, stamp, "0x" + "11".repeat(20), null, null);
+  DB.sqlite
+    .prepare("INSERT INTO sessions (id,token_hash,account,expires,created) VALUES (?,?,?,?,?)")
+    .run(
+      "activity-session",
+      createHash("sha256").update(session).digest("hex"),
+      account,
+      stamp + 60_000,
+      stamp,
+    );
+  DB.sqlite
+    .prepare(
+      "INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,entry_units,reward_units,reserve_units,platform_fee_bps,fee_policy_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    )
+    .run(
+      "activity-bounty",
+      account,
+      "Visible activity target",
+      "{\"secretBlueprint\":true}",
+      0,
+      0,
+      "busy",
+      1,
+      stamp,
+      stamp + 2,
+      "50000",
+      "200000",
+      "200000",
+      250,
+      "pathusd-direct-escrow-v3",
+    );
+  DB.sqlite
+    .prepare(
+      "INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,created,updated) VALUES (?,?,?,?,?,?,?,?,?)",
+    )
+    .run(
+      "activity-attempt",
+      "activity-bounty",
+      account,
+      "{\"secretCounter\":true}",
+      7,
+      "engineering",
+      null,
+      stamp + 1,
+      stamp + 3,
+    );
+  DB.sqlite
+    .prepare(
+      "INSERT INTO payment_holds (id,account,bounty,request_key,digest,body,amount_units,purpose,expires,status,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+    )
+    .run(
+      "activity-intent",
+      account,
+      "activity-bounty",
+      "activity-key",
+      "digest",
+      "{\"private\":true}",
+      "200000",
+      "direct-create",
+      stamp + 60_000,
+      "awaiting-onchain",
+      stamp + 4,
+      stamp + 4,
+    );
+  const response = await worker.fetch(
+    new Request("https://foundry.example/api/me/activity", {
+      headers: { cookie: "wm_session=" + session },
+    }),
+    {
+      DB,
+      WM_MODE: "tempo-mainnet",
+      WM_BOUNTY_ESCROW_ADDRESS:
+        "0xb14a3aA99C9349094612143089F55aE5372DeB24",
+    },
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.ok(body.events.some((event) => /Agent is engineering/.test(event.message)));
+  assert.ok(body.events.some((event) => /Waiting for wallet/.test(event.message)));
+  assert.ok(body.events.every((event) => !JSON.stringify(event).includes("secret")));
 });
 
 test("a settled defense reopens the bounty and keeps its reward funded", async (t) => {

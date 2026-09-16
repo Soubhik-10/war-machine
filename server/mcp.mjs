@@ -42,6 +42,10 @@ const TOOLS = [
     "List public bounty scouts. Defender blueprints remain hidden until a confirmed entry.",
   ),
   tool(
+    "war_machines_get_activity",
+    "Read the authenticated wallet's recent bounty, escrow, attempt and settlement activity without exposing blueprints or credentials.",
+  ),
+  tool(
     "war_machines_get_bounty",
     "Read one bounty scout or, for its creator/entrant, the authorized full record.",
     { bountyId: string("Bounty UUID") },
@@ -219,6 +223,8 @@ const apiSpec = (name, args) => {
       return { method: "GET", path: "/api/rules" };
     case "war_machines_list_bounties":
       return { method: "GET", path: "/api/bounties" };
+    case "war_machines_get_activity":
+      return { method: "GET", path: "/api/me/activity" };
     case "war_machines_get_bounty":
       return {
         method: "GET",

@@ -856,6 +856,166 @@ async function ledger(db, accountId) {
     status: row.status,
   }));
 }
+const activityState = (status) => {
+  if (
+    [
+      "accepted",
+      "cancelled",
+      "claimed",
+      "confirmed",
+      "expired",
+      "refunded",
+      "settled",
+    ].includes(status)
+  )
+    return "complete";
+  if (["failed", "failed-needs-reconciliation", "refund-required"].includes(status))
+    return "error";
+  if (status === "ready-to-settle") return "ready";
+  return "active";
+};
+const activityWords = (value) =>
+  String(value || "")
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+async function activity(db, accountId) {
+  const [holds, bounties, attempts, finances, audits] = await Promise.all([
+    db
+      .prepare(
+        "SELECT id,bounty,purpose,status,amount_units,provider_ref,created,updated FROM payment_holds WHERE account=? ORDER BY updated DESC LIMIT 40",
+      )
+      .bind(accountId)
+      .all(),
+    db
+      .prepare(
+        "SELECT id,title,status,active_attempt,created,updated FROM bounties WHERE owner=? ORDER BY updated DESC LIMIT 40",
+      )
+      .bind(accountId)
+      .all(),
+    db
+      .prepare(
+        "SELECT a.id,a.bounty,a.status,a.created,a.updated,b.title,b.owner FROM attempts a JOIN bounties b ON b.id=a.bounty WHERE a.account=? OR b.owner=? ORDER BY a.updated DESC LIMIT 40",
+      )
+      .bind(accountId, accountId)
+      .all(),
+    db
+      .prepare(
+        "SELECT kind,amount_units,ref,status,provider_ref,created,updated FROM financial_operations WHERE account=? ORDER BY updated DESC LIMIT 40",
+      )
+      .bind(accountId)
+      .all(),
+    db
+      .prepare(
+        "SELECT s.id,s.attempt,s.event,s.created,a.bounty,b.title FROM settlement_audit s JOIN attempts a ON a.id=s.attempt JOIN bounties b ON b.id=a.bounty WHERE a.account=? OR b.owner=? ORDER BY s.created DESC LIMIT 40",
+      )
+      .bind(accountId, accountId)
+      .all(),
+  ]);
+  const events = [];
+  const add = (event) => events.push(event);
+  for (const row of holds.results) {
+    const purpose =
+      {
+        "direct-create": "Bounty funding",
+        "direct-entry": "Bounty entry",
+        "direct-cancel": "Bounty cancellation",
+        "direct-expire": "Bounty expiry",
+        "direct-timeout-forfeit": "Timeout finalization",
+        "reward-funding": "Bounty funding",
+      }[row.purpose] || "Wallet operation";
+    const holdStatus =
+      {
+        "awaiting-onchain": "Waiting for wallet transaction",
+        accepted: "Confirmed",
+        expired: "Expired",
+        "refund-required": "Refund required",
+      }[row.status] || activityWords(row.status);
+    add({
+      id: `intent:${row.id}`,
+      kind: "escrow",
+      state: activityState(row.status),
+      message: `${purpose}: ${holdStatus}`,
+      bountyId: row.bounty,
+      intentId: row.id,
+      amount: display(row.amount_units),
+      transactionHash: validHash(row.provider_ref) ? row.provider_ref : null,
+      created: Number(row.created),
+      updated: Number(row.updated),
+    });
+  }
+  for (const row of bounties.results) {
+    add({
+      id: `bounty:${row.id}`,
+      kind: "bounty",
+      state: activityState(row.status),
+      message: `Bounty: ${activityWords(row.status)}`,
+      title: row.title,
+      bountyId: row.id,
+      attemptId: row.active_attempt || null,
+      created: Number(row.created),
+      updated: Number(row.updated),
+    });
+  }
+  for (const row of attempts.results) {
+    const message =
+      {
+        engineering: "Agent is engineering a counter",
+        queued: "Counter queued for verification",
+        "awaiting-signatures": "Result is being independently verified",
+        "ready-to-settle": "Settlement is ready to relay",
+        settled: "Attempt settled on Tempo",
+        refunded: "Entry refunded",
+      }[row.status] || `Attempt: ${activityWords(row.status)}`;
+    add({
+      id: `attempt:${row.id}`,
+      kind: "attempt",
+      state: activityState(row.status),
+      message,
+      title: row.title,
+      bountyId: row.bounty,
+      attemptId: row.id,
+      created: Number(row.created),
+      updated: Number(row.updated),
+    });
+  }
+  for (const row of finances.results) {
+    const message =
+      {
+        "agent-mpp-practice": "Paid agent practice",
+        "entry-paid": "Entry payment",
+        "reward-funded": "Reward funding",
+        "winner-payout": "Winner payout",
+        "platform-fee": "Platform fee",
+        "entry-refund": "Entry refund",
+        "reward-refund": "Reward refund",
+      }[row.kind] || activityWords(row.kind);
+    add({
+      id: `finance:${row.kind}:${row.ref}`,
+      kind: "payment",
+      state: activityState(row.status),
+      message: `${message}: ${activityWords(row.status)}`,
+      amount: display(row.amount_units),
+      transactionHash: validHash(row.provider_ref) ? row.provider_ref : null,
+      created: Number(row.created),
+      updated: Number(row.updated),
+    });
+  }
+  for (const row of audits.results) {
+    add({
+      id: `settlement:${row.id}`,
+      kind: "settlement",
+      state: row.event === "legacy-result-unverifiable" ? "error" : "active",
+      message: `Settlement: ${activityWords(row.event)}`,
+      title: row.title,
+      bountyId: row.bounty,
+      attemptId: row.attempt,
+      created: Number(row.created),
+      updated: Number(row.created),
+    });
+  }
+  events.sort((left, right) => right.updated - left.updated);
+  return { generatedAt: now(), events: events.slice(0, 80) };
+}
 async function payoutAddress(db, accountId) {
   const row = await db
     .prepare("SELECT payout_address FROM accounts WHERE id=?")
@@ -3999,6 +4159,8 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         .run();
       return response(await account(db, auth.account));
     }
+    if (path === "/api/me/activity" && method === "GET")
+      return response(await activity(db, requireAuth(auth).account));
     if (path === "/api/me/ledger" && method === "GET")
       return response(await ledger(db, requireAuth(auth).account));
     if (path === "/api/me/attempts" && method === "GET") {

@@ -1,9 +1,11 @@
 import {PARTS,ARENAS,PRESETS,clone,packChallenge,stats} from './data.mjs';
 import {Renderer,Geometry} from './renderer.mjs';
 import {fittedSpan} from './camera.mjs';
+import {installAgentActivity} from './activity.mjs';
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $=s=>document.querySelector(s);
 export function createPortal(adapter){
+ installAgentActivity(adapter);
  let frame=0,renderer=null,agentRenderer=null,generation=0;
  function clearRenderers(){cancelAnimationFrame(frame);frame=0;renderer?.dispose();renderer=null;agentRenderer?.dispose();agentRenderer=null;}
  function leave(){generation++;clearRenderers();}
