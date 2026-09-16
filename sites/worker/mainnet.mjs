@@ -266,18 +266,27 @@ export function runtimeConfig(env, origin) {
   }
   const mppRecipient = String(env.WM_AGENT_MPP_RECIPIENT || ""),
     mppPrice = String(env.WM_AGENT_MPP_PRICE || "");
+  let normalizedMppRecipient = null;
+  try {
+    if (/^0x[0-9a-fA-F]{40}$/.test(mppRecipient))
+      normalizedMppRecipient = getAddress(mppRecipient);
+  } catch {}
   let mppPriceUnits = null;
   try {
     mppPriceUnits = pathUsdToUnits(mppPrice, {
       allowZero: false,
-      maxUnits: 1_000_000_000_000_000n,
+      // Keep a misconfigured public service from charging an unexpectedly
+      // large amount in a single agent request.
+      maxUnits: 1_000_000n,
     });
   } catch {}
   const agentMppEnabled =
     env.WM_AGENT_MPP_ENABLED === "true" &&
-    /^0x[0-9a-fA-F]{40}$/.test(mppRecipient) &&
+    normalizedMppRecipient !== null &&
+    normalizedMppRecipient !== getAddress(escrow) &&
+    normalizedMppRecipient !== getAddress(PLATFORM_FEE_RECIPIENT) &&
     typeof env.MPP_SECRET_KEY === "string" &&
-    env.MPP_SECRET_KEY.length >= 32 &&
+    new TextEncoder().encode(env.MPP_SECRET_KEY).length >= 32 &&
     mppPriceUnits !== null;
   return {
     mode: "tempo-mainnet",
@@ -290,7 +299,7 @@ export function runtimeConfig(env, origin) {
     rpcUrl: env.WM_TEMPO_RPC_URL || "https://rpc.tempo.xyz",
     origin,
     agentMppEnabled,
-    agentMppRecipient: agentMppEnabled ? getAddress(mppRecipient) : null,
+    agentMppRecipient: agentMppEnabled ? normalizedMppRecipient : null,
     agentMppPriceUnits: mppPriceUnits,
     mppSecret: agentMppEnabled ? env.MPP_SECRET_KEY : null,
     acceptingNewBounties: automaticSettlementReady,
@@ -521,6 +530,11 @@ const openapi = {
     description:
       "Public bounty responses expose scouts only. A confirmed direct escrow entry reveals the defender to that challenger and unlocks one timed counter deployment.",
   },
+  components: {
+    securitySchemes: {
+      bearerAuth: { type: "http", scheme: "bearer" },
+    },
+  },
   paths: {
     "/rules": { get: {} },
     "/auth/challenge": { post: {} },
@@ -536,6 +550,71 @@ const openapi = {
       post: {
         description:
           "Prepares direct enterBounty. Body: maxEntry and maxPlatformFeeBps only.",
+      },
+    },
+    "/agent/practice": {
+      post: {
+        summary: "Run one MPP-paid practice battle",
+        description:
+          "Available only when discovery payments.mpp is true. The first request returns an MPP 402 challenge; retry with the exact Payment-Authorization credential. This route never funds, enters, settles, or cancels a bounty.",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "Idempotency-Key",
+            in: "header",
+            required: true,
+            schema: {
+              type: "string",
+              minLength: 16,
+              maxLength: 100,
+              pattern: "^[A-Za-z0-9_-]+$",
+            },
+          },
+          {
+            name: "Payment-Authorization",
+            in: "header",
+            required: false,
+            description:
+              "MPP payment credential returned by the selected Tempo client after the 402 challenge.",
+            schema: { type: "string" },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["challenger"],
+                properties: {
+                  challenger: { type: "object" },
+                  defender: { type: "object" },
+                  bountyId: { type: "string" },
+                  seed: { type: "integer", minimum: 0, maximum: 4294967295 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Practice result",
+            headers: {
+              "Payment-Receipt": { schema: { type: "string" } },
+            },
+          },
+          "402": {
+            description:
+              "MPP payment challenge. Retry with Payment-Authorization.",
+            headers: {
+              "WWW-Authenticate": { schema: { type: "string" } },
+            },
+          },
+          "401": { description: "A wallet session or agent key is required." },
+          "409": { description: "Idempotency-Key conflict." },
+          "503": { description: "MPP service is not configured or paused." },
+        },
       },
     },
     "/attempts/{id}": {
@@ -920,6 +999,25 @@ function gateway(db, config) {
       receipt: receipt.headers.get("payment-receipt") || null,
     };
   };
+}
+
+const mppResultKey = (operation) => "mpp-result:" + operation;
+
+async function savedMppResult(db, operation) {
+  const row = await db
+    .prepare("SELECT value FROM payment_kv WHERE key=?")
+    .bind(mppResultKey(operation))
+    .first();
+  return row ? parse(row.value) : null;
+}
+
+async function saveMppResult(db, operation, value) {
+  await db
+    .prepare(
+      "INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    )
+    .bind(mppResultKey(operation), json(value))
+    .run();
 }
 
 async function expire(db) {
@@ -3659,19 +3757,32 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         key = request.headers.get("idempotency-key");
       validKey(key);
       const operation = "agent-practice:" + actor.account + ":" + key,
-        payment = await gateway(db, config)(request, {
-          amountUnits: config.agentMppPriceUnits,
-          recipient: config.agentMppRecipient,
-          operation,
-          description: "War Machines paid agent practice",
-          meta: {
-            kind: "agent-practice",
-            engineHash: CLIENT_ENGINE_HASH,
-            scope: "practice-only",
-          },
-          expires: now() + 5 * 60 * 1000,
+        previous = await prior(db, actor.account, key, "agent-practice", body);
+      if (previous) {
+        const cached = await savedMppResult(db, previous);
+        check(
+          cached,
+          "The paid practice result is temporarily unavailable; retry with the same idempotency key.",
+          503,
+        );
+        return response(cached.result, 200, {
+          "payment-receipt": cached.receipt,
         });
+      }
+      const payment = await gateway(db, config)(request, {
+        amountUnits: config.agentMppPriceUnits,
+        recipient: config.agentMppRecipient,
+        operation,
+        description: "War Machines paid agent practice",
+        meta: {
+          kind: "agent-practice",
+          engineHash: CLIENT_ENGINE_HASH,
+          scope: "practice-only",
+        },
+        expires: now() + 5 * 60 * 1000,
+      });
       if (!payment.paid) return payment.response;
+      const result = await practice(db, body, actor.account);
       await recordFinancial(db, {
         kind: "agent-mpp-practice",
         account: actor.account,
@@ -3681,7 +3792,12 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         status: "confirmed",
         providerRef: payment.receipt,
       });
-      return response(await practice(db, body, actor.account), 200, {
+      await saveMppResult(db, operation, {
+        result,
+        receipt: payment.receipt,
+      });
+      await remember(db, actor.account, key, "agent-practice", body, operation);
+      return response(result, 200, {
         "payment-receipt": payment.receipt,
       });
     }

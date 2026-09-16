@@ -7,6 +7,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import worker from "../sites/worker/index.mjs";
 import {
   reopenDefendedBounties,
+  runtimeConfig,
   validateEscrowAttestation,
 } from "../sites/worker/mainnet.mjs";
 import { packChallenge, PRESETS } from "../dist/data.mjs";
@@ -206,6 +207,100 @@ test("Tempo mode is fail-closed and never falls back to sandbox credits", async 
   assert.equal(rules.status, 200);
   assert.equal(rules.body.startingCredits, 0);
   assert.equal(rules.body.mpp.enabled, false);
+});
+
+test("MPP practice advertises a bounded Tempo charge and returns a challenge before payment", async (t) => {
+  const DB = new D1Mock();
+  await DB.migrate();
+  t.after(() => DB.close());
+  const escrow = "0xb14a3aA99C9349094612143089F55aE5372DeB24",
+    recipient = "0x4444444444444444444444444444444444444444",
+    signer = privateKeyToAccount("0x" + "04".repeat(32)),
+    env = {
+      DB,
+      WM_MODE: "tempo-mainnet",
+      WM_BOUNTY_ESCROW_ADDRESS: escrow,
+      WM_AGENT_MPP_ENABLED: "true",
+      WM_AGENT_MPP_RECIPIENT: recipient,
+      WM_AGENT_MPP_PRICE: "0.01",
+      MPP_SECRET_KEY: "m".repeat(32),
+    };
+  const mppConfig = runtimeConfig(env, "https://foundry.example");
+  assert.equal(mppConfig.agentMppEnabled, true);
+  assert.equal(
+    runtimeConfig(
+      { ...env, WM_AGENT_MPP_RECIPIENT: escrow },
+      "https://foundry.example",
+    ).agentMppEnabled,
+    false,
+  );
+  assert.equal(
+    runtimeConfig(
+      { ...env, WM_AGENT_MPP_PRICE: "1.000001" },
+      "https://foundry.example",
+    ).agentMppEnabled,
+    false,
+  );
+  const discovery = await worker.fetch(
+    new Request("https://foundry.example/.well-known/war-machines.json"),
+    env,
+  );
+  const discoveryBody = await discovery.json();
+  assert.equal(discoveryBody.payments.mpp, true);
+  assert.deepEqual(discoveryBody.payments.mppRoutes, [
+    {
+      path: "/api/agent/practice",
+      price: "0.01",
+      recipient,
+    },
+  ]);
+  const openapi = await call(env, "/api/openapi.json");
+  assert.equal(openapi.status, 200);
+  assert.match(
+    openapi.body.paths["/agent/practice"].post.description,
+    /Payment-Authorization/,
+  );
+
+  const challenge = await call(env, "/api/auth/challenge", "POST", {
+    chainId: 4217,
+  });
+  const signature = await signer.signMessage({
+    message: challenge.body.message,
+  });
+  const verified = await call(env, "/api/auth/verify", "POST", {
+    address: signer.address,
+    message: challenge.body.message,
+    signature,
+  });
+  assert.equal(verified.status, 200, JSON.stringify(verified.body));
+  const response = await worker.fetch(
+    new Request("https://foundry.example/api/agent/practice", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: verified.headers.get("set-cookie"),
+        "idempotency-key": "mpp_practice_fixture_0001",
+      },
+      body: JSON.stringify({
+        challenger: packChallenge(PRESETS[0], "foundry", 0),
+        defender: packChallenge(PRESETS[1], "foundry", 0),
+        seed: 7,
+      }),
+    }),
+    env,
+  );
+  assert.equal(response.status, 402);
+  assert.match(response.headers.get("www-authenticate"), /Payment/i);
+  assert.equal(
+    DB.sqlite
+      .prepare("SELECT COUNT(*) AS total FROM financial_operations")
+      .get().total,
+    0,
+  );
+  assert.equal(
+    DB.sqlite.prepare("SELECT COUNT(*) AS total FROM idempotency").get().total,
+    0,
+  );
 });
 
 test("a settled defense reopens the bounty and keeps its reward funded", async (t) => {
