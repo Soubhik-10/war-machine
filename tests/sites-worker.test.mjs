@@ -247,6 +247,8 @@ test("MPP practice advertises a bounded Tempo charge and returns a challenge bef
   );
   const discoveryBody = await discovery.json();
   assert.equal(discoveryBody.payments.mpp, true);
+  assert.equal(discoveryBody.mcp.endpoint, "/mcp");
+  assert.equal(discoveryBody.mcp.transport, "streamable-http");
   assert.deepEqual(discoveryBody.payments.mppRoutes, [
     {
       path: "/api/agent/practice",
@@ -318,6 +320,89 @@ test("MPP practice advertises a bounded Tempo charge and returns a challenge bef
     DB.sqlite.prepare("SELECT COUNT(*) AS total FROM idempotency").get().total,
     0,
   );
+});
+
+test("stateless MCP exposes War Machines tools and preserves the MPP challenge", async (t) => {
+  const DB = new D1Mock();
+  await DB.migrate();
+  t.after(() => DB.close());
+  const env = {
+    DB,
+    WM_MODE: "tempo-mainnet",
+    WM_BOUNTY_ESCROW_ADDRESS:
+      "0xb14a3aA99C9349094612143089F55aE5372DeB24",
+    WM_AGENT_MPP_ENABLED: "true",
+    WM_AGENT_MPP_RECIPIENT: "0x4444444444444444444444444444444444444444",
+    WM_AGENT_MPP_PRICE: "0.01",
+    MPP_SECRET_KEY: "m".repeat(32),
+  };
+  const init = await worker.fetch(
+    new Request("https://foundry.example/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: "2025-11-25" },
+      }),
+    }),
+    env,
+  );
+  assert.equal(init.status, 200);
+  const initBody = await init.json();
+  assert.equal(initBody.result.serverInfo.name, "war-machines");
+  assert.equal(initBody.result.protocolVersion, "2025-11-25");
+
+  const listed = await worker.fetch(
+    new Request("https://foundry.example/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+    }),
+    env,
+  );
+  assert.equal(listed.status, 200);
+  const listedBody = await listed.json();
+  const toolNames = listedBody.result.tools.map((item) => item.name);
+  assert.ok(toolNames.includes("war_machines_create_bounty"));
+  assert.ok(toolNames.includes("war_machines_settle_attempt"));
+
+  const read = await worker.fetch(
+    new Request("https://foundry.example/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "war_machines_get_rules", arguments: {} },
+      }),
+    }),
+    env,
+  );
+  assert.equal(read.status, 200);
+  const readBody = await read.json();
+  assert.equal(readBody.result.structuredContent.mpp.enabled, true);
+
+  const mutation = await worker.fetch(
+    new Request("https://foundry.example/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: {
+          name: "war_machines_create_bounty",
+          arguments: { idempotencyKey: "mcp_create_fixture_0001" },
+        },
+      }),
+    }),
+    env,
+  );
+  assert.equal(mutation.status, 402);
+  assert.match(mutation.headers.get("www-authenticate"), /Payment/i);
 });
 
 test("a settled defense reopens the bounty and keeps its reward funded", async (t) => {

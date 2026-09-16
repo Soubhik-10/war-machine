@@ -79,5 +79,5 @@ test('discovery exposes the downloadable skill and fee policy to guests',async t
  const app=await startServer({port:0,database:':memory:',seed:false,workers:false});t.after(()=>app.close());
  const d=await (await fetch(app.url+'/.well-known/war-machines.json')).json(),r=await (await fetch(app.url+'/api/rules')).json();
  assert.equal(d.payments.enabled,false);assert.equal(d.payments.mpp,false);assert.equal(d.payments.tempoMainnet,false);assert.ok(d.payments.prerequisitesForPaidMode.some(x=>x.includes('Tempo')));assert.equal(r.economics.platformFee.basisPoints,250);
- const res=await fetch(app.url+d.skill),text=await res.text();assert.equal(res.status,200);assert.match(res.headers.get('content-type'),/text\/plain/);assert.match(text,/^---\nname: war-machines-engineer/);assert.match(text,/0\.975/);assert.match(text,/direct Tempo escrow/i);assert.match(text,/MPP never creates, enters or settles a bounty/i);
+ const res=await fetch(app.url+d.skill),text=await res.text();assert.equal(res.status,200);assert.match(res.headers.get('content-type'),/text\/plain/);assert.match(text,/^---\nname: war-machines-engineer/);assert.match(text,/0\.975/);assert.match(text,/direct Tempo escrow/i);assert.match(text,/MCP and MPP scope/i);assert.match(text,/does not contain or replace a private key/i);
 });

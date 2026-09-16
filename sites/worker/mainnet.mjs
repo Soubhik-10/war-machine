@@ -46,6 +46,7 @@ import {
   payoutQuote,
   unitsToPathUsd,
 } from "./pathusd.mjs";
+import { handleMcpRequest } from "../../server/mcp.mjs";
 
 const now = () => Date.now(),
   COMPLETED_BOUNTY_BOARD_MS = 10 * 60 * 1000,
@@ -478,6 +479,13 @@ const discovery = (config) => ({
   instructions: "/agents.md",
   skill: "/skills/war-machines-engineer/SKILL.md",
   catalog: "/api/rules",
+  mcp: {
+    endpoint: "/mcp",
+    transport: "streamable-http",
+    stateless: true,
+    protocolVersion: "2025-11-25",
+    tools: "war_machines_*",
+  },
   payments: config.enabled
     ? {
         enabled: true,
@@ -488,7 +496,7 @@ const discovery = (config) => ({
           : { ready: false, reason: config.settlementReason },
         mpp: !!config.agentMppEnabled,
         mppScope: config.agentMppEnabled
-          ? "Zero-value Tempo proof authorizes the wallet for autonomous bounty operations; paid practice is separately priced."
+          ? "Zero-value Tempo proof authorizes the wallet for autonomous REST and MCP bounty operations; paid practice is separately priced."
           : "MPP agent billing is not configured.",
         ...(config.agentMppEnabled
           ? {
@@ -527,7 +535,8 @@ const discovery = (config) => ({
       "save builds",
       "history",
     ],
-    scheme: "Tempo wallet session or Payment-Authorization zero-value Tempo proof",
+  scheme:
+    "Tempo wallet session or Payment-Authorization zero-value Tempo proof (REST and MCP)",
   },
   invariants: {
     oneActiveAttemptPerBounty: true,
@@ -563,6 +572,13 @@ const openapi = {
     },
   },
   paths: {
+    "/mcp": {
+      post: {
+        summary: "Stateless MCP Streamable HTTP endpoint",
+        description:
+          "Connect an MCP client to this endpoint. Read, validation and practice tools are public; bounty mutations accept the same zero-value Tempo MPP proof in Payment-Authorization as the REST API. Returned direct escrow plans must be signed by the caller's own Tempo wallet/access key.",
+      },
+    },
     "/rules": { get: {} },
     "/auth/challenge": { post: {} },
     "/auth/verify": { post: {} },
@@ -3820,6 +3836,10 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     ctx.waitUntil(runAutomaticSettlement(env));
   if (path === "/.well-known/war-machines.json" && request.method === "GET")
     return response(discovery(config));
+  if (path === "/mcp")
+    return handleMcpRequest(request, (subrequest) =>
+      mainnetFetch(subrequest, env, ctx, serveStaticAsset),
+    );
   if (!path.startsWith("/api/")) return serveStaticAsset(request);
   try {
     check(env.DB, "D1 storage is unavailable.");
@@ -4420,8 +4440,19 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       }
       if (action === "settlement-confirm" && method === "POST") {
         fields(body, ["transactionHash"]);
+        const gate = await ownerOrMppAgent(
+          db,
+          config,
+          request,
+          auth,
+          "settle",
+          "agent-settle:" + attemptId + ":" + body.transactionHash,
+        );
+        if (gate.response) return gate.response;
         return response(
           await confirmSettlement(db, attemptId, body.transactionHash, config),
+          200,
+          gate.receipt ? { "payment-receipt": gate.receipt } : {},
         );
       }
       if (action === "forfeit" && method === "POST")

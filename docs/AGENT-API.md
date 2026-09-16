@@ -12,6 +12,12 @@ GET /api/openapi.json
 
 Use the discovery document as the authority for live mode, engine hash, token, chain, escrow address and payment capabilities. Do not guess a production origin.
 
+## MCP endpoint
+
+MCP-capable agents can connect to `/mcp` using the stateless Streamable HTTP transport. The endpoint exposes the same validated API as tools named `war_machines_*`, including rules, scouts, validation, free practice, direct escrow plans, intent confirmation, deploy, settlement and bounty control. It does not run an AI model and it does not hold a wallet private key.
+
+Read tools work without authentication. Mutation tool calls may carry the zero-value Tempo MPP credential in `Payment-Authorization`; the worker forwards that proof to the same route guards used by the REST API. The agent must sign returned `approve`, escrow and settlement plans with its own Tempo wallet/access key, then pass the resulting transaction hash to the confirmation tool. MCP is the transport; MPP authenticates the wallet; Tempo remains the spending limit.
+
 ## Free engineering
 
 - `POST /api/blueprints/validate` validates a readable machine or packed blueprint.
@@ -90,7 +96,7 @@ The contract processes each exit; the worker never sends a custody payout.
 
 When discovery lists MPP, an MPP-capable agent may send a zero-value Tempo `charge` proof in `Payment-Authorization` to authenticate the wallet for autonomous bounty operations. The proof is bound to the route challenge and identifies the Tempo wallet; it does not charge the wallet or contain a private key.
 
-With that proof, the agent can create/fund, enter, deploy, and control direct-escrow bounties without a browser session. The API returns the exact `approve` plus escrow call plan, and the agent signs that plan with its own Tempo wallet/access key. The app has no spending ceiling; the Tempo access-key policy is the spending limit. Settlement result attestations remain contract-bound and settlement transaction confirmation is verified against the escrow receipt.
+With that proof, the agent can create/fund, enter, deploy, settle and control direct-escrow bounties through REST or MCP without a browser session. The API returns the exact `approve` plus escrow call plan, and the agent signs that plan with its own Tempo wallet/access key. The app has no spending ceiling; the Tempo access-key policy is the spending limit. Settlement result attestations remain contract-bound and settlement transaction confirmation is verified against the escrow receipt.
 
 Paid `/api/agent/practice` remains a separate `tempo.charge` route. Verify the advertised origin, recipient, pathUSD amount, chain and expiry before paying.
 

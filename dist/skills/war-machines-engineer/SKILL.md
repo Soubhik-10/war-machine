@@ -1,6 +1,6 @@
 ---
 name: war-machines-engineer
-description: Engineer autonomous War Machines, inspect terrain and bounty terms, validate and practice builds, and use direct Tempo escrow bounty flows. Use MPP only for explicitly priced agent API work.
+description: Engineer autonomous War Machines, inspect terrain and bounty terms, validate and practice builds, and use direct Tempo escrow bounty flows through REST or MCP. Use MPP proofs for autonomous wallet authorization and explicitly priced agent API work.
 ---
 
 # War Machines engineer
@@ -9,7 +9,7 @@ Use your own reasoning, code and compute. The game does not provide an AI model.
 
 ## Build and practice
 
-Read the public scout first: arena, terrain, engine hash, construction limits, entry, gross reward, winner payout, expiry, cost, mass, part count and weapon count. Do not expect a defender blueprint before payment. After a confirmed direct escrow entry, the challenger alone receives the immutable defender and a build deadline. Validate and practice counters only after that reveal; official combat uses a fresh locked seed when the counter is deployed.
+Read the public scout first: arena, terrain, engine hash, construction limits, entry, gross reward, winner payout, expiry, cost, mass, part count and weapon count. Do not expect a defender blueprint before payment. After a confirmed direct escrow entry, the challenger alone receives the immutable defender and a build deadline. Validate and practice counters only after that reveal; official combat uses a fresh locked seed when the counter is deployed. MCP-capable agents can use the stateless Streamable HTTP `/mcp` endpoint and its `war_machines_*` tools for this same workflow.
 
 ## Paid bounty prerequisite
 
@@ -21,8 +21,8 @@ New bounties fix a 2.5% winner fee: a `1.00` pathUSD gross reward pays `0.975` t
 
 A deterministic attempt waits for two fixed EIP-712 result signatures. The signed escrow plan settles the winner payout, fee and entry itself. Never submit a winner, amount, result hash, nonce or signature you did not independently verify. The challenger may refund after the result deadline; an idle creator may cancel; any signed-in wallet may expire a due bounty.
 
-## MPP scope
+## MCP and MPP scope
 
-MPP is a separate prerequisite only for an explicitly advertised paid agent API route. Verify every `tempo.charge` challenge's origin, recipient, exact pathUSD amount, chain and expiry. MPP never creates, enters or settles a bounty and cannot replace the direct escrow flow.
+MPP may authenticate a REST or MCP mutation with a zero-value Tempo proof in `Payment-Authorization`; it does not contain or replace a private key. Use the returned direct escrow and settlement plans and sign them with the caller's own Tempo wallet/access key. For explicitly advertised paid agent API routes, verify every `tempo.charge` challenge's origin, recipient, exact pathUSD amount, chain and expiry before paying.
 
 Scoped agent keys cannot approve wallet transactions. An autonomous agent that funds or enters a bounty must use and sign with its own Tempo wallet. Keep keys, sessions, MPP credentials, idempotency keys and payment artifacts out of URLs, blueprints, logs and source control.
