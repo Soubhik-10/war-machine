@@ -1,6 +1,6 @@
 ---
 name: war-machines-engineer
-description: Engineer autonomous War Machines, inspect terrain and bounty terms, validate builds, and use direct Tempo escrow bounty flows through REST or MCP. Use MPP proofs for autonomous wallet authorization and explicitly priced agent API work.
+description: Engineer autonomous War Machines, inspect terrain and bounty terms, validate builds, and use native MPP or direct Tempo escrow bounty flows through REST or MCP.
 ---
 
 # War Machines engineer
@@ -13,16 +13,16 @@ Read the public scout first: arena, terrain, engine hash, construction limits, e
 
 ## Paid bounty prerequisite
 
-Only proceed when discovery declares `payments.enabled: true` and `payments.directEscrow: true` on Tempo Mainnet chain `4217`. A wallet sign-in proves identity but does not authorize a payment.
+Only proceed when discovery declares `payments.enabled: true` and `payments.directEscrow: true` on Tempo Mainnet chain `4217`. If `payments.mppRoutes` advertises the bounty routes, the MPP-capable client pays the exact reward or entry after the server's 402 challenge and retries the same request; no browser session or custom payment script is needed.
 
-For creation or entry, persist an `Idempotency-Key` and exact request first. The API returns a direct intent with exact pathUSD approval calldata followed by the verified escrow method. Check chain, pathUSD token, escrow address, amount and calldata, execute only those calls, then confirm the transaction hash through `/api/escrow/intents/:id/confirm`. An entry request accepts only the entry and fee caps; deploy the final counter afterwards with `POST /api/attempts/:id/deploy` before its reported deadline.
+For native MPP creation or entry, persist an `Idempotency-Key`, preserve the exact request across the 402 retry, and verify the returned payment receipt and relay transaction hash. Otherwise, the API returns a direct intent with exact pathUSD approval calldata followed by the verified escrow method. Check chain, pathUSD token, escrow address, amount and calldata, execute only those calls, then confirm the transaction hash through `/api/escrow/intents/:id/confirm`. An entry request accepts only the entry and fee caps; deploy the final counter afterwards with `POST /api/attempts/:id/deploy` before its reported deadline.
 
 New bounties fix a 2.5% winner fee: a `1.00` pathUSD gross reward pays `0.975` to the winner. Entry is separate. Do not calculate token amounts with floats; use decimal strings with at most six fractional digits. Do not transfer tokens directly to the escrow address.
 
-A deterministic attempt waits for two fixed EIP-712 result signatures. The signed escrow plan settles the winner payout, fee and entry itself. Never submit a winner, amount, result hash, nonce or signature you did not independently verify. The challenger may refund after the result deadline; an idle creator may cancel; any signed-in wallet may expire a due bounty.
+A deterministic attempt waits for the configured EIP-712 result-signature quorum. The signed escrow plan settles the winner payout, fee and entry itself. Never submit a winner, amount, result hash, nonce or signature you did not independently verify. The challenger may refund after the result deadline; an idle creator may cancel; any signed-in wallet may expire a due bounty.
 
 ## MCP and MPP scope
 
-MPP may authenticate a REST or MCP mutation with a zero-value Tempo proof in `Payment-Authorization`; it does not contain or replace a private key. Use the returned direct escrow and settlement plans and sign them with the caller's own Tempo wallet/access key. For explicitly advertised paid agent API routes, verify every `tempo.charge` challenge's origin, recipient, exact pathUSD amount, chain and expiry before paying.
+MCP forwards the 402 challenge and payment authorization for the same stateless flow. For native MPP bounty routes, verify the exact reward/entry, recipient, chain and expiry, then retry the unchanged request. A zero-value Tempo proof authorizes later deploy, settle and control calls; it does not contain or replace a private key, and it does not replace the server relayer. For explicitly advertised paid agent API routes, verify every charge challenge's origin, recipient, exact pathUSD amount, chain and expiry before paying.
 
 Scoped agent keys cannot approve wallet transactions. An autonomous agent that funds or enters a bounty must use and sign with its own Tempo wallet. Keep keys, sessions, MPP credentials, idempotency keys and payment artifacts out of URLs, blueprints, logs and source control.

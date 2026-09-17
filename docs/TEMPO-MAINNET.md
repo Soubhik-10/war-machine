@@ -1,6 +1,6 @@
 # Tempo mainnet operations
 
-War Machines uses a non-upgradeable pathUSD bounty escrow on Tempo Mainnet. The game worker prepares an exact wallet transaction, verifies the resulting contract event, and stores immutable game terms. It never receives player pathUSD or holds a payout key.
+War Machines uses a non-upgradeable pathUSD bounty escrow on Tempo Mainnet. V3 is the direct-wallet deployment; V4 adds a narrowly bounded native MPP relayer for agent create/entry calls. The Worker verifies the resulting contract event and stores immutable game terms.
 
 | Item         | Value                                                                          |
 | ------------ | ------------------------------------------------------------------------------ |
@@ -11,12 +11,14 @@ War Machines uses a non-upgradeable pathUSD bounty escrow on Tempo Mainnet. The 
 | Settlement   | Two fixed EIP-712 result signatures within a 600-second attempt window         |
 | Verification | [Sourcify match](https://contracts.tempo.xyz/verify-ui/jobs/c14fe4d2-651b-4adc-9670-19b5e726ffb8) |
 
+The table retains the historical deployed escrow reference. The current Worker pins V3 at `0xb14a3aA99C9349094612143089F55aE5372DeB24`; native MPP requires the separately deployed V4 address and its configured relayer.
+
 ## Bounty flow
 
-1. The creator approves the exact gross reward and calls `createBounty` directly from their wallet.
-2. A challenger approves the exact entry and calls `enterBounty` directly from their wallet. That confirmed entry reveals the defender only to the challenger; public routes retain a cost, mass, part-count, weapon-count, terrain and limit summary.
+1. In direct mode, the creator approves the exact gross reward and calls `createBounty` directly from their wallet. In V4 native MPP mode, the agent pays the exact reward to the configured relayer and the relayer calls `createBountyFor` with the payer address.
+2. In direct mode, a challenger approves the exact entry and calls `enterBounty` directly from their wallet. In V4 native MPP mode, the agent pays the exact entry and the relayer calls `enterBountyFor` with the payer address. That confirmed entry reveals the defender only to the challenger; public routes retain a cost, mass, part-count, weapon-count, terrain and limit summary.
 3. The challenger gets the current construction window, then deploys one counter before the deadline. The worker records the deterministic replay and its hash.
-4. Two result keystores sign the escrow's exact EIP-712 settlement payload. Anyone can relay `settleAttempt`; the escrow verifies both signatures and sends the winner payout, platform fee, and entry recipient payment itself.
+4. The configured result signer quorum signs the escrow's exact EIP-712 settlement payload. Anyone can relay `settleAttempt`; the escrow verifies the signatures and sends the winner payout, platform fee, and entry recipient payment itself.
 5. A creator can cancel an idle bounty. A loss or draw pays the entry to the bounty creator once two result signatures attest it. A missed clock or unsigned timeout can be finalized onchain by anyone; it also pays the entry to the creator. Only idle bounties can expire and return their unused reward.
 
 ## Local result signing
@@ -33,28 +35,34 @@ Then the browser shows **Settle onchain**, which submits the verified contract c
 
 This manual operation is acceptable only for an extremely small private rehearsal. A public release needs separate signer operators, a reviewed replay/attestation service, monitoring, and an independent Solidity/security review.
 
-## MPP scope
+## Native MPP bounty mode
 
-MPP is deliberately separate from bounty funding. Standard MPP Tempo charges transfer or settle service payments; they cannot call this escrow's `createBounty` or `enterBounty` functions. The Worker can expose separately priced agent API work only when all of these are configured:
+V4 enables a native MPP payment challenge on `POST /api/bounties` and `POST /api/bounties/:id/attempts`. The client satisfies the exact reward or entry challenge and retries the same request; the Worker persists the payment, relays the matching V4 method, verifies finality and returns the normal bounty or attempt response. The relayer is not allowed to choose a different payer, recipient, reward, entry, terms hash or bounty ID.
 
 ```text
-WM_AGENT_MPP_ENABLED=true
-WM_AGENT_MPP_RECIPIENT=<separate service payee address>
-WM_AGENT_MPP_PRICE=<exact positive pathUSD decimal>
+WM_BOUNTY_ESCROW_VERSION=4
+WM_BOUNTY_ESCROW_ADDRESS=<deployed V4 escrow address>
+WM_BOUNTY_RELAYER_ADDRESS=<same address passed to the V4 constructor>
+WM_BOUNTY_RELAYER_PRIVATE_KEY=<Worker secret for that relayer>
+WM_AGENT_BOUNTY_MPP_ENABLED=true
+WM_AGENT_BOUNTY_MPP_MAX=1.00
 MPP_SECRET_KEY=<32+ character server secret>
 ```
 
-That enables `POST /api/agent/practice` for MPP-capable agents. It is a separately priced simulation service: it never funds a bounty, pays an entry, decides a winner, or receives the 2.5% bounty fee.
+The relayer must hold enough pathUSD for reward/entry forwarding and fee payment, and must approve the deployed V4 escrow for the configured maximum relay amount. The Worker secret is the only private value in this list; never put it in Git, D1 or the browser. A zero-value MPP proof remains available for later deploy, settle and control calls.
+
+The optional `/api/agent/practice` charge remains separately configured with `WM_AGENT_MPP_ENABLED`, `WM_AGENT_MPP_RECIPIENT` and `WM_AGENT_MPP_PRICE`.
 
 ## Site configuration
 
-Set only the pinned public escrow address to enable wallet bounty calls:
+For the current direct-wallet deployment:
 
 ```text
 WM_MODE=tempo-mainnet
-WM_BOUNTY_ESCROW_ADDRESS=0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e
+WM_BOUNTY_ESCROW_VERSION=3
+WM_BOUNTY_ESCROW_ADDRESS=0xb14a3aA99C9349094612143089F55aE5372DeB24
 ```
 
-The Worker fails closed when the address differs. `WM_TEMPO_RPC_URL` is optional and defaults to `https://rpc.tempo.xyz`.
+For V4 native MPP, set `WM_BOUNTY_ESCROW_VERSION=4` and replace the address with the newly deployed V4 address. The Worker fails closed when the version/address/relayer configuration is incomplete. `WM_TEMPO_RPC_URL` is optional and defaults to `https://rpc.tempo.xyz`.
 
 Do not send pathUSD straight to the escrow address. Use the contract methods prepared by the game, or call the verified ABI yourself after checking its terms. The contract is source-verified, not independently audited.

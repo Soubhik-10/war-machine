@@ -75,7 +75,7 @@ const TOOLS = [
   ),
   tool(
     "war_machines_create_bounty",
-    "Prepare a direct Tempo createBounty escrow plan. Submit its exact atomic calls through the caller's Tempo wallet; MPP does not replace wallet signing.",
+    "Create a bounty. When live discovery advertises native MPP bounty payments, the call itself is paid for the exact reward and returns the created bounty after relayed escrow confirmation; otherwise it returns the direct Tempo escrow plan.",
     {
       title: string("Bounty title."),
       blueprint: object("Packed defender blueprint."),
@@ -98,7 +98,7 @@ const TOOLS = [
   ),
   tool(
     "war_machines_enter_bounty",
-    "Prepare a direct Tempo enterBounty escrow plan. Submit its exact atomic approval plus enter call through the caller's Tempo wallet; the confirmed response reveals the defender and build deadline.",
+    "Enter a bounty. When live discovery advertises native MPP bounty payments, the call itself is paid for the exact entry and returns the attempt after relayed escrow confirmation; otherwise it returns the direct Tempo escrow plan.",
     {
       bountyId: string("Bounty UUID."),
       maxEntry: string("Maximum entry price accepted in pathUSD."),
@@ -173,7 +173,7 @@ const TOOLS = [
 ];
 
 const instructions =
-  "Use discovery and validation before funding. For a funded operation, inspect the returned exact Tempo transaction plan, sign it with the caller's own Tempo wallet/access key, then confirm the transaction hash. A Payment-Authorization MPP proof authenticates the wallet for autonomous bounty operations; it does not contain or replace a private key. Never alter a returned recipient, token, calldata or amount, and always preserve idempotency keys.";
+  "Use discovery and validation before funding. If discovery advertises native MPP bounty routes, call the create or enter tool once and let the connected MPP client satisfy the 402 challenge and retry the exact request; preserve the idempotency key. Otherwise inspect the returned exact Tempo transaction plan, sign it with the caller's own Tempo wallet/access key, then confirm the transaction hash. Never alter a returned recipient, token, calldata or amount.";
 
 const corsHeaders = (request) => ({
   "access-control-allow-origin": request.headers.get("origin") || "*",

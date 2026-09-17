@@ -342,6 +342,81 @@ test("MPP practice advertises a bounded Tempo charge and returns a challenge bef
   );
 });
 
+test("V4 discovery enables exact native MPP bounty routes only for a matching relayer", async () => {
+  const relayer = privateKeyToAccount("0x" + "09".repeat(32));
+  const env = {
+    WM_MODE: "tempo-mainnet",
+    WM_BOUNTY_ESCROW_VERSION: "4",
+    WM_BOUNTY_ESCROW_ADDRESS: "0x5555555555555555555555555555555555555555",
+    WM_BOUNTY_RELAYER_ADDRESS: relayer.address,
+    WM_BOUNTY_RELAYER_PRIVATE_KEY: "0x" + "09".repeat(32),
+    WM_AGENT_BOUNTY_MPP_ENABLED: "true",
+    WM_AGENT_BOUNTY_MPP_MAX: "1.00",
+    MPP_SECRET_KEY: "m".repeat(32),
+  };
+  const config = runtimeConfig(env, "https://foundry.example");
+  assert.equal(config.agentBountyMppEnabled, true);
+  const DB = new D1Mock();
+  await DB.migrate();
+  try {
+    const discovery = await worker.fetch(
+      new Request("https://foundry.example/.well-known/war-machines.json"),
+      { ...env, DB },
+    );
+    const body = await discovery.json();
+    assert.deepEqual(body.payments.mppRoutes, [
+      {
+        path: "/api/bounties",
+        method: "POST",
+        price: "request.reward",
+        recipient: relayer.address,
+      },
+      {
+        path: "/api/bounties/{id}/attempts",
+        method: "POST",
+        price: "request.entry",
+        recipient: relayer.address,
+      },
+    ]);
+    assert.equal(body.payments.mpp, true);
+    assert.equal(body.version, "4.0");
+    const guarded = await worker.fetch(
+      new Request("https://foundry.example/api/bounties", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "mpp_guarded_create_0001",
+        },
+        body: JSON.stringify({
+          title: "Guarded native bounty",
+          blueprint: packChallenge(PRESETS[0], "foundry", 0),
+          entry: "0.01",
+          reward: "0.02",
+          hours: 0,
+          listed: true,
+          maxPlatformFeeBps: 250,
+        }),
+      }),
+      { ...env, DB },
+    );
+    assert.equal(guarded.status, 503);
+    assert.equal(
+      DB.sqlite.prepare("SELECT COUNT(*) AS total FROM payment_holds").get()
+        .total,
+      0,
+    );
+  } finally {
+    DB.close();
+  }
+  assert.equal(
+    runtimeConfig(
+      { ...env, WM_BOUNTY_RELAYER_ADDRESS: "0x6666666666666666666666666666666666666666" },
+      "https://foundry.example",
+    ).agentBountyMppEnabled,
+    false,
+  );
+});
+
 test("stateless MCP exposes War Machines tools and preserves the MPP challenge", async (t) => {
   const DB = new D1Mock();
   await DB.migrate();

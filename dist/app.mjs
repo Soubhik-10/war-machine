@@ -42,6 +42,11 @@ import {
 import { Renderer, Geometry, workshopScene, battleScene } from "./renderer.mjs";
 import { newCamera, bindCamera, fittedSpan } from "./camera.mjs";
 import {
+  getGraphicsProfile,
+  setGraphicsTier,
+  watchPowerState,
+} from "./performance.mjs";
+import {
   engineeringReport,
   battleAdvice,
   weaponRows,
@@ -54,6 +59,8 @@ const $ = (s) => document.querySelector(s),
 const partGuide = (p) =>
   PART_GUIDANCE[p.id] || { role: p.cat.toUpperCase(), quick: p.desc };
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let graphicsProfile = getGraphicsProfile();
+let lastArenaRender = 0;
 let machine = clone(PRESETS[0]),
   selected = "cannon",
   category = "Weapons",
@@ -71,6 +78,8 @@ let machine = clone(PRESETS[0]),
 let builderRenderer = null,
   arenaRenderer = null,
   thumbRenderer = null,
+  largePreviewRenderer = null,
+  largePreviewCanvas = null,
   thumbCanvas = null,
   benchCamera = newCamera(),
   fightCamera = newCamera(true),
@@ -110,6 +119,40 @@ let portal = null,
 let rules = clone(DEFAULT_RULES),
   preChallengeRules = null,
   mirrorOpponent = false;
+const applyGraphicsProfile = (next) => {
+  if (!next || next.tier === graphicsProfile.tier) return;
+  graphicsProfile = next;
+  document.documentElement.dataset.graphicsTier = next.tier;
+  for (const renderer of [
+    builderRenderer,
+    arenaRenderer,
+    scoutRenderer,
+    thumbRenderer,
+  ]) {
+    if (renderer)
+      renderer.maxPixelRatio =
+        renderer === thumbRenderer && next.tier === "high"
+          ? 2
+          : next.maxPixelRatio;
+  }
+  lastArenaRender = 0;
+  benchDirty = true;
+};
+document.documentElement.dataset.graphicsTier = graphicsProfile.tier;
+window.warMachinesGraphics = {
+  get tier() {
+    return graphicsProfile.tier;
+  },
+  get profile() {
+    return graphicsProfile;
+  },
+  setTier(tier) {
+    const next = setGraphicsTier(tier);
+    applyGraphicsProfile(next);
+    return next;
+  },
+};
+watchPowerState(graphicsProfile, applyGraphicsProfile);
 const frontNames = ["North ↑", "East →", "South ↓", "West ←"];
 let wins = {};
 try {
@@ -189,19 +232,64 @@ function cleanupView() {
   builderRenderer = null;
   arenaRenderer?.dispose();
   arenaRenderer = null;
+  largePreviewRenderer?.dispose();
+  largePreviewRenderer = null;
+  largePreviewCanvas = null;
 }
 function sprite(p) {
   return `<canvas class="sprite" width="160" height="160" data-sprite="${p.id}" aria-hidden="true"></canvas>`;
 }
 const thumbnailCache = new Map();
+function renderLargePreview(canvas, machineOrPart) {
+  if (
+    typeof machineOrPart === "string" ||
+    (canvas.id !== "defender-preview" &&
+      canvas.id !== "create-preview" &&
+      canvas.width < 450)
+  )
+    return false;
+  try {
+    if (largePreviewCanvas !== canvas) {
+      largePreviewRenderer?.dispose();
+      largePreviewRenderer = new Renderer(canvas, {
+        maxPixelRatio: graphicsProfile.maxPixelRatio,
+      });
+      largePreviewCanvas = canvas;
+    }
+    const g = new Geometry();
+    g.detail = graphicsProfile.tier === "high" ? "full" : "reduced";
+    g.material = 4;
+    g.box(0, -0.12, 0, 9.8, 0.18, 8.1, "#1d2b31");
+    g.machine(machineOrPart, { time: 0 });
+    const fit = fittedSpan(
+      machineOrPart,
+      (canvas.clientWidth || canvas.width) /
+        Math.max(1, canvas.clientHeight || canvas.height),
+      -2.35,
+      0.64,
+    );
+    largePreviewRenderer.render(g, {
+      target: fit.center,
+      yaw: -2.35,
+      elevation: 0.64,
+      span: Math.max(2.6, fit.span + 0.65),
+      bg: [0.075, 0.12, 0.15, 1],
+    });
+    return true;
+  } catch (error) {
+    console.error("High-resolution 3D preview failed", error);
+    return false;
+  }
+}
 function renderThumbnail(canvas, machineOrPart) {
   try {
+    if (renderLargePreview(canvas, machineOrPart)) return;
     const cacheKey = JSON.stringify(machineOrPart);
     let cached = thumbnailCache.get(cacheKey);
     if (!cached) {
       thumbCanvas ||= document.createElement("canvas");
       thumbCanvas.width = thumbCanvas.height = 220;
-      thumbRenderer ||= new Renderer(thumbCanvas, { preserveDrawingBuffer: true, maxPixelRatio: 2 });
+      thumbRenderer ||= new Renderer(thumbCanvas, { preserveDrawingBuffer: true, maxPixelRatio: graphicsProfile.tier === "high" ? 2 : graphicsProfile.maxPixelRatio });
       const g = new Geometry();
       let params;
       if (typeof machineOrPart === "string") {
@@ -669,7 +757,7 @@ function drawBuilder() {
   const c = $("#builder");
   if (!c) return;
   try {
-    builderRenderer ||= new Renderer(c);
+    builderRenderer ||= new Renderer(c, { maxPixelRatio: graphicsProfile.maxPixelRatio });
     const fit = fittedSpan(
       machine,
       c.clientWidth / Math.max(1, c.clientHeight),
@@ -679,6 +767,8 @@ function drawBuilder() {
     );
     builderRenderer.render(
       workshopScene(machine, {
+        reuse: true,
+        quality: graphicsProfile,
         hover: hover || (document.activeElement === c ? cursor : null),
         selected,
         rotation,
@@ -1243,6 +1333,7 @@ function arenaView() {
     mode: battleMode,
     swapSpawns: !!bountyContext && !!(seed & 1),
   });
+  lastArenaRender = 0;
   bindArena();
   drawThumbnails();
   drawArena();
@@ -1415,6 +1506,7 @@ function startBattle(replay = false) {
   running = true;
   paused = false;
   lastFrame = 0;
+  lastArenaRender = 0;
   accumulator = 0;
   lastLogCount = 0;
   $("#fight-overlay").hidden = true;
@@ -1479,7 +1571,14 @@ function frame(t) {
       lastAudio = t;
     }
   }
-  drawArena();
+  if (
+    battle.result ||
+    !lastArenaRender ||
+    t - lastArenaRender >= 1000 / graphicsProfile.renderHz
+  ) {
+    drawArena();
+    lastArenaRender = t;
+  }
   if (t - hudTime > 90) {
     updateHUD();
     hudTime = t;
@@ -1578,7 +1677,7 @@ function drawArena() {
   const canvas = $("#arena-canvas");
   if (!canvas || !battle) return;
   try {
-    arenaRenderer ||= new Renderer(canvas);
+    arenaRenderer ||= new Renderer(canvas, { maxPixelRatio: graphicsProfile.maxPixelRatio });
     const vehicles =
         fightCamera.follow === "you"
           ? [battle.vehicles[0]]
@@ -1630,13 +1729,20 @@ function drawArena() {
         }
       : { x: target[0], y: target[1], z: target[2], span };
     const c = fightCamera.current;
-    arenaRenderer.render(battleScene(battle, { inspect: inspectMode }), {
+    arenaRenderer.render(
+      battleScene(battle, {
+        inspect: inspectMode,
+        reuse: true,
+        quality: graphicsProfile,
+      }),
+      {
       target: [c.x, c.y, c.z],
       yaw: fightCamera.yaw,
       elevation: fightCamera.elevation,
       span: c.span / fightCamera.zoom,
       bg: [0.065, 0.084, 0.1, 1],
-    });
+      },
+    );
     drawDamageLabels();
   } catch (e) {
     renderError(canvas, e);
@@ -1890,7 +1996,7 @@ function scoutRival() {
       )}</div><div class="modal-footer"><button data-close>Close intelligence</button><button class="primary" id="scout-refit">Build a counter</button></div>`,
     () => {
       const canvas = $("#scout-canvas");
-      scoutRenderer = new Renderer(canvas);
+      scoutRenderer = new Renderer(canvas, { maxPixelRatio: graphicsProfile.maxPixelRatio });
       const draw = () => {
         if (!scoutRenderer || !canvas.isConnected) return;
         const fit = fittedSpan(
@@ -1900,7 +2006,12 @@ function scoutRival() {
           camera.elevation,
         );
         scoutRenderer.render(
-          workshopScene(rival, { grid: false, ghost: false }),
+          workshopScene(rival, {
+            grid: false,
+            ghost: false,
+            reuse: true,
+            quality: graphicsProfile,
+          }),
           {
             target: [
               fit.center[0] + camera.panX,
@@ -2071,6 +2182,9 @@ function renderContractContext() {
           : "LOCAL SIMULATION · No entry charge or reward. Return to the bounty to enter an official trial."
         : "COUNTER WORKSHOP · Construction limits are locked to this bounty. Your engineering changes stay in your local draft.") +
     '</p></div><div class="bounty-actions"><button id="return-contract">← Bounty & official entry</button>' +
+    (!officialReceipt
+      ? '<button type="button" id="exit-bounty">× Exit to normal play</button>'
+      : "") +
     (bountyContext.attemptId && !officialReceipt && view === "workshop"
       ? '<button class="primary" id="deploy-official-counter">Deploy official counter</button>'
       : "") +
@@ -2088,6 +2202,7 @@ function renderContractContext() {
     officialReceipt && officialAttemptId
       ? bountyUI.attempt(officialAttemptId)
       : bountyUI.open(bountyContext.id);
+  $("#exit-bounty")?.addEventListener("click", leaveChallenge);
   if ($("#deploy-official-counter"))
     $("#deploy-official-counter").onclick = async (e) => {
       const button = e.currentTarget;

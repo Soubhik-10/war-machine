@@ -1,6 +1,6 @@
 # War Machines bounty escrow
 
-`contracts/src/WarMachineBountyEscrow.sol` is the source for **Bounty Escrow v2**, a standalone, non-upgradeable pathUSD escrow for paid War Machines bounties on Tempo mainnet. It is deployed and [source verified](https://contracts.tempo.xyz/verify-ui/jobs/c14fe4d2-651b-4adc-9670-19b5e726ffb8) at [`0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e`](https://explore.tempo.xyz/address/0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e).
+`contracts/src/WarMachineBountyEscrow.sol` and `contracts/src/WarMachineBountyEscrowV3.sol` are direct-wallet escrows. `contracts/src/WarMachineBountyEscrowV4.sol` is the non-upgradeable pathUSD escrow for native MPP agent create/entry calls.
 
 The retired v1 escrow remains immutable at [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494). Its historical record remains in [`contracts/deployments/tempo-mainnet.json`](../contracts/deployments/tempo-mainnet.json); do not send it new bounty funds.
 
@@ -35,7 +35,7 @@ The settings above were read from the deployed contract after verification. The 
 
 The on-chain contract cannot simulate the game. Settlement signers are an oracle for the off-chain deterministic replay. A quorum prevents one compromised signer from fabricating a result, but it does not make the oracle trustless. The complete replay must be published and its canonical hash must equal `resultHash` in the signed settlement. No administrator can reverse a settlement.
 
-MPP `tempo.session` is a different escrow: a payment channel between an agent and a service payee. It is appropriate for repeated paid agent/API requests but cannot conditionally route a bounty reward to a challenger. Keep MPP session channels separate from bounty reserves.
+V4's relayer methods are intentionally narrower than a general payment channel: the Worker verifies the MPP receipt, then submits the exact payer, terms, reward or entry supplied by the route. The contract never lets the relayer choose a different bounty recipient or settlement result. Direct wallet methods remain available for browser players.
 
 ## Contract lifecycle
 
@@ -79,7 +79,7 @@ Do not take a payment through the Site until all of these are true:
 1. Have an independent Solidity reviewer inspect the exact deployed bytecode and source.
 2. Rehearse with two independently controlled settlement keys, the pause guardian, expiry, cancellation, incorrect signatures, signer outage, wrong token, and wallet rejection.
 3. Replace the local manual signer process with a separately operated replay/attestation service. The retired custodial payout queue must remain disabled.
-4. Rehearse direct wallet calls for `approve`, `createBounty`, `enterBounty`, settlement, timeout forfeiture, cancellation and expiry. MPP charge receipts cannot substitute for an on-chain bounty deposit.
+4. Rehearse direct wallet calls for `approve`, `createBounty`, `enterBounty`, settlement, timeout forfeiture, cancellation and expiry. For V4, also rehearse exact MPP challenge/retry, relayer allowance, relay recovery and refund behavior.
 5. Display this contract address, token, gross reward, 2.5% fee, winner payout, entry amount, expiry, attempt deadline, signer quorum, result hash, and relevant events before every signing request.
 6. Test first with a deliberately low real-money cap and no fee sponsorship. Paid-entry prize rules, tax, sanctions, consumer protection, and payment-provider requirements still need an operator review.
 

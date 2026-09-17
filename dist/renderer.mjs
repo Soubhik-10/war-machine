@@ -201,3 +201,21 @@ export class Renderer{
  project(point){const p=this.params;if(!p)return null;const v=[point[0],point[1],point[2],1],q=[0,0,0,0];for(let r=0;r<4;r++)for(let k=0;k<4;k++)q[r]+=p.vp[k*4+r]*v[k];return {x:p.r.left+(q[0]/q[3]+1)*.5*p.r.width,y:p.r.top+(1-q[1]/q[3])*.5*p.r.height};}
  dispose(){const gl=this.gl;gl.deleteBuffer(this.buffer);gl.deleteBuffer(this.staticBuffer);gl.deleteProgram(this.program);}
 }
+
+// Lower tiers keep the silhouette, team color and readable weapon/core markers,
+// but avoid rebuilding every decorative sub-mesh on integrated hardware.
+Geometry.prototype.simpleModule=function(m,paint){
+ const oldMaterial=this.material;this.material=m.finish==='alloy'?1:0;const id=m.id,col=paint||'#5cbab4',accent=m.accent||'#dbc58b',light=m.glow||TEAL;
+ if(['wheel','winterwheel','dunewheel','track'].includes(id)){this.cylinder([0,.28,0],[0,.78,0],.4,RUBBER,8);this.box(0,.58,0,.76,.22,.76,col);}
+ else this.bevel(0,.62,0,.82,.54,.82,col);
+ if(id==='core'){this.box(0,1.05,0,.5,.16,.48,light,.7);this.box(0,1.23,0,.16,.06,.28,accent);}
+ else if(BY_ID[id]?.rate){this.cylinder([0,.86,0],[0,1.35,0],.13,accent,6,.25);this.box(0,1.13,-.22,.22,.14,.34,light,.7);}
+ else if(BY_ID[id]?.cat==='Weapons')this.box(0,1.04,-.38,.28,.18,.5,accent,.35);
+ else this.box(0,1.03,0,.25,.12,.25,light,.25);
+ this.material=oldMaterial;
+};
+const fullCachedModule=Geometry.prototype.cachedModule;
+Geometry.prototype.cachedModule=function(m,paint,phase=0){
+ if(this.detail&&this.detail!=='full'){this.simpleModule(m,paint);return;}
+ return fullCachedModule.call(this,m,paint,phase);
+};

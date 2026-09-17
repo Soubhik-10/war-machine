@@ -251,18 +251,33 @@ function canonicalBlueprint(input, locked) {
 
 export function runtimeConfig(env, origin) {
   if (env.WM_MODE !== "tempo-mainnet") return { mode: "demo", enabled: false };
-  // V3 holds the reward only. The entry is transferred directly to the bounty
-  // creator by the entrant's Tempo Wallet.
-  const escrow = "0xb14a3aA99C9349094612143089F55aE5372DeB24";
-  if (
-    String(env.WM_BOUNTY_ESCROW_ADDRESS || "").toLowerCase() !==
-    escrow.toLowerCase()
-  )
+  const v3Escrow = "0xb14a3aA99C9349094612143089F55aE5372DeB24",
+    escrowVersion = String(env.WM_BOUNTY_ESCROW_VERSION || "3"),
+    configuredEscrow = String(env.WM_BOUNTY_ESCROW_ADDRESS || "");
+  let escrow = v3Escrow;
+  if (escrowVersion === "3") {
+    if (configuredEscrow.toLowerCase() !== v3Escrow.toLowerCase())
+      return {
+        mode: "tempo-mainnet",
+        enabled: false,
+        reason:
+          "Set WM_BOUNTY_ESCROW_ADDRESS to the verified War Machines V3 escrow before enabling direct bounty transactions.",
+      };
+  } else if (escrowVersion === "4") {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(configuredEscrow))
+      return {
+        mode: "tempo-mainnet",
+        enabled: false,
+        reason:
+          "Set WM_BOUNTY_ESCROW_ADDRESS to the verified War Machines V4 escrow before enabling agent-paid bounty transactions.",
+      };
+    escrow = getAddress(configuredEscrow);
+  } else
     return {
       mode: "tempo-mainnet",
       enabled: false,
       reason:
-        "Set WM_BOUNTY_ESCROW_ADDRESS to the verified War Machines Tempo escrow before enabling direct bounty transactions.",
+        "WM_BOUNTY_ESCROW_VERSION must be 3 or 4.",
     };
   const settlementKey = String(env.WM_SETTLEMENT_PRIVATE_KEY || "");
   let automaticSettlementReady = false,
@@ -311,10 +326,46 @@ export function runtimeConfig(env, origin) {
     typeof env.MPP_SECRET_KEY === "string" &&
     new TextEncoder().encode(env.MPP_SECRET_KEY).length >= 32 &&
     mppPriceUnits !== null;
+  const relayerKey = String(env.WM_BOUNTY_RELAYER_PRIVATE_KEY || "");
+  let relayerAddress = null;
+  try {
+    if (/^0x[0-9a-fA-F]{64}$/.test(relayerKey))
+      relayerAddress = getAddress(privateKeyToAccount(relayerKey).address);
+  } catch {}
+  let configuredRelayer = null;
+  try {
+    if (/^0x[0-9a-fA-F]{40}$/.test(String(env.WM_BOUNTY_RELAYER_ADDRESS || "")))
+      configuredRelayer = getAddress(env.WM_BOUNTY_RELAYER_ADDRESS);
+  } catch {}
+  const relayerMatches =
+    relayerAddress !== null &&
+    configuredRelayer !== null &&
+    relayerAddress === configuredRelayer;
+  let bountyMppMaxUnits = null;
+  try {
+    bountyMppMaxUnits = pathUsdToUnits(
+      String(env.WM_AGENT_BOUNTY_MPP_MAX || "1.00"),
+      { allowZero: false, maxUnits: 1_000_000_000n },
+    );
+  } catch {}
+  const validMppSecret =
+    typeof env.MPP_SECRET_KEY === "string" &&
+    new TextEncoder().encode(env.MPP_SECRET_KEY).length >= 32;
+  const agentBountyMppEnabled =
+    escrowVersion === "4" &&
+    env.WM_AGENT_BOUNTY_MPP_ENABLED === "true" &&
+    relayerMatches &&
+    validMppSecret &&
+    bountyMppMaxUnits !== null;
+  const activeMppSecret =
+    validMppSecret && (agentMppEnabled || agentBountyMppEnabled)
+      ? env.MPP_SECRET_KEY
+      : null;
   return {
     mode: "tempo-mainnet",
     enabled: true,
     directEscrow: true,
+    escrowVersion,
     escrowAddress: getAddress(escrow),
     token: PATH_USD_TOKEN,
     chainId: TEMPO_MAINNET_CHAIN_ID,
@@ -324,7 +375,12 @@ export function runtimeConfig(env, origin) {
     agentMppEnabled,
     agentMppRecipient: agentMppEnabled ? normalizedMppRecipient : null,
     agentMppPriceUnits: mppPriceUnits,
-    mppSecret: agentMppEnabled ? env.MPP_SECRET_KEY : null,
+    mppSecret: activeMppSecret,
+    agentBountyMppEnabled,
+    agentBountyMppRecipient: agentBountyMppEnabled ? relayerAddress : null,
+    agentBountyMppMaxUnits: bountyMppMaxUnits,
+    relayerAddress: agentBountyMppEnabled ? relayerAddress : null,
+    relayerKey: agentBountyMppEnabled ? relayerKey : null,
     acceptingNewBounties: automaticSettlementReady,
     automaticSettlementReady,
     settlementReason,
@@ -337,7 +393,9 @@ function catalog(config) {
     acceptingNewBounties = paid && config.acceptingNewBounties;
   return {
     mode: "tempo-mainnet",
-    apiVersion: "3.2-direct-escrow",
+    apiVersion: config.agentBountyMppEnabled
+      ? "4.0-mpp-relayed-escrow"
+      : "3.2-direct-escrow",
     discovery: "/.well-known/war-machines.json",
     openapi: "/api/openapi.json",
     terrainInfo: Object.fromEntries(
@@ -371,8 +429,12 @@ function catalog(config) {
       "validate",
       ...(acceptingNewBounties
         ? [
-            "create and fund a bounty with Tempo Wallet",
-            "enter a bounty with Tempo Wallet",
+      config.agentBountyMppEnabled
+        ? "create and fund a bounty with a native MPP payment"
+        : "create and fund a bounty with Tempo Wallet",
+      config.agentBountyMppEnabled
+        ? "enter a bounty with a native MPP payment"
+        : "enter a bounty with Tempo Wallet",
           ]
         : ["inspect existing direct-escrow bounties"]),
     ],
@@ -389,19 +451,35 @@ function catalog(config) {
         }
       : "locked",
     mpp: {
-      enabled: !!config.agentMppEnabled,
+      enabled: !!(config.agentMppEnabled || config.agentBountyMppEnabled),
       method: "tempo",
       intent: "charge",
-      scope:
-        "A zero-value Tempo proof authenticates the wallet for autonomous agent operations; MPP agent simulations remain separately priced.",
-      ...(config.agentMppEnabled
+      scope: config.agentBountyMppEnabled
+        ? "Native MPP payments can fund and enter bounties through a bounded relayer; other agent operations use a zero-value Tempo proof."
+        : "A zero-value Tempo proof authenticates the wallet for autonomous agent operations; MPP agent simulations remain separately priced.",
+      ...(config.agentMppEnabled || config.agentBountyMppEnabled
         ? {
             routes: [
-              {
-                path: "/api/agent/practice",
-                price: unitsToPathUsd(config.agentMppPriceUnits),
-                recipient: config.agentMppRecipient,
-              },
+              ...(config.agentMppEnabled
+                ? [{
+                    path: "/api/agent/practice",
+                    price: unitsToPathUsd(config.agentMppPriceUnits),
+                    recipient: config.agentMppRecipient,
+                  }]
+                : []),
+              ...(config.agentBountyMppEnabled
+                ? [{
+                    path: "/api/bounties",
+                    method: "POST",
+                    price: "request.reward",
+                    recipient: config.agentBountyMppRecipient,
+                  }, {
+                    path: "/api/bounties/{id}/attempts",
+                    method: "POST",
+                    price: "request.entry",
+                    recipient: config.agentBountyMppRecipient,
+                  }]
+                : []),
             ],
             agentProof: {
               intent: "charge",
@@ -427,6 +505,7 @@ function catalog(config) {
     directEscrow: paid
       ? {
           enabled: true,
+          version: config.escrowVersion,
           acceptingNewBounties,
           settlement: acceptingNewBounties
             ? { ready: true }
@@ -480,7 +559,9 @@ function catalog(config) {
         "Missing the counter-build deadline is a loss. The entry was paid to the bounty creator when you entered; this one-trial bounty completes and its unused reward remains returnable only by its creator.",
       payments: paid
         ? acceptingNewBounties
-          ? "Direct Tempo mainnet pathUSD escrow. Agents may separately use MPP only for explicitly priced API work; MPP never funds or enters a bounty."
+          ? config.agentBountyMppEnabled
+            ? "Direct Tempo mainnet pathUSD escrow. Browser wallets may use exact direct calls; native MPP agent payments use the bounded V4 relayer path."
+            : "Direct Tempo mainnet pathUSD escrow. Agents may separately use MPP only for explicitly priced API work; MPP never funds or enters a bounty."
           : config.settlementReason
         : "Payments are unavailable until escrow configuration is complete. No synthetic credits are issued.",
     },
@@ -489,7 +570,7 @@ function catalog(config) {
 
 const discovery = (config) => ({
   name: "War Machines",
-  version: "3.2",
+  version: config.agentBountyMppEnabled ? "4.0" : "3.2",
   mode: "tempo-mainnet",
   description:
     "Engineer autonomous machines with your own code or model. Same deterministic game engine as browser players.",
@@ -517,18 +598,35 @@ const discovery = (config) => ({
         settlement: config.acceptingNewBounties
           ? { ready: true }
           : { ready: false, reason: config.settlementReason },
-        mpp: !!config.agentMppEnabled,
-        mppScope: config.agentMppEnabled
-          ? "Zero-value Tempo proof authorizes the wallet for autonomous REST and MCP bounty operations; MPP agent simulations are separately priced."
+        mpp: !!(config.agentMppEnabled || config.agentBountyMppEnabled),
+        mppScope: config.agentBountyMppEnabled
+          ? "Native MPP payments fund and enter bounties through the configured bounded relayer; zero-value proof remains available for later agent operations."
+          : config.agentMppEnabled
+            ? "Zero-value Tempo proof authorizes the wallet for autonomous REST and MCP bounty operations; MPP agent simulations are separately priced."
           : "MPP agent billing is not configured.",
-        ...(config.agentMppEnabled
+        ...(config.agentMppEnabled || config.agentBountyMppEnabled
           ? {
               mppRoutes: [
-                {
-                  path: "/api/agent/practice",
-                  price: unitsToPathUsd(config.agentMppPriceUnits),
-                  recipient: config.agentMppRecipient,
-                },
+                ...(config.agentMppEnabled
+                  ? [{
+                      path: "/api/agent/practice",
+                      price: unitsToPathUsd(config.agentMppPriceUnits),
+                      recipient: config.agentMppRecipient,
+                    }]
+                  : []),
+                ...(config.agentBountyMppEnabled
+                  ? [{
+                      path: "/api/bounties",
+                      method: "POST",
+                      price: "request.reward",
+                      recipient: config.agentBountyMppRecipient,
+                    }, {
+                      path: "/api/bounties/{id}/attempts",
+                      method: "POST",
+                      price: "request.entry",
+                      recipient: config.agentBountyMppRecipient,
+                    }]
+                  : []),
               ],
             }
           : {}),
@@ -598,7 +696,7 @@ const openapi = {
       post: {
         summary: "Stateless MCP Streamable HTTP endpoint",
         description:
-          "Connect an MCP client to this endpoint. Read and validation tools are public; bounty mutations accept the same zero-value Tempo MPP proof in Payment-Authorization as the REST API. MPP-priced agent simulations are separate from bounty entries. Returned direct escrow plans must be signed by the caller's own Tempo wallet/access key.",
+          "Connect an MCP client to this endpoint. Read and validation tools are public. On a V4 deployment, create and enter tools advertise native MPP charges and the MPP client retries the exact request to complete the relayed escrow action; otherwise the returned direct escrow plan must be signed by the caller's own Tempo wallet/access key.",
       },
     },
     "/rules": { get: {} },
@@ -608,7 +706,7 @@ const openapi = {
       get: {},
       post: {
         description:
-          "Prepares a direct createBounty funding plan. A wallet session or MPP zero-value Tempo proof may authorize this request; the returned approve plus createBounty calls must be signed by the same Tempo wallet.",
+          "On V4 deployments with native MPP enabled, this route returns a 402 challenge for the exact reward and then creates the bounty through the bounded relayer after the MPP client retries. Other deployments prepare a direct createBounty funding plan for the caller's Tempo wallet.",
         security: [{ bearerAuth: [] }, { mppProof: [] }],
       },
     },
@@ -621,7 +719,7 @@ const openapi = {
     "/bounties/{id}/attempts": {
       post: {
         description:
-          "Prepares direct enterBounty. A wallet session or MPP zero-value Tempo proof may authorize this request. Body: maxEntry and maxPlatformFeeBps only. The returned transaction must still be signed by the same Tempo wallet.",
+          "On V4 deployments with native MPP enabled, this route returns a 402 challenge for the exact entry and then enters through the bounded relayer after the MPP client retries. Other deployments prepare a direct enterBounty plan for the caller's Tempo wallet. Body: maxEntry, maxPlatformFeeBps, participantName and showAddress.",
         security: [{ bearerAuth: [] }, { mppProof: [] }],
       },
     },
@@ -2180,14 +2278,16 @@ async function accountForTempoAddress(db, address) {
   return accountId;
 }
 async function mppAgentAuth(db, config, request, scope, operation) {
+  const mppEnabled = config.agentMppEnabled || config.agentBountyMppEnabled,
+    recipient = config.agentMppRecipient || config.agentBountyMppRecipient;
   check(
-    config.agentMppEnabled,
-    "MPP agent access is not configured. Set the MPP recipient and secret first.",
+    mppEnabled && recipient,
+    "MPP agent access is not configured. Set the MPP relayer, recipient and secret first.",
     503,
   );
   const payment = await mppCharge(db, config, request, {
     amountUnits: 0n,
-    recipient: config.agentMppRecipient,
+    recipient,
     operation,
     description: "War Machines agent authorization",
     meta: {
@@ -2388,16 +2488,24 @@ async function reconcile(db, config) {
 }
 
 // Direct escrow adapter -----------------------------------------------------
-// The Worker only creates immutable game-term intents and checks receipts. It
-// never signs token transfers, receives funds or controls a payout key.
+// Direct mode only creates immutable game-term intents and checks receipts.
+// The optional V4 relayer below signs only its own precomputed forwarding and
+// refund transactions; it never receives a caller-supplied key or controls
+// settlement payouts.
 const TOKEN_ABI = parseAbi([
   "function balanceOf(address account) view returns (uint256)",
+]);
+const TOKEN_TRANSFER_ABI = parseAbi([
+  "function transfer(address to,uint256 amount) returns (bool)",
 ]);
 const ESCROW_ABI = parseAbi([
   "function approve(address spender,uint256 amount) returns (bool)",
   "function createBounty(bytes32 termsHash,uint128 reward,uint128 entry,uint64 expiresAt) returns (uint256)",
+  "function createBountyFor(address creator,bytes32 termsHash,uint128 reward,uint128 entry,uint64 expiresAt) returns (uint256)",
   "function enterBounty(uint256 bountyId)",
+  "function enterBountyFor(address challenger,uint256 bountyId)",
   "function cancelBounty(uint256 bountyId)",
+  "function cancelBountyFor(address creator,uint256 bountyId)",
   "function forfeitTimedOutAttempt(uint256 bountyId)",
   "function expireBounty(uint256 bountyId)",
   "function settleAttempt((uint256 bountyId,uint64 attemptNonce,uint8 outcome,bytes32 resultHash,uint64 validUntil) settlement,bytes[] signatures)",
@@ -2480,7 +2588,7 @@ const settlementMessage = (payload) => ({
 const settlementTypedData = (config, payload) => ({
   domain: {
     name: "War Machines Bounty Escrow",
-    version: "3",
+    version: config.escrowVersion === "4" ? "4" : "3",
     chainId: config.chainId,
     verifyingContract: config.escrowAddress,
   },
@@ -2591,6 +2699,720 @@ function eventLog(receiptValue, config, topic) {
   );
   return found;
 }
+
+// Native MPP bounty payments are received by a narrowly configured relayer,
+// then forwarded into the V4 escrow with the payer address carried as an
+// immutable contract argument. The private key never leaves the Worker and is
+// never accepted from a request.
+function agentRelayerAccount(config) {
+  check(
+    config.agentBountyMppEnabled &&
+      config.relayerKey &&
+      config.relayerAddress,
+    "Native MPP bounty payments are not configured.",
+    503,
+  );
+  let account;
+  try {
+    account = privateKeyToAccount(config.relayerKey);
+  } catch {
+    fail(503, "The native MPP bounty relayer key is invalid.");
+  }
+  check(
+    getAddress(account.address) === getAddress(config.relayerAddress),
+    "The native MPP bounty relayer address does not match its private key.",
+    503,
+  );
+  return account;
+}
+
+async function prepareAgentRelayerTransaction(config, { to, data, lane }) {
+  const account = agentRelayerAccount(config),
+    validBefore = Math.floor(now() / 1000) + 24 * 60 * 60,
+    nonceKey = BigInt("0x" + (await hex("v4-agent:" + lane)).slice(0, 48)),
+    wallet = createWalletClient({
+      account,
+      chain: tempo,
+      transport: http(config.rpcUrl, { timeout: 15_000, retryCount: 0 }),
+    }),
+    prepared = await wallet.prepareTransactionRequest({
+      account,
+      to,
+      data,
+      value: 0n,
+      nonce: 0,
+      nonceKey,
+      feeToken: config.token,
+      validBefore,
+    }),
+    raw = await wallet.signTransaction({
+      chainId: config.chainId,
+      type: "tempo",
+      to,
+      data,
+      value: 0n,
+      nonce: 0,
+      nonceKey,
+      feeToken: prepared.feeToken,
+      validBefore,
+      gas: prepared.gas,
+      maxFeePerGas: prepared.maxFeePerGas,
+      maxPriorityFeePerGas: prepared.maxPriorityFeePerGas,
+    });
+  return { raw, hash: keccak256(raw), validBefore };
+}
+
+async function broadcastAgentRelayerTransaction(config, raw) {
+  try {
+    await createClient({
+      account: agentRelayerAccount(config),
+      feeToken: config.token,
+      transport: http(config.rpcUrl, { timeout: 15_000, retryCount: 0 }),
+    }).sendRawTransaction({ serializedTransaction: raw });
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (!/already known|already imported|nonce/i.test(message)) throw error;
+  }
+}
+
+const agentBountyStateKey = (operation) => "mpp-bounty-state:" + operation;
+const agentBountyRefundKey = (operation) => "mpp-bounty-refund:" + operation;
+
+async function readAgentBountyState(db, operation, digest) {
+  const row = await db
+    .prepare("SELECT value FROM payment_kv WHERE key=?")
+    .bind(agentBountyStateKey(operation))
+    .first();
+  if (!row) return null;
+  const state = parse(row.value);
+  check(
+    state.digest === digest,
+    "That idempotency key was used for a different request.",
+    409,
+  );
+  return state;
+}
+
+async function writeAgentBountyState(db, operation, value) {
+  await db
+    .prepare(
+      "INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    )
+    .bind(agentBountyStateKey(operation), json(value))
+    .run();
+}
+
+// If a request is rejected after its MPP payment has settled (for example the
+// bounty became busy while the payer was satisfying the challenge), return
+// the exact amount from the relayer and persist the raw refund transaction so
+// a retry can resume instead of charging again.
+async function refundAgentBountyPayment(
+  db,
+  config,
+  operation,
+  source,
+  amountUnits,
+  reason,
+  status = 409,
+) {
+  const key = agentBountyRefundKey(operation),
+    existingRow = await db
+      .prepare("SELECT value FROM payment_kv WHERE key=?")
+      .bind(key)
+      .first();
+  let saved = existingRow ? parse(existingRow.value) : null;
+  if (saved) {
+    check(
+      saved.source.toLowerCase() === source.toLowerCase() &&
+        BigInt(saved.amountUnits) === BigInt(amountUnits),
+      "This paid request is bound to a different refund.",
+      409,
+    );
+  } else {
+    saved = {
+      operation,
+      source: getAddress(source),
+      amountUnits: String(amountUnits),
+      reason,
+      status: "preparing",
+    };
+  }
+  if (saved.status !== "refunded") {
+    if (!saved.rawTransaction || !validHash(saved.transactionHash)) {
+      const data = encodeFunctionData({
+        abi: TOKEN_TRANSFER_ABI,
+        functionName: "transfer",
+        args: [getAddress(saved.source), BigInt(saved.amountUnits)],
+      });
+      const prepared = await prepareAgentRelayerTransaction(config, {
+        to: config.token,
+        data,
+        lane: "refund:" + operation,
+      });
+      saved = {
+        ...saved,
+        status: "prepared",
+        rawTransaction: prepared.raw,
+        transactionHash: prepared.hash,
+        validBefore: prepared.validBefore,
+      };
+      await db
+        .prepare(
+          "INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        )
+        .bind(key, json(saved))
+        .run();
+    }
+    await broadcastAgentRelayerTransaction(config, saved.rawTransaction);
+    try {
+      await receipt(config, saved.transactionHash);
+    } catch (error) {
+      fail(
+        503,
+        "The paid request was rejected, but its refund is still confirming. Retry the same request; do not send a new payment.",
+      );
+    }
+    saved = { ...saved, status: "refunded", refundedAt: now() };
+    await db
+      .prepare(
+        "INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+      )
+      .bind(key, json(saved))
+      .run();
+  }
+  fail(status, reason + " The MPP payment was returned to the payer.");
+}
+
+function mppReceiptHeader(payment) {
+  return payment.withReceipt(new Response(null, { status: 204 })).headers.get(
+    "payment-receipt",
+  );
+}
+
+async function agentBountyPayment(
+  db,
+  config,
+  request,
+  operation,
+  amountUnits,
+  description,
+  meta,
+) {
+  const payment = await mppCharge(db, config, request, {
+    amountUnits,
+    recipient: config.agentBountyMppRecipient,
+    operation,
+    description,
+    meta,
+    expires: now() + 10 * 60 * 1000,
+  });
+  if (!payment.paid) return payment;
+  return {
+    paid: true,
+    source: check(
+      payment.source,
+      "MPP credential did not identify a Tempo wallet.",
+      401,
+    ),
+    receipt: mppReceiptHeader(payment),
+  };
+}
+
+async function mppCreateBounty(db, config, request, body, key) {
+  check(config.acceptingNewBounties, config.settlementReason, 503);
+  fields(body, [
+    "title",
+    "blueprint",
+    "entry",
+    "reward",
+    "hours",
+    "listed",
+    "maxPlatformFeeBps",
+  ]);
+  validKey(key);
+  check(
+    body.maxPlatformFeeBps === PLATFORM_FEE_BPS,
+    "Acknowledge the 2.5% winning-reward platform fee with maxPlatformFeeBps: 250.",
+    409,
+  );
+  integer(body.hours, 0, 8760, "Duration");
+  const listed = body.listed !== false,
+    entry = boundedUnits(body.entry),
+    reward = boundedUnits(body.reward),
+    blueprint = canonicalBlueprint(body.blueprint),
+    title = text(body.title, 70, "bounty title");
+  check(
+    reward <= config.agentBountyMppMaxUnits,
+    `Reward exceeds the native MPP per-request limit of ${unitsToPathUsd(config.agentBountyMppMaxUnits)} pathUSD.`,
+    409,
+  );
+  const operation = "agent-bounty-create:" + key,
+    digest = await hex(json(body));
+  let state = await readAgentBountyState(db, operation, digest);
+  if (state?.phase === "accepted")
+    return {
+      value: await bountyView(
+        db,
+        await bountyRow(db, state.bounty),
+        state.account,
+        true,
+      ),
+      status: 200,
+      receipt: state.receipt,
+      escrowHash: state.escrowHash,
+    };
+  check(
+    state?.phase !== "refunded",
+    "This paid bounty request was refunded. Use a new idempotency key.",
+    409,
+  );
+  if (!state) {
+    state = {
+      phase: "quoted",
+      operation,
+      digest,
+      kind: "create",
+      createdAt: now(),
+      bounty: id(),
+    };
+    await writeAgentBountyState(db, operation, state);
+  }
+  const payment = await agentBountyPayment(
+    db,
+    config,
+    request,
+    operation,
+    reward,
+    "War Machines bounty reward",
+    { kind: "bounty-create", engineHash: CLIENT_ENGINE_HASH },
+  );
+  if (!payment.paid) return payment;
+  const source = payment.source;
+  if (state.source)
+    check(
+      state.source.toLowerCase() === source.toLowerCase(),
+      "This idempotency key is already bound to a different Tempo wallet.",
+      409,
+    );
+  const account = await accountForTempoAddress(db, source),
+    created = state.createdAt || now(),
+    expiresAt = body.hours
+      ? Math.floor((created + body.hours * 3600000) / 1000)
+      : 0,
+    expires = expiresAt ? expiresAt * 1000 : null,
+    terms = {
+      version: "war-machines-direct-escrow-v4",
+      engineHash: CLIENT_ENGINE_HASH,
+      creator: source,
+      title,
+      defender: blueprint,
+      entry: entry.toString(),
+      reward: reward.toString(),
+      expiresAt,
+      listed,
+      platformFeeBps: PLATFORM_FEE_BPS,
+    },
+    termsHash = "0x" + (await hex(json(terms))),
+    bounty = state.bounty || id();
+  let hold = await db
+    .prepare(
+      "SELECT * FROM payment_holds WHERE account=? AND request_key=? AND purpose='mpp-create' ORDER BY created DESC LIMIT 1",
+    )
+    .bind(account, key)
+    .first();
+  if (!hold) {
+    await db
+      .prepare(
+        "INSERT INTO payment_holds (id,account,bounty,request_key,digest,body,amount_units,purpose,expires,status,provider_ref,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(
+        id(),
+        account,
+        bounty,
+        key,
+        digest,
+        json({
+          title,
+          blueprint,
+          entry: entry.toString(),
+          reward: reward.toString(),
+          listed,
+          expires,
+          expiresAt,
+          termsHash,
+          creator: source,
+          mppReceipt: payment.receipt,
+        }),
+        reward.toString(),
+        "mpp-create",
+        created + 24 * 60 * 60 * 1000,
+        "awaiting-relay",
+        null,
+        created,
+        created,
+      )
+      .run();
+    hold = await db
+      .prepare(
+        "SELECT * FROM payment_holds WHERE account=? AND request_key=? AND purpose='mpp-create' ORDER BY created DESC LIMIT 1",
+      )
+      .bind(account, key)
+      .first();
+  }
+  check(hold, "Could not persist the paid bounty request.", 503);
+  check(
+    hold.digest === digest,
+    "This idempotency key is already bound to a different bounty request.",
+    409,
+  );
+  state = {
+    ...state,
+    phase: hold.status === "accepted" ? "accepted" : "paid",
+    source,
+    account,
+    bounty,
+    hold: hold.id,
+    receipt: payment.receipt,
+  };
+  if (hold.status === "accepted") {
+    await writeAgentBountyState(db, operation, state);
+    return {
+      value: await bountyView(db, await bountyRow(db, bounty), account, true),
+      status: 200,
+      receipt: payment.receipt,
+      escrowHash: parse(hold.body).relayTransactionHash || null,
+    };
+  }
+  await writeAgentBountyState(db, operation, state);
+  const saved = parse(hold.body);
+  let raw = typeof saved.rawTransaction === "string" ? saved.rawTransaction : null,
+    escrowHash = validHash(hold.provider_ref) ? hold.provider_ref : null,
+    validBefore = Number(saved.validBefore || 0);
+  if (!raw || !escrowHash) {
+    const data = encodeFunctionData({
+      abi: ESCROW_ABI,
+      functionName: "createBountyFor",
+      args: [
+        getAddress(source),
+        saved.termsHash,
+        BigInt(saved.reward),
+        BigInt(saved.entry),
+        BigInt(saved.expiresAt),
+      ],
+    });
+    const prepared = await prepareAgentRelayerTransaction(config, {
+      to: config.escrowAddress,
+      data,
+      lane: operation,
+    });
+    raw = prepared.raw;
+    escrowHash = prepared.hash;
+    validBefore = prepared.validBefore;
+    const stored = await db
+      .prepare(
+        "UPDATE payment_holds SET body=?,provider_ref=?,status='relay-prepared',updated=? WHERE id=? AND status IN ('awaiting-relay','relay-prepared')",
+      )
+      .bind(
+        json({ ...saved, rawTransaction: raw, validBefore }),
+        escrowHash,
+        now(),
+        hold.id,
+      )
+      .run();
+    check(
+      stored.meta.changes === 1,
+      "This paid bounty request is being recovered by another retry.",
+      409,
+    );
+  }
+  await broadcastAgentRelayerTransaction(config, raw);
+  let receiptValue;
+  try {
+    receiptValue = await receipt(config, escrowHash);
+  } catch (error) {
+    if (/reverted|no bounty funds were accepted/i.test(String(error?.message || error)))
+      await refundAgentBountyPayment(db, config, operation, source, reward, "The escrow rejected the bounty terms.");
+    throw error;
+  }
+  const log = eventLog(receiptValue, config, ESCROW_EVENTS.created);
+  check(log.topics?.length === 3, "Escrow create event is malformed.", 409);
+  check(
+    topicAddress(log.topics[2]) === getAddress(source),
+    "The relayed creating wallet does not match the MPP payer.",
+    409,
+  );
+  check(
+    word(log.data, 0) === reward &&
+      word(log.data, 1) === entry &&
+      word(log.data, 2) === BigInt(saved.expiresAt) &&
+      bytesWord(log.data, 3).toLowerCase() === saved.termsHash.toLowerCase(),
+    "Escrow create event does not match the paid bounty terms.",
+    409,
+  );
+  const escrowBountyId = BigInt(log.topics[1]).toString();
+  const existing = await db
+    .prepare("SELECT * FROM bounties WHERE id=?")
+    .bind(bounty)
+    .first();
+  if (!existing) {
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,expires,active_attempt,winner,created,updated,entry_units,reward_units,reserve_units,platform_fee_bps,fee_policy_version,platform_recipient,escrow_bounty_id,terms_hash,escrow_create_tx) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .bind(
+          bounty,
+          account,
+          saved.title,
+          json(saved.blueprint),
+          0,
+          0,
+          "open",
+          saved.listed ? 1 : 0,
+          saved.expires,
+          null,
+          null,
+          now(),
+          now(),
+          saved.entry,
+          saved.reward,
+          saved.reward,
+          PLATFORM_FEE_BPS,
+          "pathusd-direct-escrow-v4",
+          PLATFORM_FEE_RECIPIENT,
+          escrowBountyId,
+          saved.termsHash,
+          escrowHash,
+        ),
+      db
+        .prepare(
+          "UPDATE payment_holds SET status='accepted',provider_ref=?,body=?,updated=? WHERE id=? AND status IN ('awaiting-relay','relay-prepared')",
+        )
+        .bind(
+          escrowHash,
+          json({ ...saved, rawTransaction: raw, validBefore, relayTransactionHash: escrowHash }),
+          now(),
+          hold.id,
+        ),
+      db
+        .prepare(
+          "INSERT INTO idempotency (account,key,kind,digest,ref,created) VALUES (?,?,?,?,?,?)",
+        )
+        .bind(account, key, "create", digest, bounty, now()),
+    ]);
+  }
+  await writeAgentBountyState(db, operation, { ...state, phase: "accepted", escrowHash });
+  return {
+    value: await bountyView(db, await bountyRow(db, bounty), account, true),
+    status: 201,
+    receipt: payment.receipt,
+    escrowHash,
+  };
+}
+
+async function mppEnterBounty(db, config, request, bountyId, body, key) {
+  check(config.acceptingNewBounties, config.settlementReason, 503);
+  fields(body, ["maxEntry", "maxPlatformFeeBps", "participantName", "showAddress"]);
+  validKey(key);
+  const identity = participantIdentity(body),
+    initialRow = await bountyRow(db, bountyId);
+  check(initialRow.status === "open", "This bounty is busy or closed. No payment was requested.", 409);
+  check(initialRow.escrow_bounty_id, "This legacy bounty is not backed by the direct escrow.", 409);
+  check(!initialRow.expires || initialRow.expires > now(), "This bounty has expired.", 409);
+  const entry = BigInt(initialRow.entry_units),
+    maximum = boundedUnits(body.maxEntry);
+  check(maximum >= entry, "Entry exceeds your quoted maximum.", 409);
+  check(
+    body.maxPlatformFeeBps >= initialRow.platform_fee_bps &&
+      body.maxPlatformFeeBps <= 10000,
+    "Platform fee exceeds your accepted maximum.",
+    409,
+  );
+  const operation = "agent-bounty-entry:" + bountyId + ":" + key,
+    digest = await hex(json(body));
+  let state = await readAgentBountyState(db, operation, digest);
+  if (state?.phase === "accepted")
+    return {
+      value: await attemptView(db, state.attempt, state.account),
+      status: 200,
+      receipt: state.receipt,
+      escrowHash: state.escrowHash,
+    };
+  check(
+    state?.phase !== "refunded",
+    "This paid entry request was refunded. Use a new idempotency key.",
+    409,
+  );
+  if (!state) {
+    state = { phase: "quoted", operation, digest, kind: "entry", created: now() };
+    await writeAgentBountyState(db, operation, state);
+  }
+  const payment = await agentBountyPayment(
+    db,
+    config,
+    request,
+    operation,
+    entry,
+    "War Machines bounty entry",
+    { kind: "bounty-entry", bounty: bountyId, engineHash: CLIENT_ENGINE_HASH },
+  );
+  if (!payment.paid) return payment;
+  const source = payment.source,
+    row = await bountyRow(db, bountyId),
+    account = await accountForTempoAddress(db, source);
+  if (source.toLowerCase() === (await payoutAddress(db, row.owner)).toLowerCase())
+    return refundAgentBountyPayment(db, config, operation, source, entry, "You cannot enter your own bounty.");
+  if (row.status !== "open" || (row.expires && row.expires <= now()))
+    return refundAgentBountyPayment(db, config, operation, source, entry, "This bounty became unavailable before the entry was relayed.");
+  let hold = await db
+    .prepare(
+      "SELECT * FROM payment_holds WHERE account=? AND bounty=? AND request_key=? AND purpose='mpp-entry' ORDER BY created DESC LIMIT 1",
+    )
+    .bind(account, bountyId, key)
+    .first();
+  if (!hold) {
+    const created = now();
+    await db
+      .prepare(
+        "INSERT INTO payment_holds (id,account,bounty,request_key,digest,body,amount_units,purpose,expires,status,provider_ref,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(
+        id(),
+        account,
+        bountyId,
+        key,
+        digest,
+        json({
+          escrowBountyId: row.escrow_bounty_id,
+          participantName: identity.participantName,
+          showAddress: identity.showAddress,
+          source,
+          mppReceipt: payment.receipt,
+        }),
+        entry.toString(),
+        "mpp-entry",
+        created + 24 * 60 * 60 * 1000,
+        "awaiting-relay",
+        null,
+        created,
+        created,
+      )
+      .run();
+    hold = await db
+      .prepare(
+        "SELECT * FROM payment_holds WHERE account=? AND bounty=? AND request_key=? AND purpose='mpp-entry' ORDER BY created DESC LIMIT 1",
+      )
+      .bind(account, bountyId, key)
+      .first();
+  }
+  check(hold, "Could not persist the paid entry request.", 503);
+  check(
+    hold.digest === digest,
+    "This idempotency key is already bound to a different entry request.",
+    409,
+  );
+  state = {
+    ...state,
+    phase: hold.status === "accepted" ? "accepted" : "paid",
+    source,
+    account,
+    bounty: bountyId,
+    hold: hold.id,
+    receipt: payment.receipt,
+  };
+  if (hold.status === "accepted") {
+    const saved = parse(hold.body);
+    await writeAgentBountyState(db, operation, state);
+    return {
+      value: await attemptView(db, saved.attempt || hold.provider_ref, account),
+      status: 200,
+      receipt: payment.receipt,
+      escrowHash: saved.relayTransactionHash || null,
+    };
+  }
+  await writeAgentBountyState(db, operation, state);
+  const saved = parse(hold.body);
+  let raw = typeof saved.rawTransaction === "string" ? saved.rawTransaction : null,
+    escrowHash = validHash(hold.provider_ref) ? hold.provider_ref : null,
+    validBefore = Number(saved.validBefore || 0);
+  if (!raw || !escrowHash) {
+    const data = encodeFunctionData({
+      abi: ESCROW_ABI,
+      functionName: "enterBountyFor",
+      args: [getAddress(source), BigInt(saved.escrowBountyId)],
+    });
+    const prepared = await prepareAgentRelayerTransaction(config, {
+      to: config.escrowAddress,
+      data,
+      lane: operation,
+    });
+    raw = prepared.raw;
+    escrowHash = prepared.hash;
+    validBefore = prepared.validBefore;
+    const stored = await db
+      .prepare(
+        "UPDATE payment_holds SET body=?,provider_ref=?,status='relay-prepared',updated=? WHERE id=? AND status IN ('awaiting-relay','relay-prepared')",
+      )
+      .bind(json({ ...saved, rawTransaction: raw, validBefore }), escrowHash, now(), hold.id)
+      .run();
+    check(stored.meta.changes === 1, "This paid entry request is being recovered by another retry.", 409);
+  }
+  await broadcastAgentRelayerTransaction(config, raw);
+  let receiptValue;
+  try {
+    receiptValue = await receipt(config, escrowHash);
+  } catch (error) {
+    if (/reverted|no bounty funds were accepted/i.test(String(error?.message || error)))
+      await refundAgentBountyPayment(db, config, operation, source, entry, "The escrow rejected the entry.");
+    throw error;
+  }
+  const log = eventLog(receiptValue, config, ESCROW_EVENTS.entered);
+  check(log.topics?.length === 4, "Escrow entry event is malformed.", 409);
+  check(BigInt(log.topics[1]).toString() === row.escrow_bounty_id, "The relayed entry targets a different bounty.", 409);
+  check(topicAddress(log.topics[3]) === getAddress(source), "The relayed entering wallet does not match the MPP payer.", 409);
+  const nonce = word(log.topics[2]).toString(),
+    deadline = word(log.data, 0),
+    seedBytes = new Uint32Array(1);
+  crypto.getRandomValues(seedBytes);
+  const attempt = id(),
+    updated = now(),
+    requestedSeconds = requestedBuildSeconds(parse(row.blueprint)),
+    escrowDeadline = Number(deadline) * 1000,
+    buildDeadline = Math.min(updated + requestedSeconds * 1000, escrowDeadline - SETTLEMENT_RESERVE_SECONDS * 1000);
+  if (buildDeadline < updated + 150 * 1000)
+    return refundAgentBountyPayment(
+      db,
+      config,
+      operation,
+      source,
+      entry,
+      "The escrow confirmation left too little build time.",
+    );
+  await db.batch([
+    db
+      .prepare(
+        "INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,error,created,updated,escrow_entry_tx,settlement_payload,build_deadline,build_requested_seconds,participant_name,show_address) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(attempt, row.id, account, json(null), seedBytes[0], "engineering", null, null, updated, updated, escrowHash, null, buildDeadline, requestedSeconds, saved.participantName, saved.showAddress ? 1 : 0),
+    db
+      .prepare(
+        "UPDATE bounties SET status='busy',active_attempt=?,escrow_attempt_nonce=?,escrow_attempt_deadline=?,updated=? WHERE id=? AND status='open'",
+      )
+      .bind(attempt, Number(nonce), Number(deadline) * 1000, updated, row.id),
+    db
+      .prepare(
+        "UPDATE payment_holds SET status='accepted',provider_ref=?,body=?,updated=? WHERE id=? AND status IN ('awaiting-relay','relay-prepared')",
+      )
+      .bind(attempt, json({ ...saved, rawTransaction: raw, validBefore, relayTransactionHash: escrowHash, attempt }), updated, hold.id),
+    db
+      .prepare(
+        "INSERT INTO idempotency (account,key,kind,digest,ref,created) VALUES (?,?,?,?,?,?)",
+      )
+      .bind(account, key, "enter:" + row.id, digest, attempt, updated),
+  ]);
+  await writeAgentBountyState(db, operation, { ...state, phase: "accepted", attempt, escrowHash });
+  return { value: await attemptView(db, attempt, account), status: 202, receipt: payment.receipt, escrowHash };
+}
 const MAX_ESCROW_TOKEN_UNITS = 2n ** 256n - 1n;
 function boundedUnits(value, allowZero = false) {
   try {
@@ -2668,7 +3490,7 @@ async function directCreateIntent(db, auth, body, key, config) {
       : 0,
     expires = expiresAt ? expiresAt * 1000 : null,
     terms = {
-      version: "war-machines-direct-escrow-v3",
+      version: "war-machines-direct-escrow-v" + config.escrowVersion,
       engineHash: CLIENT_ENGINE_HASH,
       creator: accountAddress,
       title,
@@ -2944,7 +3766,7 @@ async function confirmDirectIntent(db, auth, intentId, hash, config) {
           saved.reward,
           saved.reward,
           PLATFORM_FEE_BPS,
-          "pathusd-direct-escrow-v3",
+          "pathusd-direct-escrow-v" + config.escrowVersion,
           PLATFORM_FEE_RECIPIENT,
           escrowBountyId,
           saved.termsHash,
@@ -4306,7 +5128,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         mode: "tempo-mainnet",
         paymentsEnabled: config.enabled,
         directEscrow: !!config.directEscrow,
-        mppAgentApi: !!config.agentMppEnabled,
+        mppAgentApi: !!(config.agentMppEnabled || config.agentBountyMppEnabled),
         activation: config.enabled
           ? config.acceptingNewBounties
             ? "ready"
@@ -4685,8 +5507,16 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       );
     }
     if (path === "/api/bounties" && method === "POST") {
-      const key = request.headers.get("idempotency-key"),
-        gate = await ownerOrMppAgent(
+      const key = request.headers.get("idempotency-key");
+      if (config.agentBountyMppEnabled && !auth) {
+        const result = await mppCreateBounty(db, config, request, body, key);
+        if (result.response) return result.response;
+        return response(result.value, result.status, {
+          ...(result.receipt ? { "payment-receipt": result.receipt } : {}),
+          ...(result.escrowHash ? { "x-escrow-transaction": result.escrowHash } : {}),
+        });
+      }
+      const gate = await ownerOrMppAgent(
           db,
           config,
           request,
@@ -4842,8 +5672,23 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
           : response(result, 202, gate.receipt ? { "payment-receipt": gate.receipt } : {});
       }
       if (action === "attempts" && method === "POST") {
-        const key = request.headers.get("idempotency-key"),
-          gate = await ownerOrMppAgent(
+        const key = request.headers.get("idempotency-key");
+        if (config.agentBountyMppEnabled && !auth) {
+          const result = await mppEnterBounty(
+            db,
+            config,
+            request,
+            bountyId,
+            body,
+            key,
+          );
+          if (result.response) return result.response;
+          return response(result.value, result.status, {
+            ...(result.receipt ? { "payment-receipt": result.receipt } : {}),
+            ...(result.escrowHash ? { "x-escrow-transaction": result.escrowHash } : {}),
+          });
+        }
+        const gate = await ownerOrMppAgent(
             db,
             config,
             request,
