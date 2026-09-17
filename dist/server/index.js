@@ -6089,7 +6089,25 @@ main{max-width:1500px;padding:34px clamp(18px,4vw,64px) 54px}
 @media(max-width:1050px){.contract-hero{gap:28px;padding:30px}.contract-detail{grid-template-columns:1fr 1fr}.credit-summary{padding-left:25px}.contract-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){main{padding:24px 16px 42px}.page-heading{align-items:flex-start;flex-direction:column;gap:15px}.page-heading h1{font-size:34px}.heading-actions{width:100%;justify-content:flex-start}.heading-actions button{flex:1}.contract-hero{grid-template-columns:1fr;padding:25px 22px;gap:24px}.contract-hero h2{font-size:34px}.credit-summary{padding:22px 0 0;border-left:0;border-top-color:#365466}.contract-detail{grid-template-columns:1fr}.contract-terms{padding:24px 21px}.contract-grid{grid-template-columns:1fr}.contract-preview{height:210px}.bounty-loading{min-height:360px;padding:30px 18px}.contract-economy{gap:12px}.contract-economy b{font-size:30px}}
 @media(prefers-reduced-motion:reduce){.bounty-loading-grid i::after{animation:none}.contract-card{transition:none}}
-`,"text/css; charset=utf-8","29fa02f14ab87abb"],"/portal.mjs":[`import {PARTS,ARENAS,PRESETS,clone,packChallenge,stats} from './data.mjs';
+
+/* Bounty detail sizing: keep the two panels aligned and readable on desktop. */
+.contract-detail{align-items:stretch}
+.defender-card{align-self:stretch;display:flex;flex-direction:column}
+.defender-card>canvas{height:clamp(380px,31vw,500px);flex:0 0 auto}
+.defender-card>.sealed-defender{min-height:clamp(380px,31vw,500px);flex:0 0 auto}
+.defender-caption{padding:24px 28px 18px}
+.defender-caption h2{font-size:clamp(30px,2.2vw,38px);line-height:1.05}
+.defender-caption p{font-size:14px;line-height:1.65}
+.defender-card .bounty-actions{margin-top:auto;padding:0 28px 28px;gap:10px}
+.defender-card .bounty-actions button{min-height:44px;padding:10px 15px}
+.contract-terms{padding:34px 36px}
+.contract-terms>h2{font-size:clamp(31px,2.2vw,38px)}
+.contract-economy{gap:30px;padding:24px 0}
+.contract-economy b{font-size:clamp(36px,2.5vw,44px)}
+.contract-rule p,.contract-terms>.hint{font-size:14px;line-height:1.7}
+@media(max-width:900px){.contract-detail{grid-template-columns:1fr}}
+@media(max-width:760px){.defender-card>canvas,.defender-card>.sealed-defender{height:320px;min-height:320px}.defender-caption{padding:20px 22px 16px}.defender-card .bounty-actions{padding:0 22px 22px}.contract-terms{padding:26px 22px}.contract-economy{gap:14px}.contract-economy b{font-size:31px}.contract-rule p,.contract-terms>.hint{font-size:13px}}
+`,"text/css; charset=utf-8","a6f1bebcb6fc0b1f"],"/portal.mjs":[`import {PARTS,ARENAS,PRESETS,clone,packChallenge,stats} from './data.mjs';
 import {Renderer,Geometry} from './renderer.mjs';
 import {fittedSpan} from './camera.mjs';
 import {installAgentActivity} from './activity.mjs';
