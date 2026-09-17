@@ -2448,11 +2448,8 @@ const validSignature = (value) =>
   /^0x[0-9a-fA-F]{130}$/.test(value) &&
   ["1b", "1c"].includes(value.slice(-2).toLowerCase()) &&
   BigInt("0x" + value.slice(66, 130)) <= SECP256K1N_HALF;
-const directPlan = (config, call, approvalUnits = 0n) => ({
-  chainId: config.chainId,
-  token: config.token,
-  escrow: config.escrowAddress,
-  approval:
+const directPlan = (config, call, approvalUnits = 0n) => {
+  const approval =
     approvalUnits > 0n
       ? {
           to: config.token,
@@ -2463,9 +2460,20 @@ const directPlan = (config, call, approvalUnits = 0n) => ({
           }),
           amount: approvalUnits.toString(),
         }
-      : null,
-  call: { to: config.escrowAddress, data: call },
-});
+      : null;
+  const escrowCall = { to: config.escrowAddress, data: call };
+  return {
+    chainId: config.chainId,
+    token: config.token,
+    escrow: config.escrowAddress,
+    approval,
+    call: escrowCall,
+    // Tempo executes `calls` atomically, so an approval cannot be mined
+    // without the matching escrow action. This is the agent-facing form;
+    // approval/call remain for older browser clients.
+    calls: approval ? [approval, escrowCall] : [escrowCall],
+  };
+};
 const settlementMessage = (payload) => ({
   bountyId: BigInt(payload.bountyId),
   attemptNonce: BigInt(payload.attemptNonce),
@@ -4259,7 +4267,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     ctx.waitUntil(runAutomaticSettlement(env));
   if (path === "/.well-known/war-machines.json" && request.method === "GET")
     return response(discovery(config));
-  if (path === "/mcp")
+  if (path === "/mcp" || path === "/mcp/")
     return handleMcpRequest(request, (subrequest) =>
       mainnetFetch(subrequest, env, ctx, serveStaticAsset),
     );

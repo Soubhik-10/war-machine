@@ -75,7 +75,7 @@ const TOOLS = [
   ),
   tool(
     "war_machines_create_bounty",
-    "Prepare a direct Tempo createBounty escrow plan. MPP authorizes the wallet; the agent signs the returned approval and call.",
+    "Prepare a direct Tempo createBounty escrow plan. Submit its exact atomic calls through the caller's Tempo wallet; MPP does not replace wallet signing.",
     {
       title: string("Bounty title."),
       blueprint: object("Packed defender blueprint."),
@@ -98,7 +98,7 @@ const TOOLS = [
   ),
   tool(
     "war_machines_enter_bounty",
-    "Prepare a direct Tempo enterBounty escrow plan. The confirmed response reveals the defender and build deadline.",
+    "Prepare a direct Tempo enterBounty escrow plan. Submit its exact atomic approval plus enter call through the caller's Tempo wallet; the confirmed response reveals the defender and build deadline.",
     {
       bountyId: string("Bounty UUID."),
       maxEntry: string("Maximum entry price accepted in pathUSD."),
@@ -173,7 +173,7 @@ const TOOLS = [
 ];
 
 const instructions =
-  "Use the free discovery, validation and practice tools first. For a funded operation, inspect the returned exact Tempo transaction plan, sign it with the caller's own Tempo wallet/access key, then confirm the transaction hash. A Payment-Authorization MPP proof authenticates the wallet for autonomous bounty operations; it does not contain or replace a private key. Never alter a returned recipient, token, calldata or amount, and always preserve idempotency keys.";
+  "Use the free discovery, validation and practice tools first. For a funded operation, inspect the returned exact Tempo transaction plan and submit its calls atomically through the caller's own Tempo wallet/access key, then confirm the transaction hash. A Payment-Authorization MPP proof authenticates the wallet for autonomous bounty operations; it does not contain or replace a private key. Never alter a returned recipient, token, calldata or amount, and always preserve idempotency keys.";
 
 const corsHeaders = (request) => ({
   "access-control-allow-origin": request.headers.get("origin") || "*",

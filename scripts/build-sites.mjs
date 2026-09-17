@@ -55,6 +55,11 @@ await build({
     "node:util": resolve(root, "sites", "worker", "node-util-shim.mjs"),
   },
 });
+const workerBundlePath = resolve(dist, "server", "index.js");
+const workerBundle = await readFile(workerBundlePath, "utf8");
+if (!workerBundle.includes("war_machines_get_rules")) {
+  throw new Error("MCP tools are missing from the Worker bundle.");
+}
 await mkdir(resolve(dist, ".openai"), { recursive: true });
 await cp(
   resolve(root, ".openai", "hosting.json"),

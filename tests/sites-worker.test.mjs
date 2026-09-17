@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { privateKeyToAccount } from "viem/accounts";
+import { encodeFunctionData } from "viem";
 import worker from "../sites/worker/index.mjs";
 import {
   reopenDefendedBounties,
@@ -360,6 +361,21 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
   const initBody = await init.json();
   assert.equal(initBody.result.serverInfo.name, "war-machines");
   assert.equal(initBody.result.protocolVersion, "2025-11-25");
+
+  const initWithTrailingSlash = await worker.fetch(
+    new Request("https://foundry.example/mcp/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 11,
+        method: "initialize",
+        params: { protocolVersion: "2025-11-25" },
+      }),
+    }),
+    env,
+  );
+  assert.equal(initWithTrailingSlash.status, 200);
 
   const listed = await worker.fetch(
     new Request("https://foundry.example/mcp", {
@@ -784,6 +800,65 @@ test("browser wallet client uses Tempo Wallet rather than an injected provider",
   assert.match(source, /walletProvider\?\.store\?\.disconnect\?\.\(\)/);
   assert.match(source, /headers: \{ "Content-Type": "application\/json" \}/);
   assert.doesNotMatch(source, /window\.ethereum/);
+});
+
+test("source wallet MCP only accepts the exact atomic War Machines escrow plan", async () => {
+  const { validateEscrowPlan } = await import(
+    "../scripts/tempo-wallet-mcp.mjs"
+  );
+  const token = "0x20c0000000000000000000000000000000000000";
+  const escrow = "0xb14a3aa99c9349094612143089f55ae5372deb24";
+  const approval = {
+    to: token,
+    data: encodeFunctionData({
+      abi: [{
+        type: "function",
+        name: "approve",
+        stateMutability: "nonpayable",
+        inputs: [
+          { name: "spender", type: "address" },
+          { name: "amount", type: "uint256" },
+        ],
+        outputs: [{ name: "", type: "bool" }],
+      }],
+      functionName: "approve",
+      args: [escrow, 50_000n],
+    }),
+    amount: "50000",
+  };
+  const call = {
+    to: escrow,
+    data: encodeFunctionData({
+      abi: [{
+        type: "function",
+        name: "enterBounty",
+        stateMutability: "nonpayable",
+        inputs: [{ name: "bountyId", type: "uint256" }],
+        outputs: [],
+      }],
+      functionName: "enterBounty",
+      args: [1n],
+    }),
+  };
+  const checked = validateEscrowPlan({
+    chainId: 4217,
+    token,
+    escrow,
+    approval,
+    call,
+    calls: [approval, call],
+  });
+  assert.equal(checked.calls.length, 2);
+  assert.throws(
+    () => validateEscrowPlan({
+      chainId: 4217,
+      token,
+      escrow,
+      approval,
+      call: { ...call, to: "0x4444444444444444444444444444444444444444" },
+    }),
+    /allowed War Machines escrow method|plan call/,
+  );
 });
 
 test("paid bounty actions establish a Tempo session only when payment starts", async () => {
