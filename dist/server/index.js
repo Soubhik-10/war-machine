@@ -745,7 +745,8 @@ let arenaId = "foundry",
   inspectMode = false,
   battleMode = "auto",
   audioCtx = null,
-  lastAudio = 0;
+  soundCooldowns = new Map(),
+  soundSeenEffects = new WeakSet();
 let arenaIdleRAF = 0,
   modalCleanup = null,
   replaceFitted = false,
@@ -2223,14 +2224,6 @@ function frame(t) {
       battle.step();
       accumulator -= DT;
     }
-    if (
-      sound &&
-      battle.effects.some((e) => e.type === "blast") &&
-      t - lastAudio > 110
-    ) {
-      beep(65, 0.08, 0.04, "sawtooth");
-      lastAudio = t;
-    }
   }
   if (
     battle.result ||
@@ -2252,6 +2245,7 @@ function frame(t) {
 }
 function updateHUD() {
   if (!battle || !$("#your-hp")) return;
+  syncBattleSound();
   for (const [i, id] of ["your", "enemy"].entries()) {
     const v = battle.vehicles[i],
       core = v.modules.find((m) => m.id === "core");
@@ -2565,7 +2559,7 @@ function finishBattle() {
       localStorage.setItem("wm-wins-v2", JSON.stringify(wins));
     } catch {}
   }
-  if (sound) beep(won ? 660 : 130, 0.3, 0.08, "triangle");
+  playBattleSfx(won ? "win" : draw ? "draw" : "loss");
   const advice = battleAdvice(battle).notes[0];
   const overlay = $("#fight-overlay");
   overlay.hidden = false;
@@ -2824,20 +2818,173 @@ function initAudio() {
 }
 function beep(hz, duration, volume, type = "sine") {
   if (!sound || !audioCtx) return;
-  const o = audioCtx.createOscillator(),
-    g = audioCtx.createGain();
-  o.type = type;
-  o.frequency.setValueAtTime(hz, audioCtx.currentTime);
-  o.frequency.exponentialRampToValueAtTime(
-    Math.max(20, hz * 0.3),
-    audioCtx.currentTime + duration,
-  );
-  g.gain.setValueAtTime(volume, audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-  o.connect(g);
-  g.connect(audioCtx.destination);
-  o.start();
-  o.stop(audioCtx.currentTime + duration);
+  try {
+    const o = audioCtx.createOscillator(),
+      g = audioCtx.createGain(),
+      now = audioCtx.currentTime;
+    o.type = type;
+    o.frequency.setValueAtTime(Math.max(20, hz), now);
+    o.frequency.exponentialRampToValueAtTime(
+      Math.max(20, hz * 0.3),
+      now + duration,
+    );
+    g.gain.setValueAtTime(Math.max(0.0001, volume), now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start(now);
+    o.stop(now + duration);
+  } catch {
+    // Browsers can close an AudioContext when a tab is suspended.
+  }
+}
+function soundReady(kind, cooldown = 0.08) {
+  if (!sound || !audioCtx) return false;
+  const now = performance.now(), previous = soundCooldowns.get(kind) || 0;
+  if (now - previous < cooldown * 1000) return false;
+  soundCooldowns.set(kind, now);
+  return true;
+}
+function noise(duration = 0.08, volume = 0.025, cutoff = 1800) {
+  if (!sound || !audioCtx) return;
+  try {
+    const length = Math.max(1, Math.floor(audioCtx.sampleRate * duration)),
+      buffer = audioCtx.createBuffer(1, length, audioCtx.sampleRate),
+      data = buffer.getChannelData(0),
+      source = audioCtx.createBufferSource(),
+      filter = audioCtx.createBiquadFilter(),
+      gain = audioCtx.createGain(),
+      now = audioCtx.currentTime;
+    for (let i = 0; i < length; i++) {
+      const envelope = 1 - i / length;
+      data[i] = (Math.random() * 2 - 1) * envelope;
+    }
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(cutoff, now);
+    gain.gain.setValueAtTime(Math.max(0.0001, volume), now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    source.buffer = buffer;
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    source.start(now);
+    source.stop(now + duration);
+  } catch {
+    // Sound is optional; a failed effect must never interrupt a match.
+  }
+}
+function playBattleSfx(kind, intensity = 1) {
+  const level = clamp(Number(intensity) || 1, 0.5, 2);
+  switch (kind) {
+    case "fire":
+      if (soundReady("fire", 0.055)) {
+        beep(150 + level * 70, 0.055, 0.028, "square");
+        noise(0.045, 0.016, 2600);
+      }
+      break;
+    case "laser":
+      if (soundReady("laser", 0.07)) beep(620 + level * 120, 0.11, 0.024, "sine");
+      break;
+    case "impact":
+      if (soundReady("impact", 0.045)) {
+        beep(95, 0.09, 0.032, "triangle");
+        noise(0.07, 0.022, 900);
+      }
+      break;
+    case "explosion":
+      if (soundReady("explosion", 0.13)) {
+        beep(78, 0.26, 0.055, "sawtooth");
+        noise(0.24, 0.045, 1200);
+      }
+      break;
+    case "intercept":
+      if (soundReady("intercept", 0.1)) {
+        beep(980, 0.07, 0.026, "square");
+        window.setTimeout(() => beep(1380, 0.06, 0.02, "square"), 45);
+      }
+      break;
+    case "emp":
+      if (soundReady("emp", 0.16)) beep(210, 0.24, 0.034, "sine");
+      break;
+    case "shield":
+      if (soundReady("shield", 0.08)) beep(460, 0.12, 0.024, "triangle");
+      break;
+    case "vent":
+      if (soundReady("vent", 0.2)) {
+        noise(0.32, 0.028, 2300);
+        beep(280, 0.18, 0.018, "sine");
+      }
+      break;
+    case "warning":
+      if (soundReady("warning", 0.7)) {
+        beep(310, 0.12, 0.03, "square");
+        window.setTimeout(() => beep(230, 0.14, 0.025, "square"), 135);
+      }
+      break;
+    case "overheat":
+      if (soundReady("overheat", 0.8)) {
+        beep(440, 0.13, 0.035, "square");
+        window.setTimeout(() => beep(170, 0.22, 0.03, "sawtooth"), 145);
+      }
+      break;
+    case "power":
+      if (soundReady("power", 0.8)) beep(120, 0.2, 0.035, "sine");
+      break;
+    case "capture":
+      if (soundReady("capture", 0.35)) beep(520, 0.18, 0.025, "triangle");
+      break;
+    case "win":
+      if (soundReady("result", 0.5)) {
+        beep(520, 0.2, 0.04, "triangle");
+        window.setTimeout(() => beep(780, 0.28, 0.045, "triangle"), 120);
+      }
+      break;
+    case "loss":
+      if (soundReady("result", 0.5)) {
+        beep(180, 0.22, 0.04, "triangle");
+        window.setTimeout(() => beep(95, 0.35, 0.035, "sawtooth"), 150);
+      }
+      break;
+    case "draw":
+      if (soundReady("result", 0.5)) beep(260, 0.3, 0.035, "triangle");
+      break;
+  }
+}
+function playBattleEventSfx(event) {
+  if (!event) return;
+  if (event.kind === "overheat") return playBattleSfx("overheat");
+  if (event.kind === "power") return playBattleSfx("power");
+  if (event.kind === "battery") return playBattleSfx("emp", 1.1);
+  if (event.kind === "intercept") return playBattleSfx("intercept");
+  if (event.kind === "capture") return playBattleSfx("capture");
+  if (event.kind === "core") return playBattleSfx("explosion", 1.4);
+}
+function syncBattleSound() {
+  if (!battle) return;
+  const timeline = battle.timeline || [];
+  if (!sound) {
+    battle.soundTimelineCursor = timeline.length;
+    return;
+  }
+  const cursor = battle.soundTimelineCursor || 0;
+  for (const event of timeline.slice(cursor)) playBattleEventSfx(event);
+  battle.soundTimelineCursor = timeline.length;
+  for (const effect of battle.effects || []) {
+    if (soundSeenEffects.has(effect)) continue;
+    soundSeenEffects.add(effect);
+    if (effect.type === "muzzle") playBattleSfx("fire", effect.scale);
+    else if (effect.type === "beam") playBattleSfx("laser", effect.scale);
+    else if (effect.type === "hit" || effect.type === "reactive") playBattleSfx("impact", effect.scale);
+    else if (effect.type === "blast") playBattleSfx("explosion", effect.scale);
+    else if (effect.type === "intercept") playBattleSfx("intercept", effect.scale);
+    else if (effect.type === "emp") playBattleSfx("emp", effect.scale);
+    else if (effect.type === "shield") playBattleSfx("shield", effect.scale);
+    else if (effect.type === "vent") playBattleSfx("vent", effect.scale);
+  }
+  if (battle.result && !battle.soundResult) {
+    battle.soundResult = true;
+    playBattleSfx(battle.result.winner === 0 ? "win" : battle.result.winner < 0 ? "draw" : "loss");
+  }
 }
 function historyReplace() {
   window.history.replaceState(null, "", location.pathname + location.search);
@@ -3209,7 +3356,7 @@ $("#sound-btn").onclick = () => {
   $("#sound-state").textContent = sound ? "ON" : "OFF";
   $("#sound-btn").setAttribute(
     "aria-label",
-    sound ? "Disable sound" : "Enable sound",
+    sound ? "Disable battle sound effects" : "Enable battle sound effects",
   );
 };
 document.addEventListener("keydown", (e) => {
@@ -3437,7 +3584,7 @@ if (document.modelContext?.registerTool) {
   }
   window.addEventListener("pagehide", () => lifecycle.abort(), { once: true });
 }
-`,"text/javascript; charset=utf-8","86f84190038b0650"],"/bounties.css":[`.bounty-heading p {
+`,"text/javascript; charset=utf-8","8159ce47c6c479da"],"/bounties.css":[`.bounty-heading p {
   max-width: 660px;
 }
 .contract-hero {
@@ -6396,9 +6543,9 @@ export function pickModule(ray,machine,{layer=0,full=true,gap=1.65,allLevels=fal
 }\r
 `,"text/javascript; charset=utf-8","df0c8bf7eb0fb9ed"],"/index.html":[`<!doctype html>\r
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#111416"><meta name="description" content="Design a three-level combat machine, test it across eleven arenas, and challenge friends with deterministic Tempo bounties."><title>War Machines</title><link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23111416'/%3E%3Cpath d='M5 7h5l3 12 3-8 3 8 3-12h5l-6 19h-4l-1-5-1 5h-4z' fill='%23e5a849'/%3E%3C/svg%3E"><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="isometric.css"><link rel="stylesheet" href="command.css"><link rel="stylesheet" href="playtest.css"><link rel="stylesheet" href="engineering.css"><link rel="stylesheet" href="bounties.css"><link rel="stylesheet" href="portal.css"></head>\r
-<body><header class="topbar"><a class="brand" href="#" aria-label="War Machines home"><span class="brand-mark" aria-hidden="true"><b>W</b><i>M</i></span><span>WAR MACHINES</span></a><button id="nav-toggle" class="mobile-nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="main-nav"><span></span><span></span><span></span></button><nav id="main-nav" aria-label="Main"><button class="nav active" data-view="workshop">Build</button><button class="nav" data-view="arena">Arena</button><button class="nav" data-view="bounties">Bounties</button><button class="nav" data-view="rules">How it works</button><button class="nav" data-view="agents">Agent API</button></nav><div class="header-tools"><span class="local-tag">LOCAL SAVE</span><button id="manual-btn" class="icon-button" aria-label="Field manual" title="Field manual">?</button><button id="sound-btn" class="icon-button" aria-label="Enable sound" title="Enable sound">\u266A<span id="sound-state">OFF</span></button></div></header>
+<body><header class="topbar"><a class="brand" href="#" aria-label="War Machines home"><span class="brand-mark" aria-hidden="true"><b>W</b><i>M</i></span><span>WAR MACHINES</span></a><button id="nav-toggle" class="mobile-nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="main-nav"><span></span><span></span><span></span></button><nav id="main-nav" aria-label="Main"><button class="nav active" data-view="workshop">Build</button><button class="nav" data-view="arena">Arena</button><button class="nav" data-view="bounties">Bounties</button><button class="nav" data-view="rules">How it works</button><button class="nav" data-view="agents">Agent API</button></nav><div class="header-tools"><span class="local-tag">LOCAL SAVE</span><button id="manual-btn" class="icon-button" aria-label="Field manual" title="Field manual">?</button><button id="sound-btn" class="icon-button" aria-label="Enable sound effects" title="Toggle battle sound effects">SFX <span id="sound-state">OFF</span></button></div></header>
 <main id="app"><div class="app-loading" role="status" aria-live="polite"><span class="loading-mark" aria-hidden="true"></span><strong>Loading War Machines</strong><span>Preparing the workshop\u2026</span></div></main><div id="toast" role="status" aria-live="polite"></div><dialog id="modal"><div id="modal-content"></div></dialog><script type="module" src="app.mjs"><\/script></body></html>\r
-`,"text/html; charset=utf-8","5a6b84bfa3843fcf"],"/isometric.css":[`/* The vehicle is the primary surface; controls frame an actual 3D assembly. */
+`,"text/html; charset=utf-8","dfa5be8029db275d"],"/isometric.css":[`/* The vehicle is the primary surface; controls frame an actual 3D assembly. */
 :root{--bg:#111619;--panel:#1c2428;--line:#364247;--gold:#f2bd67;--muted:#a3adac;--text:#f0f0e6}
 body{background:radial-gradient(ellipse at 55% 15%,#263136 0%,#141b1f 50%,#0e1417 100%);background-attachment:fixed}
 .topbar{background:#121a1ed9;height:78px}.brand{letter-spacing:1.8px}.brand small{color:#9aa9a7}.page-heading{margin-bottom:21px}.page-heading .eyebrow{letter-spacing:2px;font-size:11px}.page-heading h1{font-size:38px;letter-spacing:1.5px}.page-heading p{font-size:15px}.workspace{grid-template-columns:242px minmax(350px,1fr) 267px;gap:17px}.panel{border-radius:8px}.bench{background:#172126;border-color:#526265;box-shadow:0 18px 65px #0003}.bench-top{padding:19px 22px;background:#1a2429}.machine-title{font-size:27px;letter-spacing:.4px}.bench-tools{background:#172125;padding:11px 18px;border-bottom:1px solid #344146}.bench-tools button{font-size:13px;min-height:36px}.bench-stage{min-height:520px;background:radial-gradient(ellipse at 30% 18%,#e0b57814,transparent 55%),radial-gradient(ellipse at 58% 65%,#5f818336,transparent 70%),#162025}.builder-wrap{padding:0;width:100%;height:560px;aspect-ratio:auto;position:relative;max-width:none}.builder-wrap canvas{width:100%;height:100%;cursor:crosshair}.grid-caption{z-index:1;top:18px;font-size:10px;letter-spacing:1.5px;color:#9badad}.grid-caption.bottom{bottom:15px;font-size:10px;letter-spacing:1px;color:#91a3a3}.camera-controls{position:absolute;left:50%;bottom:43px;transform:translateX(-50%);display:flex;gap:5px;z-index:2;white-space:nowrap}.camera-controls button{background:#162125dd;border-color:#61727270;font-size:12px;min-height:33px;padding:7px 12px;backdrop-filter:blur(8px)}.camera-controls button:hover{background:#344145}.bench-status{background:#1d282c;font-size:13px;min-height:48px}.panel-head{padding:17px}.panel-head h3{font-size:15px}.parts-list{max-height:430px;padding:6px 12px 13px;gap:8px}.part-card{height:129px;background:linear-gradient(140deg,#2c373c,#1b242a);border-color:#425053}.part-card .sprite{width:70px;height:70px;filter:drop-shadow(0 8px 4px #0009)}.part-card strong{font-size:12px;font-weight:600;margin-top:6px}.part-card .price{font-size:12px;right:8px;top:7px}.part-card.active{border-color:#f4bb60;background:linear-gradient(145deg,#53422d,#292b27);box-shadow:inset 0 0 0 1px #f1bd5630,0 3px 13px #0003}.selection-details{min-height:170px;padding:17px}.selection-details h3{font-size:15px}.selection-details p{font-size:14px;line-height:1.65}.selection-details small{font-size:11px;line-height:1.6}.parts-tabs button{font-size:13px}.stats-body{padding:18px}.stat-grid small{font-size:11px}.stat-grid strong{font-size:23px}.system-row,.system-row b{font-size:12px}.field>span{font-size:13px}.field select{font-size:14px;min-height:43px}.field{margin-bottom:17px}.tactics-body{padding:17px}.paint-row{gap:9px}.swatch{width:26px;min-height:26px}.deploy-bar{margin-top:18px;padding:18px 22px;background:linear-gradient(110deg,#253136,#252d2d);border-color:#655d48}.deploy-bar h3{font-size:16px}.deploy-bar p{font-size:13px}.deploy-bar .primary{font-size:15px;min-width:210px;padding:15px 22px;box-shadow:0 2px 20px #f0bd5820}.render-warning{padding:25px;color:var(--red);line-height:1.7}.arena-screen{background:#202e34;box-shadow:0 12px 40px #0005}.fight-overlay{background:#10191f32;backdrop-filter:none}.match-card{background:#17242be8;border-color:#ad8c5770;backdrop-filter:blur(13px);box-shadow:0 18px 65px #0008}.fight-hud{background:linear-gradient(#172128c9,#17212800);margin:-16px -20px 0;padding:16px 20px 22px}.match-card .mode-note{font-size:10px;margin-bottom:0}.opponent{background:#202b301d}.opponent:hover{background:#344047}.nav{font-size:14px}

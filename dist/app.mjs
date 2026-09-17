@@ -114,7 +114,8 @@ let arenaId = "foundry",
   inspectMode = false,
   battleMode = "auto",
   audioCtx = null,
-  lastAudio = 0;
+  soundCooldowns = new Map(),
+  soundSeenEffects = new WeakSet();
 let arenaIdleRAF = 0,
   modalCleanup = null,
   replaceFitted = false,
@@ -1592,14 +1593,6 @@ function frame(t) {
       battle.step();
       accumulator -= DT;
     }
-    if (
-      sound &&
-      battle.effects.some((e) => e.type === "blast") &&
-      t - lastAudio > 110
-    ) {
-      beep(65, 0.08, 0.04, "sawtooth");
-      lastAudio = t;
-    }
   }
   if (
     battle.result ||
@@ -1621,6 +1614,7 @@ function frame(t) {
 }
 function updateHUD() {
   if (!battle || !$("#your-hp")) return;
+  syncBattleSound();
   for (const [i, id] of ["your", "enemy"].entries()) {
     const v = battle.vehicles[i],
       core = v.modules.find((m) => m.id === "core");
@@ -1934,7 +1928,7 @@ function finishBattle() {
       localStorage.setItem("wm-wins-v2", JSON.stringify(wins));
     } catch {}
   }
-  if (sound) beep(won ? 660 : 130, 0.3, 0.08, "triangle");
+  playBattleSfx(won ? "win" : draw ? "draw" : "loss");
   const advice = battleAdvice(battle).notes[0];
   const overlay = $("#fight-overlay");
   overlay.hidden = false;
@@ -2193,20 +2187,173 @@ function initAudio() {
 }
 function beep(hz, duration, volume, type = "sine") {
   if (!sound || !audioCtx) return;
-  const o = audioCtx.createOscillator(),
-    g = audioCtx.createGain();
-  o.type = type;
-  o.frequency.setValueAtTime(hz, audioCtx.currentTime);
-  o.frequency.exponentialRampToValueAtTime(
-    Math.max(20, hz * 0.3),
-    audioCtx.currentTime + duration,
-  );
-  g.gain.setValueAtTime(volume, audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-  o.connect(g);
-  g.connect(audioCtx.destination);
-  o.start();
-  o.stop(audioCtx.currentTime + duration);
+  try {
+    const o = audioCtx.createOscillator(),
+      g = audioCtx.createGain(),
+      now = audioCtx.currentTime;
+    o.type = type;
+    o.frequency.setValueAtTime(Math.max(20, hz), now);
+    o.frequency.exponentialRampToValueAtTime(
+      Math.max(20, hz * 0.3),
+      now + duration,
+    );
+    g.gain.setValueAtTime(Math.max(0.0001, volume), now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start(now);
+    o.stop(now + duration);
+  } catch {
+    // Browsers can close an AudioContext when a tab is suspended.
+  }
+}
+function soundReady(kind, cooldown = 0.08) {
+  if (!sound || !audioCtx) return false;
+  const now = performance.now(), previous = soundCooldowns.get(kind) || 0;
+  if (now - previous < cooldown * 1000) return false;
+  soundCooldowns.set(kind, now);
+  return true;
+}
+function noise(duration = 0.08, volume = 0.025, cutoff = 1800) {
+  if (!sound || !audioCtx) return;
+  try {
+    const length = Math.max(1, Math.floor(audioCtx.sampleRate * duration)),
+      buffer = audioCtx.createBuffer(1, length, audioCtx.sampleRate),
+      data = buffer.getChannelData(0),
+      source = audioCtx.createBufferSource(),
+      filter = audioCtx.createBiquadFilter(),
+      gain = audioCtx.createGain(),
+      now = audioCtx.currentTime;
+    for (let i = 0; i < length; i++) {
+      const envelope = 1 - i / length;
+      data[i] = (Math.random() * 2 - 1) * envelope;
+    }
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(cutoff, now);
+    gain.gain.setValueAtTime(Math.max(0.0001, volume), now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    source.buffer = buffer;
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    source.start(now);
+    source.stop(now + duration);
+  } catch {
+    // Sound is optional; a failed effect must never interrupt a match.
+  }
+}
+function playBattleSfx(kind, intensity = 1) {
+  const level = clamp(Number(intensity) || 1, 0.5, 2);
+  switch (kind) {
+    case "fire":
+      if (soundReady("fire", 0.055)) {
+        beep(150 + level * 70, 0.055, 0.028, "square");
+        noise(0.045, 0.016, 2600);
+      }
+      break;
+    case "laser":
+      if (soundReady("laser", 0.07)) beep(620 + level * 120, 0.11, 0.024, "sine");
+      break;
+    case "impact":
+      if (soundReady("impact", 0.045)) {
+        beep(95, 0.09, 0.032, "triangle");
+        noise(0.07, 0.022, 900);
+      }
+      break;
+    case "explosion":
+      if (soundReady("explosion", 0.13)) {
+        beep(78, 0.26, 0.055, "sawtooth");
+        noise(0.24, 0.045, 1200);
+      }
+      break;
+    case "intercept":
+      if (soundReady("intercept", 0.1)) {
+        beep(980, 0.07, 0.026, "square");
+        window.setTimeout(() => beep(1380, 0.06, 0.02, "square"), 45);
+      }
+      break;
+    case "emp":
+      if (soundReady("emp", 0.16)) beep(210, 0.24, 0.034, "sine");
+      break;
+    case "shield":
+      if (soundReady("shield", 0.08)) beep(460, 0.12, 0.024, "triangle");
+      break;
+    case "vent":
+      if (soundReady("vent", 0.2)) {
+        noise(0.32, 0.028, 2300);
+        beep(280, 0.18, 0.018, "sine");
+      }
+      break;
+    case "warning":
+      if (soundReady("warning", 0.7)) {
+        beep(310, 0.12, 0.03, "square");
+        window.setTimeout(() => beep(230, 0.14, 0.025, "square"), 135);
+      }
+      break;
+    case "overheat":
+      if (soundReady("overheat", 0.8)) {
+        beep(440, 0.13, 0.035, "square");
+        window.setTimeout(() => beep(170, 0.22, 0.03, "sawtooth"), 145);
+      }
+      break;
+    case "power":
+      if (soundReady("power", 0.8)) beep(120, 0.2, 0.035, "sine");
+      break;
+    case "capture":
+      if (soundReady("capture", 0.35)) beep(520, 0.18, 0.025, "triangle");
+      break;
+    case "win":
+      if (soundReady("result", 0.5)) {
+        beep(520, 0.2, 0.04, "triangle");
+        window.setTimeout(() => beep(780, 0.28, 0.045, "triangle"), 120);
+      }
+      break;
+    case "loss":
+      if (soundReady("result", 0.5)) {
+        beep(180, 0.22, 0.04, "triangle");
+        window.setTimeout(() => beep(95, 0.35, 0.035, "sawtooth"), 150);
+      }
+      break;
+    case "draw":
+      if (soundReady("result", 0.5)) beep(260, 0.3, 0.035, "triangle");
+      break;
+  }
+}
+function playBattleEventSfx(event) {
+  if (!event) return;
+  if (event.kind === "overheat") return playBattleSfx("overheat");
+  if (event.kind === "power") return playBattleSfx("power");
+  if (event.kind === "battery") return playBattleSfx("emp", 1.1);
+  if (event.kind === "intercept") return playBattleSfx("intercept");
+  if (event.kind === "capture") return playBattleSfx("capture");
+  if (event.kind === "core") return playBattleSfx("explosion", 1.4);
+}
+function syncBattleSound() {
+  if (!battle) return;
+  const timeline = battle.timeline || [];
+  if (!sound) {
+    battle.soundTimelineCursor = timeline.length;
+    return;
+  }
+  const cursor = battle.soundTimelineCursor || 0;
+  for (const event of timeline.slice(cursor)) playBattleEventSfx(event);
+  battle.soundTimelineCursor = timeline.length;
+  for (const effect of battle.effects || []) {
+    if (soundSeenEffects.has(effect)) continue;
+    soundSeenEffects.add(effect);
+    if (effect.type === "muzzle") playBattleSfx("fire", effect.scale);
+    else if (effect.type === "beam") playBattleSfx("laser", effect.scale);
+    else if (effect.type === "hit" || effect.type === "reactive") playBattleSfx("impact", effect.scale);
+    else if (effect.type === "blast") playBattleSfx("explosion", effect.scale);
+    else if (effect.type === "intercept") playBattleSfx("intercept", effect.scale);
+    else if (effect.type === "emp") playBattleSfx("emp", effect.scale);
+    else if (effect.type === "shield") playBattleSfx("shield", effect.scale);
+    else if (effect.type === "vent") playBattleSfx("vent", effect.scale);
+  }
+  if (battle.result && !battle.soundResult) {
+    battle.soundResult = true;
+    playBattleSfx(battle.result.winner === 0 ? "win" : battle.result.winner < 0 ? "draw" : "loss");
+  }
 }
 function historyReplace() {
   window.history.replaceState(null, "", location.pathname + location.search);
@@ -2578,7 +2725,7 @@ $("#sound-btn").onclick = () => {
   $("#sound-state").textContent = sound ? "ON" : "OFF";
   $("#sound-btn").setAttribute(
     "aria-label",
-    sound ? "Disable sound" : "Enable sound",
+    sound ? "Disable battle sound effects" : "Enable battle sound effects",
   );
 };
 document.addEventListener("keydown", (e) => {
