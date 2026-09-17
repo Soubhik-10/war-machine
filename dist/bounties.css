@@ -24,6 +24,32 @@
   max-width: 570px;
   font-size: 14px;
 }
+.challenge-steps {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  margin: 20px 0 0;
+  list-style: none;
+  max-width: 620px;
+}
+.challenge-steps li {
+  display: grid;
+  grid-template-columns: 155px 1fr;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid #354641;
+  border-radius: 5px;
+  background: #14201f80;
+}
+.challenge-steps b {
+  color: var(--gold);
+  font-size: 12px;
+}
+.challenge-steps span {
+  color: #b2bcb6;
+  font-size: 13px;
+  line-height: 1.5;
+}
 .contract-hero-actions,
 .bounty-actions {
   display: flex;
@@ -52,6 +78,33 @@
     Arial;
   color: var(--gold);
   margin-top: 22px;
+}
+.credit-summary h3 {
+  margin: 20px 0 0;
+  color: #e7e7df;
+  font-size: 18px;
+}
+.credit-summary .credit-balance b {
+  font-size: 30px;
+  letter-spacing: 0.5px;
+  margin-top: 15px;
+}
+.credit-rules {
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+  padding-top: 15px;
+  border-top: 1px solid #394941;
+}
+.credit-rules p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.credit-rules b {
+  display: inline;
+  font: inherit;
+  color: var(--gold);
 }
 .credit-summary span:not(.status-stamp) {
   font: 10px monospace;
@@ -682,6 +735,13 @@
   }
   .credit-summary p {
     margin: 12px 0 7px;
+  }
+  .challenge-steps li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .credit-summary .credit-balance b {
+    font-size: 27px;
   }
   .contract-detail,
   .contract-create,

@@ -3411,6 +3411,32 @@ if (document.modelContext?.registerTool) {
   max-width: 570px;
   font-size: 14px;
 }
+.challenge-steps {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  margin: 20px 0 0;
+  list-style: none;
+  max-width: 620px;
+}
+.challenge-steps li {
+  display: grid;
+  grid-template-columns: 155px 1fr;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid #354641;
+  border-radius: 5px;
+  background: #14201f80;
+}
+.challenge-steps b {
+  color: var(--gold);
+  font-size: 12px;
+}
+.challenge-steps span {
+  color: #b2bcb6;
+  font-size: 13px;
+  line-height: 1.5;
+}
 .contract-hero-actions,
 .bounty-actions {
   display: flex;
@@ -3439,6 +3465,33 @@ if (document.modelContext?.registerTool) {
     Arial;
   color: var(--gold);
   margin-top: 22px;
+}
+.credit-summary h3 {
+  margin: 20px 0 0;
+  color: #e7e7df;
+  font-size: 18px;
+}
+.credit-summary .credit-balance b {
+  font-size: 30px;
+  letter-spacing: 0.5px;
+  margin-top: 15px;
+}
+.credit-rules {
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+  padding-top: 15px;
+  border-top: 1px solid #394941;
+}
+.credit-rules p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.credit-rules b {
+  display: inline;
+  font: inherit;
+  color: var(--gold);
 }
 .credit-summary span:not(.status-stamp) {
   font: 10px monospace;
@@ -4070,6 +4123,13 @@ if (document.modelContext?.registerTool) {
   .credit-summary p {
     margin: 12px 0 7px;
   }
+  .challenge-steps li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .credit-summary .credit-balance b {
+    font-size: 27px;
+  }
   .contract-detail,
   .contract-create,
   .profile-grid {
@@ -4283,7 +4343,7 @@ if (document.modelContext?.registerTool) {
     min-height: 280px;
   }
 }
-`,"text/css; charset=utf-8","b39f5caea02783ba"],"/bounties.mjs":[`import {
+`,"text/css; charset=utf-8","79a169e1a9719ec8"],"/bounties.mjs":[`import {
   paymentPanel,
   paymentStatus,
   transactionLink,
@@ -4814,7 +4874,7 @@ export function createBountyUI(adapter) {
     app.innerHTML =
       header(
         "CHOOSE A CHALLENGE.",
-        "Choose a challenge. Build your machine.",
+        "Review the rules, then create or join a challenge.",
       ) +
       '<div class="bounty-loading" role="status" aria-live="polite"><span class="loading-mark" aria-hidden="true"></span><strong>Loading bounties</strong><span>Fetching live challenges and payment status\u2026</span><div class="bounty-loading-grid" aria-hidden="true"><i></i><i></i><i></i></div></div>';
     wireHeader();
@@ -4860,9 +4920,9 @@ export function createBountyUI(adapter) {
       app.innerHTML =
         header(
           "CHOOSE A CHALLENGE.",
-          "Choose a challenge. Build your machine.",
+          "Review the rules, then create or join a challenge.",
         ) +
-        \`<section class="contract-hero"><div><span class="eyebrow">AVAILABLE CHALLENGES</span><h2>Choose a challenge.<br>Build your machine.</h2><p>\${runtime.paid ? "Read the summary. Pay the entry to reveal the full machine and start a timed build window. Both machines then fight automatically and the verified escrow pays the result." : "Read the summary. Refine your machine in local simulation. The same automatic fight runs without a payment."}</p><div class="contract-hero-actions"><button class="primary" id="new-contract" \${runtime.paid && !runtime.acceptingNewBounties ? "disabled" : ""}>\${runtime.paid && !runtime.acceptingNewBounties ? "New paid bounties paused" : "\uFF0B Create a challenge"}</button><button id="my-history">My runs</button></div>\${runtime.paid && !runtime.acceptingNewBounties ? \`<p class="notice bounty-footnote">\${esc(runtime.settlementReason)}</p>\` : ""}</div><div class="credit-summary"><span class="status-stamp">\${runtime.paid ? "TEMPO MAINNET \xB7 pathUSD" : "SANDBOX CREDITS \xB7 NO CASH VALUE"}</span><div><b>\${runtime.paid ? (me ? money(me.reserved || 0) : "PAY AS YOU GO") : me ? money(me.balance) : "1,000"}</b><span>\${runtime.paid ? (me ? "RESERVED IN BOUNTIES" : "TEMPO WALLET") : me ? "AVAILABLE" : "STARTING CREDITS"}</span></div><p>\${runtime.paid ? (me ? "Your wallet approves pathUSD and calls the verified escrow directly. Use Swap to pathUSD in the header for any supported Tempo stablecoin." : "Create or enter by confirming the shown pathUSD transaction in Tempo Wallet.") : me ? money(me.reserved) + " reserved in your bounties" : "Create a sandbox profile to enter local trials."}</p><small>Creators choose entry, gross reward and build limits. New bounties: 2.5% platform fee on wins.<br>Read the terms before you enter.</small></div></section><div class="contract-filter"><div class="segmented">\${[
+        \`<section class="contract-hero"><div class="challenge-hero-copy"><span class="eyebrow">\${runtime.paid ? "HOW PAID CHALLENGES WORK" : "HOW LOCAL CHALLENGES WORK"}</span><h2>How to enter and play.</h2><ol class="challenge-steps"><li><b>1. Read the challenge</b><span>Check the arena, build limits, reward and entry cost.</span></li><li><b>2. Pay the entry</b><span>Tempo Wallet reveals the opponent and starts your build timer.</span></li><li><b>3. Build and submit</b><span>Stay within the locked limits, then submit before the timer ends.</span></li><li><b>4. Watch the result</b><span>Both machines fight automatically. The escrow pays the winner.</span></li></ol><div class="contract-hero-actions"><button class="primary" id="new-contract" \${runtime.paid && !runtime.acceptingNewBounties ? "disabled" : ""}>\${runtime.paid && !runtime.acceptingNewBounties ? "New paid challenges paused" : "\uFF0B Create a challenge"}</button><button id="my-history">My runs</button></div>\${runtime.paid && !runtime.acceptingNewBounties ? \`<p class="notice bounty-footnote">\${esc(runtime.settlementReason)}</p>\` : ""}</div><div class="credit-summary"><span class="status-stamp">\${runtime.paid ? "TEMPO MAINNET \xB7 pathUSD" : "LOCAL MODE \xB7 NO CASH VALUE"}</span><h3>\${runtime.paid ? "Payment details" : "Practice mode"}</h3><div class="credit-balance"><b>\${runtime.paid ? (me ? money(me.reserved || 0) : "CONNECT WALLET") : me ? money(me.balance) : "1,000"}</b><span>\${runtime.paid ? (me ? "RESERVED FOR CHALLENGES" : "REQUIRED TO PAY") : me ? "AVAILABLE CREDITS" : "STARTING CREDITS"}</span></div><p>\${runtime.paid ? (me ? "Connected wallet: confirm the entry or reward transaction shown by Tempo Wallet." : "Connect Tempo Wallet before creating or entering a paid challenge.") : me ? money(me.reserved) + " reserved in your challenges" : "Create a local profile to practice without money."}</p><div class="credit-rules"><p><b>Creator:</b> chooses the entry, reward, arena and build limits.</p><p><b>Player:</b> pays the entry to join and gets the full opponent.</p><p><b>Fee:</b> 2.5% of a winning reward. The remaining 97.5% goes to the winner.</p></div></div></section><div class="contract-filter"><div class="segmented">\${[
           ["open", "Available"],
           ["mine", "My bounties"],
           ["saved", "Saved"],
@@ -5816,7 +5876,7 @@ export function createBountyUI(adapter) {
   }
   return { open, leave, profile, attempt, deploy: deployCounter };
 }
-`,"text/javascript; charset=utf-8","84685363c3886560"],"/camera.mjs":[`const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+`,"text/javascript; charset=utf-8","8ca4d0b8ba88b050"],"/camera.mjs":[`const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 export function newCamera(battle=false){return {yaw:battle?-.65:-2.55,elevation:battle?.86:.68,zoom:1,panX:0,panZ:0,follow:'both',drag:'orbit',current:null};}
 export function screenDirection(x,y,camera){return {x:Math.cos(camera.yaw)*x+Math.sin(camera.yaw)*y,y:-Math.sin(camera.yaw)*x+Math.cos(camera.yaw)*y};}
 export function fittedSpan(machine,aspect,yaw,elevation,gap=1.65){const xs=machine.modules.map(m=>m.x-4),zs=machine.modules.map(m=>m.y-4),heights=machine.modules.map(m=>(m.z||0)*gap+1.7);const minX=Math.min(...xs)-.8,maxX=Math.max(...xs)+.8,minZ=Math.min(...zs)-.8,maxZ=Math.max(...zs)+.8,maxH=Math.max(...heights),center=[(minX+maxX)/2,maxH*.46,(minZ+maxZ)/2];let minU=Infinity,maxU=-Infinity,minV=Infinity,maxV=-Infinity;for(const x of [minX,maxX])for(const z of [minZ,maxZ])for(const h of [0,maxH]){const u=x*Math.cos(yaw)-z*Math.sin(yaw),v=-x*Math.sin(yaw)*Math.sin(elevation)+h*Math.cos(elevation)-z*Math.cos(yaw)*Math.sin(elevation);minU=Math.min(minU,u);maxU=Math.max(maxU,u);minV=Math.min(minV,v);maxV=Math.max(maxV,v);}return {center,span:Math.max(6,maxV-minV+1.8,(maxU-minU+1.8)/Math.max(.3,aspect))};}
