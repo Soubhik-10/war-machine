@@ -1213,6 +1213,22 @@ async function mppCharge(
   request,
   { amountUnits, recipient, operation, description, meta, expires },
 ) {
+  // `requiresAuth` advertises Payment-Authorization so a normal Bearer
+  // session can coexist with an MPP credential. Some clients, including the
+  // Tempo request CLI, still send the standard Authorization: Payment header
+  // because they do not pass the challenge header override to their
+  // transport. Normalize that form before MPP verification, but only when the
+  // value is actually a Payment credential so ordinary Bearer auth is never
+  // shadowed.
+  const mppRequest = request.headers.get("Payment-Authorization")
+    ? request
+    : (() => {
+        const authorization = request.headers.get("Authorization");
+        if (!authorization || !/^Payment\s+/i.test(authorization)) return request;
+        const headers = new Headers(request.headers);
+        headers.set("Payment-Authorization", authorization);
+        return new Request(request.clone(), { headers });
+      })();
   const method = tempoMpp.charge({
       currency: config.token,
       decimals: config.decimals,
@@ -1235,9 +1251,9 @@ async function mppCharge(
       description,
       meta,
       expires: new Date(expires).toISOString(),
-    })(request);
+    })(mppRequest);
   if (result.status === 402) return { paid: false, response: result.challenge };
-  const source = mppCredentialSource(request);
+  const source = mppCredentialSource(mppRequest);
   return {
     paid: true,
     source,
