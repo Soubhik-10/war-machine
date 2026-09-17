@@ -499,7 +499,11 @@ const discovery = (config) => ({
   skill: "/skills/war-machines-engineer/SKILL.md",
   catalog: "/api/rules",
   mcp: {
-    endpoint: "/mcp",
+    // The hosting edge forwards /api/* reliably. Keep /mcp as a compatibility
+    // alias for clients that discovered the original endpoint before the
+    // direct-escrow deployment was rebuilt.
+    endpoint: "/api/mcp",
+    aliases: ["/mcp", "/mcp/"],
     transport: "streamable-http",
     stateless: true,
     protocolVersion: "2025-11-25",
@@ -4265,7 +4269,12 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     ctx.waitUntil(runAutomaticSettlement(env));
   if (path === "/.well-known/war-machines.json" && request.method === "GET")
     return response(discovery(config));
-  if (path === "/mcp" || path === "/mcp/")
+  if (
+    path === "/mcp" ||
+    path === "/mcp/" ||
+    path === "/api/mcp" ||
+    path === "/api/mcp/"
+  )
     return handleMcpRequest(request, (subrequest) =>
       mainnetFetch(subrequest, env, ctx, serveStaticAsset),
     );

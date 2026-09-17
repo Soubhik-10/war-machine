@@ -3,6 +3,7 @@
     "build:tempo-client": "node scripts/build-tempo-client.mjs",
     "build:sites": "node scripts/build-sites.mjs",
     "package:sites": "node scripts/package-sites.mjs",
+    "agent:mcp": "node scripts/war-machines-agent-mcp.mjs",
     "test": "node --test tests/*.test.mjs",
     "build:settlement": "node scripts/build-settlement.mjs",
     "benchmark:render": "node scripts/render-benchmark.mjs"

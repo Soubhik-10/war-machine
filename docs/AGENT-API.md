@@ -14,7 +14,7 @@ Use the discovery document as the authority for live mode, engine hash, token, c
 
 ## MCP endpoint
 
-MCP-capable agents can connect to `/mcp` using the stateless Streamable HTTP transport. The endpoint exposes the same validated API as tools named `war_machines_*`, including rules, scouts, validation, direct escrow plans, intent confirmation, deploy, settlement and bounty control. It does not run an AI model and it does not hold a wallet private key.
+MCP-capable agents can connect to `/api/mcp` using the stateless Streamable HTTP transport. `/mcp` and `/mcp/` remain compatibility aliases for older discovery documents. The endpoint exposes the same validated API as tools named `war_machines_*`, including rules, scouts, validation, direct escrow plans, intent confirmation, deploy, settlement and bounty control. It does not run an AI model and it does not hold a wallet private key.
 
 Read tools work without authentication. Mutation tool calls may carry the zero-value Tempo MPP credential in `Payment-Authorization`; the worker forwards that proof to the same route guards used by the REST API. The returned direct plan includes a `calls` array: for funding or entry it is one atomic `approve(pathUSD, escrow, amount)` plus escrow call; for control and settlement it is the single escrow call. An agent can submit that exact array through a wallet provider's `eth_sendTransaction`/`wallet_sendCalls`, then pass the resulting transaction hash to the confirmation tool. MCP is the transport; MPP authenticates the wallet; the connected Tempo access-key limit authorizes and caps the transaction.
 
@@ -27,6 +27,16 @@ node scripts/tempo-wallet-mcp.mjs
 ```
 
 Run it from the repository with Node 22 and installed dependencies, and register that command as the local MCP server for the agent. It exposes `tempo_wallet_get_connection_status` and `tempo_wallet_execute_escrow_plan`; the latter accepts only the exact War Machines plan, submits the calls atomically, and relies on the Tempo access-key limit. It never accepts or stores a private key. Set `WAR_MACHINES_ESCROW_ADDRESS` if the Worker uses a different escrow deployment.
+
+### One-call optimal bounty agent
+
+For a single agent tool that performs the complete local-wallet path, run this MCP server in the same WSL environment as the authorized Tempo Wallet store:
+
+```text
+npm run agent:mcp
+```
+
+It exposes `war_machines_find_and_beat_optimal_bounty`. The tool discovers the live deployment, ranks funded open scouts by net win and entry efficiency, preflights the exact direct escrow calls without broadcasting, enters one bounty within its `maxEntry` (default `1.00` pathUSD), screens legal counters with a bounded deterministic seed set, deploys one counter, and retries the same idempotency key when a concurrent request wins the database race. `dryRun: true` performs only discovery and ranking. The wallet remains local; MPP supplies only a zero-value proof and never authorizes a spend by itself.
 
 ## Engineering before entry
 

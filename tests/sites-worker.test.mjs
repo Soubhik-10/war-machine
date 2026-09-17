@@ -262,7 +262,8 @@ test("MPP practice advertises a bounded Tempo charge and returns a challenge bef
   );
   const discoveryBody = await discovery.json();
   assert.equal(discoveryBody.payments.mpp, true);
-  assert.equal(discoveryBody.mcp.endpoint, "/mcp");
+  assert.equal(discoveryBody.mcp.endpoint, "/api/mcp");
+  assert.deepEqual(discoveryBody.mcp.aliases, ["/mcp", "/mcp/"]);
   assert.equal(discoveryBody.mcp.transport, "streamable-http");
   assert.deepEqual(discoveryBody.payments.mppRoutes, [
     {
@@ -383,6 +384,21 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
     env,
   );
   assert.equal(initWithTrailingSlash.status, 200);
+
+  const initWithApiPrefix = await worker.fetch(
+    new Request("https://foundry.example/api/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 12,
+        method: "initialize",
+        params: { protocolVersion: "2025-11-25" },
+      }),
+    }),
+    env,
+  );
+  assert.equal(initWithApiPrefix.status, 200);
 
   const listed = await worker.fetch(
     new Request("https://foundry.example/mcp", {
@@ -856,6 +872,17 @@ test("source wallet MCP only accepts the exact atomic War Machines escrow plan",
     calls: [approval, call],
   });
   assert.equal(checked.calls.length, 2);
+  assert.throws(
+    () => validateEscrowPlan({
+      chainId: 4217,
+      token,
+      escrow,
+      approval: { ...approval, amount: "1" },
+      call,
+      calls: [approval, call],
+    }),
+    /does not match its calldata/,
+  );
   assert.throws(
     () => validateEscrowPlan({
       chainId: 4217,

@@ -10,7 +10,6 @@ import { Provider, Storage } from "accounts/cli";
 import { keccak256, toBytes } from "viem";
 
 const CHAIN_ID = 4217;
-const CHAIN_HEX = "0x1069";
 const PATHUSD = "0x20c0000000000000000000000000000000000000";
 const DEFAULT_ESCROW = "0xb14a3aa99c9349094612143089f55ae5372deb24";
 const MCP_VERSION = "2025-11-25";
@@ -97,6 +96,11 @@ export function validateEscrowPlan(plan, options = {}) {
       throw new Error("The pathUSD approval spender is not the configured escrow.");
     if (plan.approval.amount !== undefined && !/^\d+$/.test(String(plan.approval.amount)))
       throw new Error("The plan approval amount must be integer token units.");
+    if (
+      plan.approval.amount !== undefined &&
+      BigInt(String(plan.approval.amount)) !== BigInt(`0x${approval.data.slice(74)}`)
+    )
+      throw new Error("The plan approval amount does not match its calldata.");
     if (options.maxSpend !== undefined) {
       const maxSpend = BigInt(String(options.maxSpend));
       const amount = BigInt(`0x${approval.data.slice(74)}`);
@@ -113,11 +117,14 @@ export function validateEscrowPlan(plan, options = {}) {
         throw new Error("The plan calls batch does not match the signed plan.");
     });
   }
-  return { chainId: CHAIN_HEX, token, escrow, calls: expectedCalls };
+  return { chainId: CHAIN_ID, token, escrow, calls: expectedCalls };
 }
 
 const wallet = Provider.create({
-  mpp: { mode: "pull" },
+  // This bridge owns its fetch calls. The provider's default MPP polyfill
+  // would replace global fetch and make ordinary RPC/HTTP calls look like
+  // malformed payment requests.
+  mpp: { mode: "pull", polyfill: false },
   storage: Storage.filesystem(),
   open() {
     throw new Error(
@@ -179,9 +186,12 @@ async function callTool(name, args) {
     params: [
       {
         from: normalizedFrom,
-        chainId: checked.chainId,
+        // accounts/cli validates transactionRequest.chainId as a number. The
+        // browser connector accepts a hex quantity, but the local provider
+        // does not.
+        chainId: CHAIN_ID,
         feeToken: checked.token,
-        calls: checked.calls,
+        calls: checked.calls.map((call) => ({ ...call, value: 0n })),
       },
     ],
   });
