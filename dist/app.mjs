@@ -38,6 +38,7 @@ import {
   DT,
   world,
   ABILITIES,
+  failureLabel,
 } from "./engine.mjs";
 import { Renderer, Geometry, workshopScene, battleScene } from "./renderer.mjs";
 import { newCamera, bindCamera, fittedSpan } from "./camera.mjs";
@@ -50,6 +51,8 @@ import {
   engineeringReport,
   battleAdvice,
   weaponRows,
+  combatSummary,
+  stressTest,
   pickModule,
 } from "./engineering.mjs";
 const $ = (s) => document.querySelector(s),
@@ -383,8 +386,10 @@ function workshop() {
  <section class="panel"><div class="panel-head"><h3>Combat doctrine</h3><small>PROGRAM BEFORE DEPLOYMENT</small></div><div class="tactics-body"><label class="field"><span>Movement</span><select id="tactic"><option value="balanced">Hold optimal range</option><option value="kite">Kite & retreat</option><option value="flank">Flank & circle</option><option value="ram">Ram & overwhelm</option></select></label><label class="field"><span>Target priority</span>${targetSelect("target")}</label><label class="field"><span>Range <b id="range-value">${machine.range} m</b></span><input type="range" id="range" min="80" max="600" step="10" value="${machine.range}"></label><label class="field"><span>Damage response</span><select id="stance"><option value="steady">Hold the line</option><option value="aggressive">Push when enemy weakens</option><option value="guarded">Protect the damaged side</option></select></label></div></section></div>
  <div class="deploy-bar"><div><h3>Let the engineering speak.</h3><p>Set the doctrine. Run the test. Refine what breaks.</p></div><div class="deploy-actions"><button id="save-btn">Save blueprint</button><button class="primary" id="deploy-btn">Enter proving grounds ↗</button></div></div><div class="footer-note"><span id="rules-footer">${rulesLabel(rules)}</span><span>R ROTATE / CTRL+Z UNDO / ARROWS + ENTER BUILD</span></div>`;
   renderParts();
+  $("#save-btn")?.insertAdjacentHTML("afterend", '<button id="stress-btn">Stress test</button>');
   bindWorkshop();
   bindRules();
+  $(".rules-panel .rules-body")?.insertAdjacentHTML("beforeend", '<p class="timeout-formula">Timeout score: 35% core · 25% structure · 15% weapons · 15% mobility · 10% power/cooling. A gap under 2.5 points is a draw.</p>');
   $("#workshop-climate").onchange = (e) => {
     arenaId = e.target.value;
     save();
@@ -429,6 +434,7 @@ function bindRules() {
     const panel = $(".rules-panel");
     panel.outerHTML = rulesPanel();
     bindRules();
+    $(".rules-panel .rules-body")?.insertAdjacentHTML("beforeend", '<p class="timeout-formula">Timeout score: 35% core · 25% structure · 15% weapons · 15% mobility · 10% power/cooling. A gap under 2.5 points is a draw.</p>');
     updateReadout();
     save();
   };
@@ -1042,6 +1048,7 @@ function bindWorkshop() {
   $("#blueprints-btn").onclick = blueprints;
   $("#share-btn").onclick = shareDialog;
   $("#save-btn").onclick = saveBlueprint;
+  $("#stress-btn").onclick = () => showStressTest();
   $("#deploy-btn").onclick = arenaView;
 }
 function rotate() {
@@ -1332,6 +1339,7 @@ function arenaView() {
     mode: battleMode,
     swapSpawns: !!bountyContext && !!(seed & 1),
   });
+  $(".arena-screen")?.insertAdjacentHTML("afterbegin", '<div id="machine-warning" class="machine-warning" hidden></div>');
   lastArenaRender = 0;
   bindArena();
   drawThumbnails();
@@ -1612,6 +1620,18 @@ function updateHUD() {
               ? "FIELD CLOSING"
               : "LIVE";
   const v = battle.vehicles[0];
+  const warning = $("#machine-warning");
+  if (warning) {
+    const state = v.dead ? "CORE LOST" : v.disabled > 0 ? "EMP DISABLED" : v.overheated ? "WEAPONS OVERHEATED" : v.energy <= Math.max(5, v.maxEnergy * .12) ? "POWER RESERVE CRITICAL" : "";
+    warning.hidden = !state;
+    warning.textContent = state;
+    warning.className = "machine-warning" + (v.disabled > 0 ? " emp" : v.energy <= Math.max(5, v.maxEnergy * .12) ? " power" : "");
+  }
+  battle.uiTrace ||= [];
+  if (!battle.uiTrace.length || battle.time - battle.uiTrace.at(-1).t >= .25) {
+    battle.uiTrace.push({ t: battle.time, heat: v.heat, energy: v.energy, maxEnergy: v.maxEnergy });
+    if (battle.uiTrace.length > 420) battle.uiTrace.shift();
+  }
   renderWeaponMonitor();
   $("#observation-status").textContent = battle.replaying
     ? "EXACT REPLAY"
@@ -1838,7 +1858,7 @@ function finishBattle() {
   const overlay = $("#fight-overlay");
   overlay.hidden = false;
   overlay.innerHTML = `<div class="match-card"><small>${officialReceipt ? "OFFICIAL REPLAY · " : ""}${esc(r.reason.toUpperCase())}</small><h2 style="color:${won ? "var(--gold)" : draw ? "var(--text)" : "var(--red)"}">${won ? "VICTORY." : draw ? "STALEMATE." : "OUTENGINEERED."}</h2><div class="result-grid"><div><strong>${r.time.toFixed(1)}s</strong><small>BATTLE TIME</small></div><div><strong>${r.damage[0]}</strong><small>DAMAGE</small></div><div><strong>${v.intercepts}</strong><small>INTERCEPTIONS</small></div></div><p>${esc(advice)}</p><p class="hint">Autonomous trial · ${v.pickups} caches · ${v.detached} part${v.detached === 1 ? "" : "s"} collapsed</p><div class="modal-footer"><button id="battle-report-btn">Battle report</button><button id="watch-replay">↻ Exact replay</button><button class="primary" id="result-tune">Refit machine</button></div><div class="result-extras"><button id="fight-again">${officialReceipt ? "Continue to result" : "Fight again"}</button><button id="inspect-wreck">Inspect wreckage</button></div></div>`;
-  $("#battle-report-btn").onclick = showBattleReport;
+  $("#battle-report-btn").onclick = showBattleReportEnhanced;
   $("#watch-replay").onclick = () => startBattle(true);
   $("#result-tune").onclick = workshop;
   $("#fight-again").onclick = () =>
@@ -2047,6 +2067,42 @@ function showBattleReport() {
     },
   );
 }
+function showStressTest() {
+  const result = stressTest(machine, opponent(), "all", seed), s = result.summary;
+  const bar = (value, max = 1) => `<span class="metric-bar"><i style="width:${Math.max(0, Math.min(100, (value / max) * 100)).toFixed(1)}%"></i></span>`;
+  showModal("Build stress test", `<p>Three deterministic seeds across every arena. These runs are local and never touch a bounty or wallet.</p><div class="report-score"><div><strong>${Math.round(s.averageSurvival)}s</strong><span>AVERAGE SURVIVAL</span></div><div><strong>${Math.round(s.winRate * 100)}%</strong><span>WIN RATE</span></div><div><strong>${s.averageOverheats.toFixed(1)}</strong><span>OVERHEATS / RUN</span></div></div><div class="stress-grid"><section><h3>Terrain spread</h3>${result.terrainScores.map(t => `<div class="stress-row"><b>${esc(t.name)}</b><span>${Math.round(t.winRate * 100)}% wins · ${Math.round(t.time)}s</span>${bar(t.winRate)}</div>`).join("")}</section><section><h3>Failure pressure</h3><p><b>Most dangerous weapon:</b> ${result.dangerousWeapon ? `${esc(result.dangerousWeapon.name)} · ${Math.round(result.dangerousWeapon.damage / Math.max(1, result.dangerousWeapon.runs))} damage/run` : "none recorded"}</p><p><b>Average mobility loss:</b> ${s.averageMobilityLoss.toFixed(1)}s</p><p><b>Best terrain:</b> ${result.bestTerrain ? esc(result.bestTerrain.name) : "—"}</p><p><b>Worst terrain:</b> ${result.worstTerrain ? esc(result.worstTerrain.name) : "—"}</p></section></div><h3>Average damage by weapon</h3><div class="report-bars">${result.damagePerWeapon.slice(0, 8).map(r => `<div class="stress-row"><b>${esc(r.name)}</b><span>${Math.round(r.damage)}</span>${bar(r.damage, Math.max(1, result.damagePerWeapon[0]?.damage || 1))}</div>`).join("") || '<p class="hint">No weapon impacts recorded.</p>'}</div><div class="modal-footer"><button data-close>Back to the foundry</button><button class="primary" id="stress-deploy">Open proving grounds</button></div>`, () => { $("#stress-deploy").onclick = () => { closeModal(); arenaView(); }; });
+}
+function jumpReplay(target) {
+  if (!matchSource) return;
+  cancelAnimationFrame(raf);
+  battle = new Battle(matchSource.a, matchSource.b, matchSource.arena, matchSource.seed, { mode: matchSource.mode, swapSpawns: !!matchSource.swapSpawns, commands: matchSource.commands || [] });
+  while (!battle.result && battle.time + DT / 2 < target) battle.step();
+  running = false;
+  paused = true;
+  $("#fight-overlay").hidden = true;
+  closeModal();
+  updateHUD();
+  drawArena();
+  toast("Replay positioned at " + battle.time.toFixed(1) + "s. Press Replay to continue the exact run.");
+}
+function showBattleReportEnhancedBase() {
+  const report = battleAdvice(battle), summary = combatSummary(battle), v = battle.vehicles[0];
+  const formula = "35% core · 25% structure · 15% weapons · 15% mobility · 10% power/cooling";
+  const timeline = summary.timeline.filter(e => e.kind !== "status").slice(-18);
+  const failures = Object.entries(summary.failures).filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]);
+  showModal("Battle engineering report", `<div class="report-score"><div><strong>${report.ownIntegrity}%</strong><span>YOUR INTEGRITY</span></div><div><strong>${report.enemyIntegrity}%</strong><span>RIVAL INTEGRITY</span></div><div><strong>${v.shots} / ${v.hits}</strong><span>SHOTS / IMPACTS</span></div></div><div class="report-callout"><b>Published timeout scoring</b><span>${formula}</span><strong>Your weighted score: ${Math.round(report.score * 100)}%</strong></div><div class="report-grid"><section><h3>Why weapons waited</h3>${failures.map(([key, value]) => `<div class="stress-row"><b>${esc(failureLabel(key))}</b><span>${key === "heat" || key === "power" ? value.toFixed(1) + "s" : Math.round(value) + " events"}</span></div>`).join("") || '<p class="hint">No firing failures recorded.</p>'}</section><section><h3>Resource trace</h3><div class="trace-stat"><span>Peak heat</span><b>${Math.round(v.peakHeat || v.heat)}°</b></div><div class="trace-stat"><span>Final energy</span><b>${Math.round(v.energy)} / ${Math.round(v.maxEnergy)}</b></div><div class="trace-stat"><span>Mobility impaired</span><b>${summary.mobilityLossTime.toFixed(1)}s</b></div></section></div><div class="report-table-wrap"><table class="report-table"><thead><tr><th>Weapon</th><th>Fitted / left</th><th>Shots</th><th>Damage</th><th>Waits</th></tr></thead><tbody>${report.rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.count} / ${r.alive}</td><td>${r.shots}</td><td>${Math.round(r.damage)}</td><td>${Math.round(r.powerWait + r.heatWait)}s</td></tr>`).join("")}</tbody></table></div><h3>Replay timeline</h3><div class="replay-timeline">${timeline.map(e => `<button data-jump-time="${e.t}"><b>${e.t.toFixed(1)}s</b><span>${esc(e.text)}</span></button>`).join("") || '<p class="hint">No milestone events recorded.</p>'}</div><div class="report-advice">${report.notes.map((n) => `<p>↗ ${esc(n)}</p>`).join("")}</div><div class="modal-footer"><button data-close>Back to result</button><button class="primary" id="report-refit">Refit with this in mind</button></div>`, () => { $("#report-refit").onclick = () => { closeModal(); workshop(); }; $$('[data-jump-time]').forEach(b => b.onclick = () => jumpReplay(+b.dataset.jumpTime)); });
+}
+function showBattleReportEnhanced() {
+  showBattleReportEnhancedBase();
+  queueMicrotask(() => {
+    if (!battle) return;
+    const trace = battle.uiTrace || [], maxHeat = Math.max(1, ...trace.map(p => p.heat)), maxEnergy = Math.max(1, ...trace.map(p => p.maxEnergy));
+    const chart = (key, max, color) => trace.slice(-90).map(p => `<i style="height:${Math.max(2, Math.min(100, (p[key] / max) * 100)).toFixed(1)}%;background:${color}" title="${p.t.toFixed(1)}s · ${Math.round(p[key])}"></i>`).join("");
+    $(".report-grid")?.insertAdjacentHTML("afterend", `<div class="trace-charts"><section><h3>Heat trace</h3><div class="trace-bars">${chart("heat", maxHeat, "#e49b62")}</div><small>Peak ${Math.round(maxHeat)}° · weapons lock at 100°</small></section><section><h3>Power trace</h3><div class="trace-bars">${chart("energy", maxEnergy, "#73c6b2")}</div><small>Reserve ${Math.round(trace.at(-1)?.energy || battle.vehicles[0].energy)} / ${Math.round(maxEnergy)}</small></section></div>`);
+    const destroyed = combatSummary(battle).destroyed.slice(-12);
+    $(".replay-timeline")?.insertAdjacentHTML("beforebegin", `<section class="destroyed-report"><h3>What disabled each part</h3>${destroyed.length ? `<div class="replay-timeline">${destroyed.map(e => `<div><b>${e.time.toFixed(1)}s</b><span>${esc(e.text)}</span><small>Cause: ${esc(e.cause)}</small></div>`).join("")}</div>` : '<p class="hint">No parts were destroyed in this run.</p>'}</section>`);
+  });
+}
 function initAudio() {
   try {
     audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
@@ -2111,6 +2167,11 @@ function rulesView() {
     <section class="rules-section panel" id="rules-bounties"><div class="rules-section-head"><span class="rules-index">06</span><div><span class="eyebrow">PAID CHALLENGES</span><h2>How a bounty uses the result</h2></div></div><div class="rules-section-body rules-bounty-flow"><div class="bounty-flow-step"><b>01</b><span>Creator funds a reward and locks the machine, arena, seed and limits.</span></div><div class="bounty-flow-step"><b>02</b><span>Challenger pays the entry and receives the exact defender plus a timed build window.</span></div><div class="bounty-flow-step"><b>03</b><span>The deterministic battle runs once. The result is recorded and independently attested before settlement.</span></div><div class="bounty-flow-step"><b>04</b><span>A challenger win pays 97.5% of the gross reward after the 2.5% platform fee. Loss, draw or missed deadline sends the entry to the creator.</span></div></div><p class="rules-footnote">The payment layer settles the engine result; it does not change the combat rules. Watch the full simulation in Proving grounds before the result is finalized.</p></section>
     <div class="rules-actions"><button id="rules-workshop-bottom" class="primary">Build a machine</button><button id="rules-arena-bottom">Run a proving-ground test</button><button id="rules-bounties-bottom">Browse bounties</button></div>
   </div>`;
+  $("#rules-result .rules-section-body")?.insertAdjacentHTML("beforeend", '<div class="rules-callout"><h3>Published timeout formula</h3><p>When both cores survive, the deterministic score is <b>35% core survival + 25% structure + 15% weapons + 15% mobility + 10% power and cooling</b>. The higher score wins; a gap under 2.5 points is a draw. This prevents cheap armor walls from winning by raw hit points alone.</p></div>');
+  const timeoutStep = $("#rules-result .rule-step:nth-child(2) p");
+  if (timeoutStep) timeoutStep.textContent = "If both cores are still alive at 100 seconds, the engine compares the published weighted timeout score: core, structure, weapons, mobility, and power/cooling.";
+  const closeStep = $("#rules-result .rule-step:nth-child(3) p");
+  if (closeStep) closeStep.textContent = "The higher weighted score wins. A difference under 2.5 percentage points is a draw. Raw armor alone cannot decide the result.";
   $("#rules-workshop").onclick = workshop;
   $("#rules-arena").onclick = arenaView;
   $("#rules-workshop-bottom").onclick = workshop;

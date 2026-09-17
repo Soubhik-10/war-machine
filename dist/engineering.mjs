@@ -1,4 +1,5 @@
-import {BY_ID,ARENAS,stats,partSpec,validate,connected,keyOf,terrainAt,environmentProfile,weaponReloadFactor,DUPLICATE_WEAPON_FREE} from './data.mjs';
+import {BY_ID,ARENAS,stats,partSpec,validate,connected,keyOf,terrainAt,environmentProfile,weaponReloadFactor,DUPLICATE_WEAPON_FREE,timeoutScore,integrityBreakdown,clone} from './data.mjs';
+import {Battle} from './engine.mjs';
 
 export function engineeringReport(machine,rules,arenaId='foundry'){
  const s=stats(machine),arena=ARENAS.find(a=>a.id===arenaId)||ARENAS[0],notes=validate(machine,rules).map(text=>({level:'error',text,category:text.includes('move')?'Mobility':text.includes('weapon')?'Weapons':'Structure'}));
@@ -21,19 +22,40 @@ export function engineeringReport(machine,rules,arenaId='foundry'){
 }
 
 export function weaponRows(vehicle){
- const rows=new Map();for(const m of vehicle.modules){const p=partSpec(m);if(!p.rate&&!p.ram)continue;let row=rows.get(m.id);if(!row){row={id:m.id,name:p.name,count:0,alive:0,shots:0,hits:0,damage:0,powerWait:0,heatWait:0};rows.set(m.id,row);}row.count++;if(m.hp>0)row.alive++;for(const [key,field] of [['shots','fired'],['hits','landed'],['damage','dealt'],['powerWait','powerWait'],['heatWait','heatWait']])row[key]+=m[field]||0;}return [...rows.values()].sort((a,b)=>b.damage-a.damage);
+ const rows=new Map();for(const m of vehicle.modules){const p=partSpec(m);if(!p.rate&&!p.ram)continue;let row=rows.get(m.id);if(!row){row={id:m.id,name:p.name,count:0,alive:0,shots:0,hits:0,damage:0,powerWait:0,heatWait:0,failures:{}};rows.set(m.id,row);}row.count++;if(m.hp>0)row.alive++;for(const [key,field] of [['shots','fired'],['hits','landed'],['damage','dealt'],['powerWait','powerWait'],['heatWait','heatWait']])row[key]+=m[field]||0;for(const [key,value] of Object.entries(m.failureCounts||{}))row.failures[key]=(row.failures[key]||0)+value;}return [...rows.values()].sort((a,b)=>b.damage-a.damage);
+}
+
+export function combatSummary(battle,side=0){
+ const v=battle.vehicles[side],enemy=battle.vehicles[1-side],rows=weaponRows(v),failures={};
+ for(const m of v.modules)for(const [key,value] of Object.entries(m.failureCounts||{}))failures[key]=(failures[key]||0)+value;
+ const destroyed=battle.timeline.filter(e=>e.kind==='module'||e.kind==='battery'||e.kind==='core').map(e=>({time:e.t,text:e.text,cause:e.cause||'unknown',side:e.side,moduleUid:e.moduleUid}));
+ const timeline=battle.timeline.slice();if(v.firstHitAt!=null&&!timeline.some(e=>e.kind==='hit'))timeline.push({t:v.firstHitAt,kind:'hit',side, text:'First hit registered.'});timeline.sort((a,b)=>a.t-b.t);
+ return {rows,failures,destroyed,timeline,score:timeoutScore(v),breakdown:integrityBreakdown(v),integrity:Math.round(battle.health(v)*100),enemyIntegrity:Math.round(battle.health(enemy)*100),heat:Math.round(v.heat),energy:Math.round(v.energy),overheats:v.overheatCount,mobilityLossTime:Math.round((v.mobilityLossTime||0)*10)/10};
+}
+
+export function stressTest(machine,opponent,arenaId='foundry',seed=42817,{seeds=[seed>>>0,(seed+1013904223)>>>0,(seed^0x9e3779b9)>>>0]}={}){
+ const arenas=arenaId==='all'?ARENAS:ARENAS.filter(a=>a.id===arenaId);
+ const runs=[];
+ for(const arena of arenas)for(const runSeed of seeds){const battle=new Battle(clone(machine),clone(opponent),arena.id,runSeed);const result=battle.run(),own=battle.vehicles[0],enemy=battle.vehicles[1];runs.push({arena:arena.name,arenaId:arena.id,seed:runSeed,result,time:result.time,won:result.winner===0,score:timeoutScore(own),overheats:own.overheatCount,mobilityLossTime:own.mobilityLossTime||0,ownRows:weaponRows(own),enemyRows:weaponRows(enemy)});}
+ const average=(key,list=runs)=>list.length?list.reduce((n,row)=>n+row[key],0)/list.length:0;
+ const terrainScores=[...new Set(runs.map(r=>r.arenaId))].map(id=>{const list=runs.filter(r=>r.arenaId===id);return {id,name:list[0].arena,winRate:average('won',list),score:average('score',list),time:average('time',list)};}).sort((a,b)=>b.winRate-a.winRate||b.score-a.score);
+ const damage=new Map(),danger=new Map();for(const run of runs){for(const row of run.ownRows){const item=damage.get(row.id)||{id:row.id,name:row.name,damage:0,runs:0};item.damage+=row.damage;item.runs++;damage.set(row.id,item);}for(const row of run.enemyRows){const item=danger.get(row.id)||{id:row.id,name:row.name,damage:0,runs:0};item.damage+=row.damage;item.runs++;danger.set(row.id,item);}}
+ return {runs,summary:{averageSurvival:average('time'),averageScore:average('score'),averageOverheats:average('overheats'),averageMobilityLoss:average('mobilityLossTime'),winRate:average('won')},bestTerrain:terrainScores[0]||null,worstTerrain:terrainScores.at(-1)||null,terrainScores,damagePerWeapon:[...damage.values()].map(r=>({...r,damage:r.damage/Math.max(1,r.runs)})).sort((a,b)=>b.damage-a.damage),dangerousWeapon:[...danger.values()].sort((a,b)=>b.damage-a.damage)[0]||null};
 }
 
 export function battleAdvice(battle,side=0){
- const v=battle.vehicles[side],enemy=battle.vehicles[1-side],rows=weaponRows(v),notes=[];
+ const v=battle.vehicles[side],enemy=battle.vehicles[1-side],rows=weaponRows(v),notes=[],failures={},breakdown=integrityBreakdown(v),score=timeoutScore(v);
+ for(const m of v.modules)for(const [key,value] of Object.entries(m.failureCounts||{}))failures[key]=(failures[key]||0)+value;
  const dry=rows.reduce((s,r)=>s+r.powerWait,0),hot=rows.reduce((s,r)=>s+r.heatWait,0);
  if(v.dead)notes.push('Your core was destroyed. Put armor between it and the rival, and use the protected-side damage response.');
  if(dry>4)notes.push(`Guns spent ${Math.round(dry)} combined weapon-seconds waiting for power. Add generation, a capacitor, or use fewer simultaneous weapons.`);
  if(hot>3)notes.push(`Heat or coolant purges blocked guns for ${Math.round(hot)} combined weapon-seconds. Add cooling or replace a high-heat weapon with a more efficient one.`);
  if(v.detached)notes.push(`${v.detached} part${v.detached===1?' was':'s were'} lost to broken connections or supports. Reinforce critical links before adding more armor elsewhere.`);
+ if((v.mobilityLossTime||0)>2)notes.push(`Mobility was impaired for ${Math.round(v.mobilityLossTime)}s. Destroyed or damaged drive parts reduce steering and speed; distribute wheels or add protected treads.`);
+ if((failures.power||0)>2)notes.push(`Weapons waited ${Math.round(failures.power)}s for energy. Generation, storage and reactor control are now part of the timeout score.`);
  if(!v.pickups&&battle.time>25)notes.push('No repair caches collected. Green cache pickups restore surviving parts and energy; a mobile kite doctrine can help your design survive longer.');
  if(!notes.length)notes.push(battle.result?.winner===side?'Your core held and your weapons stayed supplied. Try the same design against a stronger rival or different terrain.':'Review which weapons connected, then adjust their range and firing direction.');
- return {notes:notes.slice(0,4),rows,ownIntegrity:Math.round(battle.health(v)*100),enemyIntegrity:Math.round(battle.health(enemy)*100)};
+ return {notes:notes.slice(0,5),rows,failures,breakdown,score,ownIntegrity:Math.round(battle.health(v)*100),enemyIntegrity:Math.round(battle.health(enemy)*100)};
 }
 
 // Intersect a pointer ray with the visible module body, choosing the closest hit.

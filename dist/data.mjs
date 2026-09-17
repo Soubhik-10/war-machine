@@ -1,5 +1,9 @@
-export const BALANCE_VERSION="agent-season-4", ENGINE_VERSION="agent-season-4-core-free", TERRAIN_VERSION="climate-3";
+export const BALANCE_VERSION="agent-season-6", ENGINE_VERSION="agent-season-6-explainable", TERRAIN_VERSION="climate-3";
 export const VERSION=3, GRID=9, LIMIT=1200, PART_LIMIT=32, MASS_LIMIT=360, WEAPON_LIMIT=8, LEVELS=3, LAYER_HEIGHT=1.65;
+// A modest durability pass gives damaged systems time to degrade visibly before
+// they disappear. Costs and offensive output stay unchanged, so the extra time
+// comes from survivability rather than a damage race.
+export const HP_SCALE=1.15;
 // Two matching weapons retain their normal cycle. Further matching weapons
 // share targeting, ammunition and heat-control bandwidth, so a pure weapon
 // bank remains a deliberate redundancy choice rather than the only answer.
@@ -91,7 +95,7 @@ ARENAS.push(
 export const TERRAIN_INFO={snow:{name:'Snow',effect:'60% wheel speed · winter tires: 94% speed / 95% grip'},brine:{name:'Conductive brine',effect:'−8 energy/s · 52% wheel speed · insulation and hover resist leakage'},road:{name:'Hard ground',effect:'Full traction'},sand:{name:'Sand',effect:'Wheels: 72% speed · treads: 93%'},mud:{name:'Mud',effect:'Wheels: 58% speed · reduced grip'},oil:{name:'Oil',effect:'40% grip · wider turns'},ice:{name:'Ice',effect:'24% grip · +55% cooling'},lava:{name:'Lava',effect:'+9 heat/s · 5 ground damage/s'},vent:{name:'Heat vent',effect:'Erupts at 8–12s each cycle · +15 heat/s · 7 damage/s'},ridge:{name:'Ridge',effect:'Elevated firing position · exposed approach'},coolant:{name:'Coolant',effect:'+70% cooling · wheels: 75% speed'},rubble:{name:'Rubble',effect:'Wheels: 65% speed · treads: 93%'}};
 export const clone=o=>JSON.parse(JSON.stringify(o));
 const specificationCache=new Map();
-export function partSpec(m){const cacheKey=m.id+':'+(m.u||'stock')+':'+(m.z||0);if(specificationCache.has(cacheKey))return specificationCache.get(cacheKey);const p=BY_ID[m.id],g=GRADES[m.u||'stock'];if(!p||!g)return null;const tuned=m.u==='tuned';const result={...p,cost:Math.ceil(p.cost*g.cost)+(m.z||0)*12,hp:Math.round(p.hp*g.hp),mass:Math.round(p.mass*g.mass),damage:p.damage?(p.damage*(tuned?1.2:1)):p.damage,heat:p.heat?(p.heat*(tuned?1.3:1)):p.heat,power:(p.power||0)*(tuned?1.2:1),cooling:(p.cooling||0)*(tuned?1.2:1),thrust:p.thrust?(p.thrust*(tuned?1.2:1)):p.thrust,shield:(p.shield||0)*(tuned?1.2:1)};specificationCache.set(cacheKey,result);return result;}
+export function partSpec(m){const cacheKey=m.id+':'+(m.u||'stock')+':'+(m.z||0);if(specificationCache.has(cacheKey))return specificationCache.get(cacheKey);const p=BY_ID[m.id],g=GRADES[m.u||'stock'];if(!p||!g)return null;const tuned=m.u==='tuned';const result={...p,cost:Math.ceil(p.cost*g.cost)+(m.z||0)*12,hp:Math.round(p.hp*HP_SCALE*g.hp),mass:Math.round(p.mass*g.mass),damage:p.damage?(p.damage*(tuned?1.2:1)):p.damage,heat:p.heat?(p.heat*(tuned?1.3:1)):p.heat,power:(p.power||0)*(tuned?1.2:1),cooling:(p.cooling||0)*(tuned?1.2:1),thrust:p.thrust?(p.thrust*(tuned?1.2:1)):p.thrust,shield:(p.shield||0)*(tuned?1.2:1)};specificationCache.set(cacheKey,result);return result;}
 export function stats(machine){
  const s={cost:0,hp:0,mass:0,thrust:0,power:0,cooling:0,dps:0,heat:0,energy:0,shield:0,weapons:0,capacity:100,height:1,upperMass:0,tracks:0,wheels:0,hovers:0,boosters:0,winterWheels:0,duneWheels:0,insulators:0,heaters:0,gyros:0,parts:machine.modules.filter(m=>m.id!=='core').length};
  for(const m of machine.modules){const p=partSpec(m);if(!p)continue;for(const k of ['cost','hp','mass','power','cooling','shield'])s[k]+=p[k]||0;if(!(m.z||0))s.thrust+=p.thrust||0;if(p.rate){s.dps+=p.damage*(p.pellets||1)/p.rate;s.heat+=p.heat/p.rate;s.energy+=p.energy/p.rate;s.weapons++;}if(p.ram)s.weapons++;s.energy+=p.drain||0;s.capacity+=p.capacity||0;s.height=Math.max(s.height,(m.z||0)+1);s.upperMass+=p.mass*(m.z||0);if(m.id==='track'&&!(m.z||0))s.tracks++;if((m.id==='wheel'||p.tires)&&!(m.z||0))s.wheels++;if(m.id==='winterwheel'&&!(m.z||0))s.winterWheels++;if(m.id==='dunewheel'&&!(m.z||0))s.duneWheels++;if(m.id==='insulator')s.insulators++;if(m.id==='heater')s.heaters++;if(m.id==='gyro')s.gyros++;if(m.id==='hover'&&!(m.z||0))s.hovers++;if(p.boost)s.boosters++;}
@@ -100,6 +104,16 @@ export function stats(machine){
  s.speed=s.thrust?Math.min(115,(28+55*s.thrust/Math.max(1,s.mass))*(1+Math.min(2,s.boosters)*.1)):0;
  return s;
 }
+// Timeout integrity is deliberately published and category-weighted. A wall
+// of cheap armor cannot outweigh a machine that has lost its core, weapons,
+// mobility, or power systems.
+export function integrityBreakdown(vehicle){
+ const modules=Array.isArray(vehicle?.modules)?vehicle.modules:[],active=modules.filter(m=>m.hp>0),sum=(list,remaining=false)=>{const total=list.reduce((n,m)=>n+partSpec(m).hp,0);if(!total)return 0;return list.reduce((n,m)=>n+(remaining?Math.max(0,m.hp):partSpec(m).hp),0)/total;};
+ const core=modules.find(m=>m.id==='core'),coreMax=core?partSpec(core).hp:1;
+  const category=(test)=>{const all=modules.filter(test);return sum(all,true);};
+ return {core:core?Math.max(0,core.hp)/coreMax:0,structure:category(m=>m.id!=='core'&&['Structure','Defense'].includes(BY_ID[m.id]?.cat)),weapons:category(m=>BY_ID[m.id]?.cat==='Weapons'),mobility:category(m=>!!BY_ID[m.id]?.thrust||BY_ID[m.id]?.ground&&['wheel','track','winterwheel','dunewheel','hover'].includes(m.id)),systems:category(m=>BY_ID[m.id]?.cat==='Systems'),active:active.length,total:modules.length};
+}
+export function timeoutScore(vehicle){const b=integrityBreakdown(vehicle);return Math.max(0,Math.min(1,b.core*.35+b.structure*.25+b.weapons*.15+b.mobility*.15+b.systems*.10));}
 export function weaponReloadFactor(modules,id){
  const copies=modules.filter(m=>m.id===id&&partSpec(m)?.rate).length;
  return 1+Math.max(0,copies-DUPLICATE_WEAPON_FREE)*DUPLICATE_WEAPON_RELOAD_PENALTY;
