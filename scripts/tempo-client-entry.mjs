@@ -135,6 +135,33 @@ export async function executeEscrowPlan(plan) {
   return sendDirect(selected, calls);
 }
 
+/**
+ * Open Tempo Wallet's native stablecoin swap flow with pathUSD preselected as
+ * the output token. The wallet supplies the supported input-token list, quote,
+ * slippage review and final transaction prompt; the app never fabricates DEX
+ * calldata or takes custody of a user's funds.
+ */
+export async function swapToPathUsd() {
+  const selected = await directWallet();
+  const pathUsd = discovery?.payments?.token;
+  if (typeof pathUsd !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(pathUsd))
+    throw Error("The verified pathUSD token is unavailable.");
+  const result = await wallet().request({
+    method: "wallet_swap",
+    params: [
+      {
+        pairToken: pathUsd,
+        type: "sell",
+        slippage: 0.01,
+      },
+    ],
+  });
+  const hash = result?.receipt?.transactionHash;
+  if (typeof hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(hash))
+    throw Error("Tempo Wallet did not return a swap receipt.");
+  return { hash, account: selected };
+}
+
 export async function logout() {
   // Clear both identities: the site cookie and the persisted Tempo connector
   // state. `wallet_disconnect` is local to the accounts provider, so it does
