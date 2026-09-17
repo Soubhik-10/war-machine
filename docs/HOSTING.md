@@ -38,7 +38,7 @@ For a static-only workshop preview:
 python serve.py --open
 ```
 
-Static hosting supports local saves, exports, ordinary challenge links, and free practice. Shared bounties require the Worker/D1 deployment.
+Static hosting supports local saves, exports, ordinary challenge links, and local simulations. Shared bounties require the Worker/D1 deployment.
 
 ## Mainnet safeguards
 

@@ -25,11 +25,11 @@ For the static sandbox only: `python serve.py --open`, then open http://127.0.0.
 
 ## Agent access
 
-The Agents page offers a [downloadable SKILL.md](dist/skills/war-machines-engineer/SKILL.md), direct-escrow discovery, fee disclosure, readable validation, and bounded free practice. An agent can prepare a build, but a controller must use its own Tempo wallet to approve and execute any bounty transaction.
+The Agents page offers a [downloadable SKILL.md](dist/skills/war-machines-engineer/SKILL.md), direct-escrow discovery, fee disclosure and readable validation. An agent can prepare a build, but a controller must use its own Tempo wallet to approve and execute any bounty transaction.
 
 The landing page offers human and agent paths, a live machine display, three interface colorways (Forge, Glacier, Ember) and climate previews. Guests can build, save local blueprints, share, validate and practice. Sign in only for bounty actions. Bounties support search, arena/maximum-fee filters, account bookmarks, and up to 50 private saved builds per account.
 
-External agents have `/.well-known/war-machines.json`, `/agents.md`, `/api/openapi.json`, readable part-ID validation, terrain-performance reports and free bounded server practice. The same deterministic engine can run locally on their own compute.
+External agents have `/.well-known/war-machines.json`, `/agents.md`, `/api/openapi.json`, readable part-ID validation, terrain-performance reports and deterministic local simulation guidance. The same engine can run locally on their own compute before they commit a paid entry.
 
 ```sh
 # Local sandbox only
@@ -45,7 +45,7 @@ The engineer loop tests candidates with multiple seeds and both spawn positions,
 2. Create a bounty: approve pathUSD, fund the verified escrow, and share its stable link.
 3. Public scouts show terrain, construction limits, cost, mass, fitted-part count and weapon count. The defender layout, doctrine, colors, firing arcs and blueprint stay sealed.
 4. The challenger approves the entry and calls the escrow. After the Worker confirms that exact on-chain entry event, it reveals the defender only to that challenger and starts the counter-build clock.
-5. The challenger can refit and practice freely against the revealed defender, then deploys one valid counter. The Worker binds both builds, rules, terrain, engine release and seed into the result commitment.
+5. The challenger receives the revealed defender and a timed construction window, then deploys one valid counter. The Worker binds both builds, rules, terrain, engine release and seed into the result commitment.
 6. Two independent signer services replay and attest the result. A dedicated relay submits settlement automatically; the UI shows Paid, Lost or Draw only after verifying the finalized receipt. No player settlement confirmation is needed.
 7. An idle bounty can be cancelled by its creator. If settlement misses the contract deadline, the entry can be forfeited to the creator; no refund is implied. Expired idle bounties release their reward.
 
@@ -120,7 +120,7 @@ No package installation is required. With Node.js already installed:
 node --test tests/*.test.mjs
 ```
 
-The test suite covers construction and sharing, autonomous combat, deterministic replays, terrain physics, ridge collision, forward contact rams, missile guidance, cosmetic RNG isolation, official spawn swaps, SQLite accounting, concurrent entries, idempotent settlement/refunds, expiry, restart recovery, account caps, agent revocation, hostile requests and actual HTTP worker verification. Browser playtests cover bounty creation, stable custom-rule sharing between independent identities, free practice, official payout, replay and refit. Physical phone hardware performance has not been benchmarked. See docs/BALANCE-REPORT.md for measured balance results and remaining limitations.
+The test suite covers construction and sharing, autonomous combat, deterministic replays, terrain physics, ridge collision, forward contact rams, missile guidance, cosmetic RNG isolation, official spawn swaps, SQLite accounting, concurrent entries, idempotent settlement/refunds, expiry, restart recovery, account caps, agent revocation, hostile requests and actual HTTP worker verification. Browser playtests cover bounty creation, stable custom-rule sharing between independent identities, local simulations, official payout, replay and refit. Physical phone hardware performance has not been benchmarked. See docs/BALANCE-REPORT.md for measured balance results and remaining limitations.
 
 - `dist/data.mjs`: parts, stats, class rules, terrain, blueprints, validation, challenge codec.
 - `dist/engineering.mjs`: build diagnostics, 3D module picking, weapon summaries, and battle advice.

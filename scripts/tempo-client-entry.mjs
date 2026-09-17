@@ -120,16 +120,18 @@ export async function executeEscrowPlan(plan) {
     plan.call?.to?.toLowerCase() !== expected
   )
     throw Error("The bounty plan does not match the verified Tempo escrow.");
-  const calls = [];
-  if (plan.approval) {
-    if (
-      plan.approval.to?.toLowerCase() !==
-      discovery.payments.token?.toLowerCase()
-    )
-      throw Error("The approval token does not match pathUSD.");
-    calls.push(plan.approval);
+  const calls = Array.isArray(plan.calls) ? plan.calls : [];
+  if (!calls.length) {
+    if (plan.approval) {
+      if (
+        plan.approval.to?.toLowerCase() !==
+        discovery.payments.token?.toLowerCase()
+      )
+        throw Error("The approval token does not match pathUSD.");
+      calls.push(plan.approval);
+    }
+    calls.push(plan.call);
   }
-  calls.push(plan.call);
   return sendDirect(selected, calls);
 }
 

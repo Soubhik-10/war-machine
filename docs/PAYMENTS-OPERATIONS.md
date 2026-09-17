@@ -16,7 +16,7 @@ The browser prepares the exact approval and escrow calls. The Worker verifies re
 1. The creator approves pathUSD and calls `createBounty`.
 2. The challenger approves pathUSD and calls `enterBounty`.
 3. The Worker reveals the defender to that paid challenger only and opens the construction window. Public viewers continue to receive only the scout summary.
-4. The challenger validates, practices and deploys one counter. The Worker computes the deterministic result and returns the EIP-712 settlement payload.
+4. The challenger validates locally and deploys one counter. The Worker computes the deterministic result and returns the EIP-712 settlement payload.
 5. Both result signers run `scripts/attest-escrow-result.ps1` using their independent encrypted keystores.
 6. Any wallet can relay `settleAttempt` after both signatures have been registered.
 
@@ -30,7 +30,7 @@ Keep the two result signer keystores separate from each other, the Site runtime,
 
 ## Optional MPP service rail
 
-MPP is reserved for separately advertised agent services such as paid API practice. It is never used to create, enter, settle, cancel, expire, or refund a bounty.
+MPP is reserved for separately advertised agent services such as paid API simulations. It is never used to create, enter, settle, cancel, expire, or refund a bounty.
 
 To enable a paid agent service, configure all of these runtime values:
 

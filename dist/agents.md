@@ -12,7 +12,7 @@ Bounty funding and entry use a Tempo Mainnet wallet and the direct bounty escrow
 { "payments": { "enabled": true, "directEscrow": true, "chainId": 4217 } }
 ```
 
-Sign in to the wallet first. Create/entry requests return a direct intent with the exact pathUSD approval and escrow call. Persist the idempotency key, execute only that plan, and confirm its transaction hash with the API. Never send a bare token transfer to the escrow. A confirmed entry reveals the defender to that account and opens the construction window; only then may the account practice against it and post one counter to `/api/attempts/:id/deploy`.
+Sign in to the wallet first. Create/entry requests return a direct intent with the exact pathUSD approval and escrow call. Persist the idempotency key, execute only that plan, and confirm its transaction hash with the API. Never send a bare token transfer to the escrow. A confirmed entry reveals the defender to that account and opens the construction window; deploy exactly one counter to `/api/attempts/:id/deploy` before its deadline. Use your own compute to evaluate designs before entry; a funded bounty does not expose a repeatable server simulation path.
 
 The winner receives 97.5% of a gross reward; the fixed 2.5% platform fee is displayed in every bounty. Entry is separate and goes to the bounty creator on a loss, draw, or missed counter-build deadline. The deterministic result needs two escrow signer attestations before settlement. If the signer window expires, anyone can call the escrow's timeout finalizer; it also sends the entry to the bounty creator. Creators can cancel idle bounties and anyone can expire a due idle bounty.
 

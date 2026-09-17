@@ -305,6 +305,103 @@
   width: 100%;
   margin: 18px 0 5px;
 }
+.participant-prompt {
+  margin: 18px 0 5px;
+  padding: 16px 18px;
+  border: 1px solid #3d514a;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #20302b, #1b2424);
+}
+.participant-prompt-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.participant-prompt-heading strong {
+  font-size: 14px;
+  color: #e8eee9;
+}
+.participant-prompt-heading span {
+  font: 10px monospace;
+  letter-spacing: 1px;
+  color: var(--gold);
+  text-transform: uppercase;
+}
+.participant-prompt p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #aab9b0;
+  margin: 8px 0 12px;
+}
+.participant-prompt .field {
+  margin: 0 0 10px;
+}
+.participant-prompt .field input {
+  background: #151b1c;
+}
+.identity-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #c4d0c7;
+  cursor: pointer;
+}
+.identity-check input {
+  width: auto;
+  min-height: 0;
+  margin-top: 3px;
+  accent-color: var(--gold);
+}
+.participant-prompt .hint {
+  font-size: 11px;
+  margin: 9px 0 0;
+}
+.attempt-identity {
+  display: block;
+  min-width: 0;
+}
+.attempt-identity strong {
+  display: block;
+  font-size: 13px;
+  color: #e7eee9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attempt-identity small {
+  display: block;
+  margin-top: 4px;
+  color: #93a69b;
+  font-size: 10px;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attempt-outcome {
+  display: block;
+  margin-top: 4px;
+  color: #e2b55c;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+.result-identity {
+  margin: 12px auto 0;
+  padding: 10px 13px;
+  width: min(460px, 100%);
+  border: 1px solid #354840;
+  border-radius: 6px;
+  background: #16221f;
+  color: #a9beb2;
+  font-size: 12px;
+}
+.result-identity .attempt-identity {
+  margin-top: 6px;
+  text-align: left;
+}
 .contract-expiry {
   font: 11px/1.8 monospace;
   color: #889c8e;

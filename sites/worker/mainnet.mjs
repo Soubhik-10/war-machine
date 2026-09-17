@@ -11,6 +11,7 @@ import {
   createWalletClient,
   encodeFunctionData,
   getAddress,
+  keccak256,
   parseAbi,
   recoverMessageAddress,
   recoverTypedDataAddress,
@@ -86,6 +87,25 @@ const text = (value, max, label) => {
     `Invalid ${label}.`,
   );
   return value.trim();
+};
+const optionalParticipantName = (value) =>
+  value === undefined || value === null || value === ""
+    ? null
+    : text(value, 28, "pilot or machine name");
+const participantIdentity = (body) => {
+  const name = optionalParticipantName(body.participantName);
+  check(
+    body.showAddress === undefined || typeof body.showAddress === "boolean",
+    "Choose whether to show your wallet address.",
+  );
+  return { participantName: name, showAddress: body.showAddress === true };
+};
+const participantMachineName = (blueprint) => {
+  try {
+    return blueprint ? unpackChallenge(parse(blueprint), true).machine.name : null;
+  } catch {
+    return null;
+  }
 };
 const signInMessage = (value) => {
   check(
@@ -349,7 +369,6 @@ function catalog(config) {
       "share machines",
       "browse",
       "validate",
-      "practice",
       ...(acceptingNewBounties
         ? [
             "create and fund a bounty with Tempo Wallet",
@@ -374,7 +393,7 @@ function catalog(config) {
       method: "tempo",
       intent: "charge",
       scope:
-        "A zero-value Tempo proof authenticates the wallet for autonomous agent operations; paid practice remains a separate charge.",
+        "A zero-value Tempo proof authenticates the wallet for autonomous agent operations; MPP agent simulations remain separately priced.",
       ...(config.agentMppEnabled
         ? {
             routes: [
@@ -496,7 +515,7 @@ const discovery = (config) => ({
           : { ready: false, reason: config.settlementReason },
         mpp: !!config.agentMppEnabled,
         mppScope: config.agentMppEnabled
-          ? "Zero-value Tempo proof authorizes the wallet for autonomous REST and MCP bounty operations; paid practice is separately priced."
+          ? "Zero-value Tempo proof authorizes the wallet for autonomous REST and MCP bounty operations; MPP agent simulations are separately priced."
           : "MPP agent billing is not configured.",
         ...(config.agentMppEnabled
           ? {
@@ -528,7 +547,7 @@ const discovery = (config) => ({
         reason: config.reason,
       },
   authentication: {
-    guest: ["catalog", "bounties", "validation", "practice"],
+    guest: ["catalog", "bounties", "validation"],
     account: [
       "create/cancel bounty",
       "official entry",
@@ -546,7 +565,6 @@ const discovery = (config) => ({
     results: "deterministic replay; two escrow signer attestations required",
     timeout:
       "counter-build expiry settles as a loss; entry goes to bounty creator",
-    practicePays: false,
     officialSeed: "server chosen",
   },
 });
@@ -576,7 +594,7 @@ const openapi = {
       post: {
         summary: "Stateless MCP Streamable HTTP endpoint",
         description:
-          "Connect an MCP client to this endpoint. Read, validation and practice tools are public; bounty mutations accept the same zero-value Tempo MPP proof in Payment-Authorization as the REST API. Returned direct escrow plans must be signed by the caller's own Tempo wallet/access key.",
+          "Connect an MCP client to this endpoint. Read and validation tools are public; bounty mutations accept the same zero-value Tempo MPP proof in Payment-Authorization as the REST API. MPP-priced agent simulations are separate from bounty entries. Returned direct escrow plans must be signed by the caller's own Tempo wallet/access key.",
       },
     },
     "/rules": { get: {} },
@@ -605,7 +623,7 @@ const openapi = {
     },
     "/agent/practice": {
       post: {
-        summary: "Run one MPP-paid practice battle",
+        summary: "Run one MPP-paid simulation",
         description:
           "Available only when discovery payments.mpp is true. The first request returns an MPP 402 challenge; retry with the exact Payment-Authorization credential. This route is paid separately from autonomous bounty operations and requires an existing wallet session or agent key.",
         security: [{ bearerAuth: [] }],
@@ -734,7 +752,7 @@ async function dbAuth(db, request) {
 const requireAuth = (auth) =>
   check(
     auth,
-    "Connect a Tempo wallet for bounty actions. Building and practice are open to guests.",
+    "Connect a Tempo wallet for bounty actions. Building and local simulations are open to guests.",
     401,
   );
 const requireOwner = (auth) =>
@@ -981,7 +999,7 @@ async function activity(db, accountId) {
   for (const row of finances.results) {
     const message =
       {
-        "agent-mpp-practice": "Paid agent practice",
+        "agent-mpp-practice": "Paid agent simulation",
         "entry-paid": "Entry payment",
         "reward-funded": "Reward funding",
         "winner-payout": "Winner payout",
@@ -1085,16 +1103,31 @@ async function bountyView(db, row, viewer = null, history = false) {
   if (history) {
     const rows = await db
       .prepare(
-        "SELECT id,result,created,updated FROM attempts WHERE bounty=? AND status IN ('settled','refunded') ORDER BY created DESC LIMIT 20",
+        "SELECT a.id,a.result,a.blueprint,a.participant_name,a.show_address,a.created,a.updated,ac.payout_address FROM attempts a LEFT JOIN accounts ac ON ac.id=a.account WHERE a.bounty=? AND a.status IN ('settled','refunded') ORDER BY a.created DESC LIMIT 20",
       )
       .bind(row.id)
       .all();
-    value.history = rows.results.map((attempt) => ({
-      id: attempt.id,
-      result: attempt.result ? parse(attempt.result) : null,
-      created: attempt.created,
-      updated: attempt.updated,
-    }));
+    value.history = rows.results.map((attempt) => {
+      let machineName = null;
+      try {
+        machineName = attempt.blueprint
+          ? unpackChallenge(parse(attempt.blueprint), true).machine.name
+          : null;
+      } catch {
+        machineName = null;
+      }
+      return {
+        id: attempt.id,
+        participantName: attempt.participant_name || null,
+        machineName,
+        addressVisible: attempt.show_address === 1,
+        participantAddress:
+          attempt.show_address === 1 ? attempt.payout_address || null : null,
+        result: attempt.result ? parse(attempt.result) : null,
+        created: attempt.created,
+        updated: attempt.updated,
+      };
+    });
   }
   return value;
 }
@@ -1213,6 +1246,22 @@ async function mppCharge(
   request,
   { amountUnits, recipient, operation, description, meta, expires },
 ) {
+  // `requiresAuth` advertises Payment-Authorization so a normal Bearer
+  // session can coexist with an MPP credential. Some clients, including the
+  // Tempo request CLI, still send the standard Authorization: Payment header
+  // because they do not pass the challenge header override to their
+  // transport. Normalize that form before MPP verification, but only when the
+  // value is actually a Payment credential so ordinary Bearer auth is never
+  // shadowed.
+  const mppRequest = request.headers.get("Payment-Authorization")
+    ? request
+    : (() => {
+        const authorization = request.headers.get("Authorization");
+        if (!authorization || !/^Payment\s+/i.test(authorization)) return request;
+        const headers = new Headers(request.headers);
+        headers.set("Payment-Authorization", authorization);
+        return new Request(request.clone(), { headers });
+      })();
   const method = tempoMpp.charge({
       currency: config.token,
       decimals: config.decimals,
@@ -1222,11 +1271,14 @@ async function mppCharge(
       waitForConfirmation: true,
       sponsorBudget: false,
     }),
+    // Advertise the standard Authorization header until a client has already
+    // supplied the split header. This keeps the challenge HMAC identical for
+    // Tempo CLI clients, which do not preserve a custom challenge header.
     mppx = Mppx.create({
       methods: [method],
       secretKey: config.mppSecret,
       realm: new URL(config.origin).hostname,
-      requiresAuth: true,
+      requiresAuth: !!request.headers.get("Payment-Authorization"),
     }),
     result = await mppx.charge({
       amount: display(amountUnits),
@@ -1235,9 +1287,9 @@ async function mppCharge(
       description,
       meta,
       expires: new Date(expires).toISOString(),
-    })(request);
+    })(mppRequest);
   if (result.status === 402) return { paid: false, response: result.challenge };
-  const source = mppCredentialSource(request);
+  const source = mppCredentialSource(mppRequest);
   return {
     paid: true,
     source,
@@ -1464,7 +1516,7 @@ async function createBounty(db, request, auth, body, key, config) {
     409,
   );
   integer(body.hours, 0, 8760, "Duration");
-  check(typeof body.listed === "boolean", "Choose board visibility.");
+  const listed = body.listed !== false;
   const entry = await amount(body.entry, "Entry", config),
     reward = await amount(body.reward, "Gross reward", config, {
       allowZero: false,
@@ -1520,7 +1572,7 @@ async function createBounty(db, request, auth, body, key, config) {
           entry: String(entry),
           reward: String(reward),
           hours: body.hours,
-          listed: body.listed,
+          listed,
         }),
         String(reward),
         "reward-funding",
@@ -1571,7 +1623,7 @@ async function createBounty(db, request, auth, body, key, config) {
           0,
           0,
           "open",
-          body.listed ? 1 : 0,
+          listed ? 1 : 0,
           body.hours ? created + body.hours * 3600000 : null,
           null,
           null,
@@ -1627,7 +1679,14 @@ async function createBounty(db, request, auth, body, key, config) {
 
 async function enterBounty(db, request, auth, bountyId, body, key, config) {
   requireOwner(auth);
-  fields(body, ["blueprint", "maxEntry", "maxPlatformFeeBps"]);
+  fields(body, [
+    "blueprint",
+    "maxEntry",
+    "maxPlatformFeeBps",
+    "participantName",
+    "showAddress",
+  ]);
+  const identity = participantIdentity(body);
   const previous = await prior(
     db,
     auth.account,
@@ -1640,7 +1699,7 @@ async function enterBounty(db, request, auth, bountyId, body, key, config) {
   const row = await bountyRow(db, bountyId);
   check(
     auth.account !== row.owner,
-    "You can practice against your own bounty, but cannot claim it.",
+    "You cannot enter your own bounty.",
     403,
   );
   check(
@@ -1705,7 +1764,11 @@ async function enterBounty(db, request, auth, bountyId, body, key, config) {
           bountyId,
           key,
           digest,
-          json({ blueprint }),
+          json({
+            blueprint,
+            participantName: identity.participantName,
+            showAddress: identity.showAddress,
+          }),
           String(entry),
           "entry",
           expires,
@@ -1754,7 +1817,7 @@ async function enterBounty(db, request, auth, bountyId, body, key, config) {
     await db.batch([
       db
         .prepare(
-          "INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,error,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,error,created,updated,participant_name,show_address) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         )
         .bind(
           attempt,
@@ -1767,6 +1830,8 @@ async function enterBounty(db, request, auth, bountyId, body, key, config) {
           null,
           now(),
           now(),
+          identity.participantName,
+          identity.showAddress ? 1 : 0,
         ),
       db
         .prepare(
@@ -1833,10 +1898,20 @@ async function attemptView(db, attemptId, viewer) {
     "Only the bounty creator and paid challenger can inspect this attempt.",
     403,
   );
+  const participant = attempt.show_address
+    ? await db
+        .prepare("SELECT payout_address FROM accounts WHERE id=?")
+        .bind(attempt.account)
+        .first()
+    : null;
   const value = {
     id: attempt.id,
     bounty: attempt.bounty,
     account: attempt.account,
+    participantName: attempt.participant_name || null,
+    machineName: participantMachineName(attempt.blueprint),
+    addressVisible: attempt.show_address === 1,
+    participantAddress: participant?.payout_address || null,
     economics: payoutQuote(
       bounty.reward_units,
       bounty.entry_units,
@@ -2371,11 +2446,8 @@ const validSignature = (value) =>
   /^0x[0-9a-fA-F]{130}$/.test(value) &&
   ["1b", "1c"].includes(value.slice(-2).toLowerCase()) &&
   BigInt("0x" + value.slice(66, 130)) <= SECP256K1N_HALF;
-const directPlan = (config, call, approvalUnits = 0n) => ({
-  chainId: config.chainId,
-  token: config.token,
-  escrow: config.escrowAddress,
-  approval:
+const directPlan = (config, call, approvalUnits = 0n) => {
+  const approval =
     approvalUnits > 0n
       ? {
           to: config.token,
@@ -2386,9 +2458,20 @@ const directPlan = (config, call, approvalUnits = 0n) => ({
           }),
           amount: approvalUnits.toString(),
         }
-      : null,
-  call: { to: config.escrowAddress, data: call },
-});
+      : null;
+  const escrowCall = { to: config.escrowAddress, data: call };
+  return {
+    chainId: config.chainId,
+    token: config.token,
+    escrow: config.escrowAddress,
+    approval,
+    call: escrowCall,
+    // Tempo executes `calls` atomically, so an approval cannot be mined
+    // without the matching escrow action. This is the agent-facing form;
+    // approval/call remain for older browser clients.
+    calls: approval ? [approval, escrowCall] : [escrowCall],
+  };
+};
 const settlementMessage = (payload) => ({
   bountyId: BigInt(payload.bountyId),
   attemptNonce: BigInt(payload.attemptNonce),
@@ -2542,7 +2625,7 @@ async function directCreateIntent(db, auth, body, key, config) {
     409,
   );
   integer(body.hours, 0, 8760, "Duration");
-  check(typeof body.listed === "boolean", "Choose board visibility.");
+  const listed = body.listed !== false;
   const entry = boundedUnits(body.entry),
     reward = boundedUnits(body.reward),
     blueprint = canonicalBlueprint(body.blueprint),
@@ -2595,7 +2678,7 @@ async function directCreateIntent(db, auth, body, key, config) {
       entry: entry.toString(),
       reward: reward.toString(),
       expiresAt,
-      listed: body.listed,
+      listed,
       platformFeeBps: PLATFORM_FEE_BPS,
     };
   const termsHash = "0x" + (await hex(json(terms)));
@@ -2614,7 +2697,7 @@ async function directCreateIntent(db, auth, body, key, config) {
         blueprint,
         entry: entry.toString(),
         reward: reward.toString(),
-        listed: body.listed,
+        listed,
         expires,
         expiresAt,
         termsHash,
@@ -2662,8 +2745,14 @@ function directPlanFromCreate(config, hold) {
 async function directEntryIntent(db, auth, bountyId, body, key, config) {
   requireScope(auth, "enter");
   check(config.acceptingNewBounties, config.settlementReason, 503);
-  fields(body, ["maxEntry", "maxPlatformFeeBps"]);
+  fields(body, [
+    "maxEntry",
+    "maxPlatformFeeBps",
+    "participantName",
+    "showAddress",
+  ]);
   validKey(key);
+  const identity = participantIdentity(body);
   const row = await bountyRow(db, bountyId);
   check(
     row.status === "open",
@@ -2717,7 +2806,11 @@ async function directEntryIntent(db, auth, bountyId, body, key, config) {
       bountyId,
       key,
       digest,
-      json({ escrowBountyId: row.escrow_bounty_id }),
+      json({
+        escrowBountyId: row.escrow_bounty_id,
+        participantName: identity.participantName,
+        showAddress: identity.showAddress,
+      }),
       entry.toString(),
       "direct-entry",
       created + 24 * 60 * 60 * 1000,
@@ -2920,7 +3013,7 @@ async function confirmDirectIntent(db, auth, intentId, hash, config) {
   await db.batch([
     db
       .prepare(
-        "INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,error,created,updated,escrow_entry_tx,settlement_payload,build_deadline,build_requested_seconds) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,error,created,updated,escrow_entry_tx,settlement_payload,build_deadline,build_requested_seconds,participant_name,show_address) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
       )
       .bind(
         attempt,
@@ -2937,6 +3030,8 @@ async function confirmDirectIntent(db, auth, intentId, hash, config) {
         null,
         buildDeadline,
         requestedSeconds,
+        saved.participantName,
+        saved.showAddress ? 1 : 0,
       ),
     db
       .prepare(
@@ -3849,7 +3944,175 @@ async function sendV3Settlement(env, config, attempt, payload) {
   }).sendRawTransaction({ serializedTransaction: raw });
 }
 
-async function finalizeExpiredV3Builds(db) {
+export function automaticTimeoutState(attempt, bounty, at = now()) {
+  if (attempt?.status !== "engineering") return "not-engineering";
+  const buildDeadline = Number(attempt.build_deadline || 0);
+  if (!buildDeadline || at < buildDeadline) return "build-window-open";
+  const escrowDeadline = Number(bounty?.escrow_attempt_deadline || 0);
+  if (!escrowDeadline || at < escrowDeadline) return "signable-loss";
+  return "onchain-finalizer";
+}
+
+async function prepareV3Timeout(env, config, bountyId, attemptId) {
+  const account = v3SettlementAccount(env),
+    call = encodeFunctionData({
+      abi: ESCROW_ABI,
+      functionName: "forfeitTimedOutAttempt",
+      args: [BigInt(bountyId)],
+    }),
+    lane = BigInt(
+      "0x" + (await hex("v3-timeout:" + attemptId)).slice(0, 48),
+    ),
+    validBefore = Math.floor(now() / 1000) + 24 * 60 * 60,
+    wallet = createWalletClient({
+      account,
+      chain: tempo,
+      transport: http(config.rpcUrl, { timeout: 15_000, retryCount: 0 }),
+    }),
+    prepared = await wallet.prepareTransactionRequest({
+      account,
+      to: config.escrowAddress,
+      data: call,
+      value: 0n,
+      nonce: 0,
+      nonceKey: lane,
+      feeToken: config.token,
+      validBefore,
+    }),
+    raw = await wallet.signTransaction({
+      chainId: config.chainId,
+      type: "tempo",
+      to: config.escrowAddress,
+      data: call,
+      value: 0n,
+      nonce: 0,
+      nonceKey: lane,
+      feeToken: prepared.feeToken,
+      validBefore,
+      gas: prepared.gas,
+      maxFeePerGas: prepared.maxFeePerGas,
+      maxPriorityFeePerGas: prepared.maxPriorityFeePerGas,
+    });
+  return { raw, hash: keccak256(raw), validBefore };
+}
+
+const timeoutReceiptPending = (error) =>
+  /not confirmed yet|awaiting finality|awaiting canonical finality/i.test(
+    String(error?.message || error),
+  );
+
+async function finalizeOnchainV3Timeout(db, env, config, attempt, bounty) {
+  const requestKey = "automatic-timeout-" + attempt.id,
+    bodyValue = {
+      automatic: true,
+      action: "timeout-forfeit",
+      escrowBountyId: String(bounty.escrow_bounty_id),
+      attemptId: attempt.id,
+    },
+    digest = await hex(json(bodyValue));
+  let hold = await db
+    .prepare(
+      "SELECT * FROM payment_holds WHERE account=? AND bounty=? AND request_key=? AND purpose='direct-timeout-forfeit' ORDER BY created DESC LIMIT 1",
+    )
+    .bind(attempt.account, bounty.id, requestKey)
+    .first();
+  if (!hold) {
+    const created = now();
+    await db
+      .prepare(
+        "INSERT INTO payment_holds (id,account,bounty,request_key,digest,body,amount_units,purpose,expires,status,provider_ref,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(
+        id(),
+        attempt.account,
+        bounty.id,
+        requestKey,
+        digest,
+        json(bodyValue),
+        "0",
+        "direct-timeout-forfeit",
+        created + 7 * 24 * 60 * 60 * 1000,
+        "awaiting-onchain",
+        null,
+        created,
+        created,
+      )
+      .run();
+    hold = await db
+      .prepare(
+        "SELECT * FROM payment_holds WHERE account=? AND bounty=? AND request_key=? AND purpose='direct-timeout-forfeit' ORDER BY created DESC LIMIT 1",
+      )
+      .bind(attempt.account, bounty.id, requestKey)
+      .first();
+  }
+  if (!hold || hold.status === "accepted") return;
+
+  let stored = {};
+  try {
+    stored = parse(hold.body);
+  } catch {
+    stored = { ...bodyValue };
+  }
+  let raw = typeof stored.rawTransaction === "string" ? stored.rawTransaction : null,
+    hash = validHash(hold.provider_ref) ? hold.provider_ref : null,
+    validBefore = Number(stored.validBefore || 0);
+  if (hash && validBefore > 0 && validBefore <= Math.floor(now() / 1000)) {
+    raw = null;
+    hash = null;
+  }
+  if (!hash || !raw) {
+    const prepared = await prepareV3Timeout(
+      env,
+      config,
+      bounty.escrow_bounty_id,
+      attempt.id,
+    );
+    raw = prepared.raw;
+    hash = prepared.hash;
+    validBefore = prepared.validBefore;
+    const saved = await db
+      .prepare(
+        "UPDATE payment_holds SET body=?,provider_ref=?,updated=? WHERE id=? AND status='awaiting-onchain'",
+      )
+      .bind(
+        json({ ...bodyValue, rawTransaction: raw, validBefore }),
+        hash,
+        now(),
+        hold.id,
+      )
+      .run();
+    if (saved.meta.changes !== 1) return;
+  }
+
+  const client = createClient({
+    account: v3SettlementAccount(env),
+    feeToken: config.token,
+    transport: http(config.rpcUrl, { timeout: 15_000, retryCount: 0 }),
+  });
+  try {
+    await client.sendRawTransaction({ serializedTransaction: raw });
+  } catch (error) {
+    // A lost relay response is recoverable because the exact raw transaction
+    // and its deterministic hash are already durable in the hold.
+    if (!timeoutReceiptPending(error)) {
+      const message = String(error?.message || error);
+      if (!/already known|already imported|nonce/i.test(message)) throw error;
+    }
+  }
+  try {
+    await confirmDirectControl(
+      db,
+      { account: attempt.account, role: "owner" },
+      hold.id,
+      hash,
+      config,
+    );
+  } catch (error) {
+    if (!timeoutReceiptPending(error)) throw error;
+  }
+}
+
+export async function finalizeExpiredV3Builds(db, env, config) {
   const expired = (
     await db
       .prepare(
@@ -3865,10 +4128,16 @@ async function finalizeExpiredV3Builds(db) {
       .first();
     if (!attempt || attempt.status !== "engineering") continue;
     const bounty = await bountyRow(db, attempt.bounty);
-    const deadline = Math.floor(
-      Number(bounty.escrow_attempt_deadline || 0) / 1000,
-    );
-    if (deadline <= Math.floor(now() / 1000)) continue;
+    const state = automaticTimeoutState(attempt, bounty);
+    if (state === "onchain-finalizer") {
+      try {
+        await finalizeOnchainV3Timeout(db, env, config, attempt, bounty);
+      } catch (error) {
+        console.error("War Machines V3 timeout finalizer:", error);
+      }
+      continue;
+    }
+    if (state !== "signable-loss") continue;
     const record = await immutableRecord(
       db,
       attempt,
@@ -3926,7 +4195,7 @@ export async function runAutomaticSettlement(env) {
   try {
     v3SettlementAccount(env);
     await reopenDefendedBounties(env.DB);
-    await finalizeExpiredV3Builds(env.DB);
+    await finalizeExpiredV3Builds(env.DB, env, config);
     const jobs = (
       await env.DB.prepare(
         "SELECT * FROM settlement_jobs WHERE state!='complete' AND next_run<=? AND lease_until<=? ORDER BY next_run,created LIMIT 10",
@@ -3996,7 +4265,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     ctx.waitUntil(runAutomaticSettlement(env));
   if (path === "/.well-known/war-machines.json" && request.method === "GET")
     return response(discovery(config));
-  if (path === "/mcp")
+  if (path === "/mcp" || path === "/mcp/")
     return handleMcpRequest(request, (subrequest) =>
       mainnetFetch(subrequest, env, ctx, serveStaticAsset),
     );
@@ -4017,8 +4286,11 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         403,
       );
     const body = ["POST", "PATCH"].includes(method)
-        ? await bodyOf(request)
-        : {},
+      // Keep the original request readable for MPP authentication. The
+      // Tempo CLI may need the request clone when normalizing its standard
+      // Authorization header to Payment-Authorization.
+      ? await bodyOf(request.clone())
+      : {},
       auth = await dbAuth(db, request);
     if (path === "/api/rules" && method === "GET")
       return response(catalog(config));
@@ -4042,7 +4314,10 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     if (path === "/api/blueprints/validate" && method === "POST")
       return response(await inspection(db, body, auth?.account));
     if (path === "/api/practice" && method === "POST")
-      return response(await practice(db, body, auth?.account));
+      fail(
+        410,
+        "Mainnet bounty simulations are not available through this route. A paid entry unlocks one timed counter deployment.",
+      );
     if (path === "/api/auth/challenge" && method === "POST")
       return response(await signInChallenge(db, body, url.origin));
     if (path === "/api/auth/verify" && method === "POST") {
@@ -4081,7 +4356,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         const cached = await savedMppResult(db, previous);
         check(
           cached,
-          "The paid practice result is temporarily unavailable; retry with the same idempotency key.",
+          "The paid agent simulation is temporarily unavailable; retry with the same idempotency key.",
           503,
         );
         return response(cached.result, 200, {
@@ -4092,7 +4367,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         amountUnits: config.agentMppPriceUnits,
         recipient: config.agentMppRecipient,
         operation,
-        description: "War Machines paid agent practice",
+        description: "War Machines paid agent simulation",
         meta: {
           kind: "agent-practice",
           engineHash: CLIENT_ENGINE_HASH,

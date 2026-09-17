@@ -4,9 +4,11 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { privateKeyToAccount } from "viem/accounts";
+import { encodeFunctionData } from "viem";
 import worker from "../sites/worker/index.mjs";
 import {
   reopenDefendedBounties,
+  automaticTimeoutState,
   runtimeConfig,
   validateEscrowAttestation,
 } from "../sites/worker/mainnet.mjs";
@@ -82,6 +84,12 @@ class D1Mock {
     this.sqlite.exec(
       await readFile(
         new URL("../drizzle/0006_reset_bounty_board_v3.sql", import.meta.url),
+        "utf8",
+      ),
+    );
+    this.sqlite.exec(
+      await readFile(
+        new URL("../drizzle/0007_attempt_identity.sql", import.meta.url),
         "utf8",
       ),
     );
@@ -207,6 +215,13 @@ test("Tempo mode is fail-closed and never falls back to sandbox credits", async 
   assert.equal(rules.status, 200);
   assert.equal(rules.body.startingCredits, 0);
   assert.equal(rules.body.mpp.enabled, false);
+  const practice = await call(env, "/api/practice", "POST", {
+    challenger: packChallenge(PRESETS[0], "foundry", 0),
+    defender: packChallenge(PRESETS[1], "foundry", 0),
+    seed: 42,
+  });
+  assert.equal(practice.status, 410);
+  assert.match(practice.body.error, /paid entry.*timed counter deployment/i);
 });
 
 test("MPP practice advertises a bounded Tempo charge and returns a challenge before payment", async (t) => {
@@ -353,6 +368,21 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
   const initBody = await init.json();
   assert.equal(initBody.result.serverInfo.name, "war-machines");
   assert.equal(initBody.result.protocolVersion, "2025-11-25");
+
+  const initWithTrailingSlash = await worker.fetch(
+    new Request("https://foundry.example/mcp/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 11,
+        method: "initialize",
+        params: { protocolVersion: "2025-11-25" },
+      }),
+    }),
+    env,
+  );
+  assert.equal(initWithTrailingSlash.status, 200);
 
   const listed = await worker.fetch(
     new Request("https://foundry.example/mcp", {
@@ -562,6 +592,29 @@ test("a settled defense reopens the bounty and keeps its reward funded", async (
   assert.equal(reopened.reserve_units, "1000000");
 });
 
+test("expired engineering attempts move to the public onchain finalizer path", () => {
+  const stamp = Date.now(),
+    attempt = { status: "engineering", build_deadline: stamp - 10_000 },
+    bounty = { escrow_attempt_deadline: stamp - 5_000 };
+  assert.equal(automaticTimeoutState(attempt, bounty, stamp), "onchain-finalizer");
+  assert.equal(
+    automaticTimeoutState(
+      { ...attempt, build_deadline: stamp + 10_000 },
+      bounty,
+      stamp,
+    ),
+    "build-window-open",
+  );
+  assert.equal(
+    automaticTimeoutState(
+      attempt,
+      { escrow_attempt_deadline: stamp + 5_000 },
+      stamp,
+    ),
+    "signable-loss",
+  );
+});
+
 test("a withdrawn, claimed or depleted bounty is never reopened by recovery", async (t) => {
   const DB = new D1Mock();
   await DB.migrate();
@@ -756,6 +809,65 @@ test("browser wallet client uses Tempo Wallet rather than an injected provider",
   assert.doesNotMatch(source, /window\.ethereum/);
 });
 
+test("source wallet MCP only accepts the exact atomic War Machines escrow plan", async () => {
+  const { validateEscrowPlan } = await import(
+    "../scripts/tempo-wallet-mcp.mjs"
+  );
+  const token = "0x20c0000000000000000000000000000000000000";
+  const escrow = "0xb14a3aa99c9349094612143089f55ae5372deb24";
+  const approval = {
+    to: token,
+    data: encodeFunctionData({
+      abi: [{
+        type: "function",
+        name: "approve",
+        stateMutability: "nonpayable",
+        inputs: [
+          { name: "spender", type: "address" },
+          { name: "amount", type: "uint256" },
+        ],
+        outputs: [{ name: "", type: "bool" }],
+      }],
+      functionName: "approve",
+      args: [escrow, 50_000n],
+    }),
+    amount: "50000",
+  };
+  const call = {
+    to: escrow,
+    data: encodeFunctionData({
+      abi: [{
+        type: "function",
+        name: "enterBounty",
+        stateMutability: "nonpayable",
+        inputs: [{ name: "bountyId", type: "uint256" }],
+        outputs: [],
+      }],
+      functionName: "enterBounty",
+      args: [1n],
+    }),
+  };
+  const checked = validateEscrowPlan({
+    chainId: 4217,
+    token,
+    escrow,
+    approval,
+    call,
+    calls: [approval, call],
+  });
+  assert.equal(checked.calls.length, 2);
+  assert.throws(
+    () => validateEscrowPlan({
+      chainId: 4217,
+      token,
+      escrow,
+      approval,
+      call: { ...call, to: "0x4444444444444444444444444444444444444444" },
+    }),
+    /allowed War Machines escrow method|plan call/,
+  );
+});
+
 test("paid bounty actions establish a Tempo session only when payment starts", async () => {
   const source = await readFile(
     new URL("../dist/bounties.mjs", import.meta.url),
@@ -770,7 +882,33 @@ test("paid bounty actions establish a Tempo session only when payment starts", a
   assert.match(source, /request\.intentId && request\.transactionHash/);
   assert.match(source, /prepared\.transactionHash/);
   assert.match(source, /Discard request/);
+  assert.match(source, /A wallet transaction is already saved for a different request/);
+  assert.match(source, /No transaction hash means the wallet has not been charged/);
+  assert.match(source, /entryInput\.value = "0\.01"/);
   assert.match(source, /Tempo RPC/i);
+});
+
+test("static assets use validators while HTML stays immediately refreshable", async () => {
+  const { serveStaticAsset } = await import(
+    `../sites/worker/static-assets.mjs?cache-test=${Date.now()}`
+  );
+  const first = serveStaticAsset(
+    new Request("https://foundry.example/style.css"),
+  );
+  assert.equal(first.status, 200);
+  assert.match(first.headers.get("cache-control"), /stale-while-revalidate/);
+  const etag = first.headers.get("etag");
+  assert.match(etag, /^"[0-9a-f]+"$/);
+  const cached = serveStaticAsset(
+    new Request("https://foundry.example/style.css", {
+      headers: { "if-none-match": etag },
+    }),
+  );
+  assert.equal(cached.status, 304);
+  const document = serveStaticAsset(
+    new Request("https://foundry.example/index.html"),
+  );
+  assert.equal(document.headers.get("cache-control"), "no-cache");
 });
 
 test("Tempo RPC transport failures remain retry-safe payment errors", async () => {
@@ -1059,12 +1197,12 @@ test("Sites Worker + D1 supports private build vaults and authoritative sandbox 
       reward: 100,
       maxPlatformFeeBps: 250,
       hours: 1,
-      listed: true,
     },
     owner.token,
     "create_worker_bounty_0001",
   );
   assert.equal(created.status, 201);
+  assert.equal(created.body.listed, true);
   assert.equal(created.body.platformFee, 2.5);
   assert.equal(created.body.payout, 97.5);
   const inspection = await call(env, "/api/blueprints/validate", "POST", {
@@ -1093,6 +1231,8 @@ test("Sites Worker + D1 supports private build vaults and authoritative sandbox 
       ),
       maxEntry: 0,
       maxPlatformFeeBps: 250,
+      participantName: "Copper Fox",
+      showAddress: false,
     },
     challenger.token,
     "enter_worker_bounty_0001",
@@ -1100,7 +1240,16 @@ test("Sites Worker + D1 supports private build vaults and authoritative sandbox 
   assert.equal(entered.status, 202);
   assert.equal(entered.body.status, "settled");
   assert.ok(["win", "loss", "draw"].includes(entered.body.result.outcome));
+  assert.equal(entered.body.participantName, "Copper Fox");
+  assert.equal(entered.body.addressVisible, false);
   const publicAttempt = await call(env, "/api/attempts/" + entered.body.id);
   assert.equal(publicAttempt.status, 200);
+  assert.equal(publicAttempt.body.participantName, "Copper Fox");
+  assert.equal(publicAttempt.body.machineName, PRESETS[1].name);
+  assert.equal(publicAttempt.body.addressVisible, false);
+  const detail = await call(env, "/api/bounties/" + created.body.id);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.history[0].participantName, "Copper Fox");
+  assert.equal(detail.body.history[0].addressVisible, false);
   assert.equal(publicAttempt.body.replay.versions.hash.length, 64);
 });

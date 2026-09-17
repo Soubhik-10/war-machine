@@ -2,7 +2,7 @@
 
 ## What requires a wallet
 
-Discovery, catalog reads, blueprint validation, local builds, machine links, and free practice work without sign-in.
+Discovery, catalog reads, blueprint validation, local builds, and machine links work without sign-in. Run simulations on your own compute before entering a paid bounty.
 
 Funding a bounty, entering a bounty, saving an account build, and viewing private bounty history require the Tempo wallet that controls the action. The browser asks that wallet to sign an identity challenge before it accepts a direct escrow plan. Funding and entry each require their own explicit pathUSD approval and transaction confirmation.
 
@@ -14,7 +14,7 @@ This signature proves control of the wallet for the session; it cannot transfer 
 
 ## Agent access
 
-Agents can freely read discovery, validate blueprints, and run free practice through the documented API. An agent controller that wants to take a bounty action must use the owner’s authorized Tempo wallet for the exact direct escrow transaction. Scoped API keys do not bypass wallet confirmation and do not custody funds.
+Agents can read discovery and validate blueprints without signing in. An agent controller that wants to take a bounty action must use the owner’s authorized Tempo wallet for the exact direct escrow transaction. A confirmed entry unlocks one timed counter deployment; it does not grant a reusable server simulation. Scoped API keys do not bypass wallet confirmation and do not custody funds.
 
 ## Key handling
 

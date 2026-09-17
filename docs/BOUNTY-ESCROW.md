@@ -56,7 +56,7 @@ The UI must show the gross reward, 2.5% fee, winner payout, entry amount, entry 
 
 The defender blueprint is committed by the bounty's immutable `termsHash`, but it is not returned by public Worker routes. Before entry, a bounty exposes its arena, terrain, construction rules, construction cost, mass, fitted-part count, weapon count and economic terms. A confirmed `AttemptEntered` event grants the exact defender only to that challenger account.
 
-That paid challenger gets a server-recorded build deadline, may practice without another payment, then submits one valid counter with `POST /api/attempts/:id/deploy`. The Worker commits the defender, challenger, arena, seed, engine hash and simulation result to `resultHash` before the two signers attest it. Other users cannot obtain the defender from bounty, validation, practice, attempt or replay routes.
+That paid challenger gets a server-recorded build deadline, then submits one valid counter with `POST /api/attempts/:id/deploy`. The Worker commits the defender, challenger, arena, seed, engine hash and simulation result to `resultHash` before the two signers attest it. Other users cannot obtain the defender from bounty, validation, attempt or replay routes.
 
 This escrow's 600-second attempt window gives the Worker a cost-scaled three-to-five-minute construction phase and leaves at least five minutes for the signer quorum and wallet relay. Once the deadline passes, settlement is rejected and the public timeout finalizer sends the entry to the creator. Do not point the public Worker at this escrow until its address, immutable fee constants, signer set, source verification, and signer service have been reviewed and pinned in `runtimeConfig`.
 

@@ -64,7 +64,7 @@ const TOOLS = [
   ),
   tool(
     "war_machines_practice",
-    "Run a free deterministic practice battle. Practice never transfers funds.",
+    "Run a local deterministic simulation with two explicit blueprints. This never operates on a funded bounty.",
     {
       challenger: object("Packed challenger blueprint."),
       defender: object("Packed defender blueprint, unless bountyId is supplied."),
@@ -75,14 +75,14 @@ const TOOLS = [
   ),
   tool(
     "war_machines_create_bounty",
-    "Prepare a direct Tempo createBounty escrow plan. MPP authorizes the wallet; the agent signs the returned approval and call.",
+    "Prepare a direct Tempo createBounty escrow plan. Submit its exact atomic calls through the caller's Tempo wallet; MPP does not replace wallet signing.",
     {
       title: string("Bounty title."),
       blueprint: object("Packed defender blueprint."),
       entry: string("Entry price in pathUSD."),
       reward: string("Gross reward in pathUSD."),
       hours: integer("Expiry duration in hours; zero means no expiry."),
-      listed: { type: "boolean", description: "Whether to list the bounty publicly." },
+      listed: { type: "boolean", description: "Whether to list the bounty publicly. Defaults to true; set false for a link-only bounty." },
       maxPlatformFeeBps: integer("Must be 250 to acknowledge the 2.5% fee."),
       idempotencyKey: string("Unique 16-100 character retry key."),
     },
@@ -92,14 +92,13 @@ const TOOLS = [
       "entry",
       "reward",
       "hours",
-      "listed",
       "maxPlatformFeeBps",
       "idempotencyKey",
     ],
   ),
   tool(
     "war_machines_enter_bounty",
-    "Prepare a direct Tempo enterBounty escrow plan. The confirmed response reveals the defender and build deadline.",
+    "Prepare a direct Tempo enterBounty escrow plan. Submit its exact atomic approval plus enter call through the caller's Tempo wallet; the confirmed response reveals the defender and build deadline.",
     {
       bountyId: string("Bounty UUID."),
       maxEntry: string("Maximum entry price accepted in pathUSD."),
@@ -174,7 +173,7 @@ const TOOLS = [
 ];
 
 const instructions =
-  "Use the free discovery, validation and practice tools first. For a funded operation, inspect the returned exact Tempo transaction plan, sign it with the caller's own Tempo wallet/access key, then confirm the transaction hash. A Payment-Authorization MPP proof authenticates the wallet for autonomous bounty operations; it does not contain or replace a private key. Never alter a returned recipient, token, calldata or amount, and always preserve idempotency keys.";
+  "Use discovery and validation before funding. For a funded operation, inspect the returned exact Tempo transaction plan, sign it with the caller's own Tempo wallet/access key, then confirm the transaction hash. A Payment-Authorization MPP proof authenticates the wallet for autonomous bounty operations; it does not contain or replace a private key. Never alter a returned recipient, token, calldata or amount, and always preserve idempotency keys.";
 
 const corsHeaders = (request) => ({
   "access-control-allow-origin": request.headers.get("origin") || "*",
