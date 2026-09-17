@@ -11,6 +11,7 @@ import {
   createWalletClient,
   encodeFunctionData,
   getAddress,
+  keccak256,
   parseAbi,
   recoverMessageAddress,
   recoverTypedDataAddress,
@@ -3865,7 +3866,175 @@ async function sendV3Settlement(env, config, attempt, payload) {
   }).sendRawTransaction({ serializedTransaction: raw });
 }
 
-async function finalizeExpiredV3Builds(db) {
+export function automaticTimeoutState(attempt, bounty, at = now()) {
+  if (attempt?.status !== "engineering") return "not-engineering";
+  const buildDeadline = Number(attempt.build_deadline || 0);
+  if (!buildDeadline || at < buildDeadline) return "build-window-open";
+  const escrowDeadline = Number(bounty?.escrow_attempt_deadline || 0);
+  if (!escrowDeadline || at < escrowDeadline) return "signable-loss";
+  return "onchain-finalizer";
+}
+
+async function prepareV3Timeout(env, config, bountyId, attemptId) {
+  const account = v3SettlementAccount(env),
+    call = encodeFunctionData({
+      abi: ESCROW_ABI,
+      functionName: "forfeitTimedOutAttempt",
+      args: [BigInt(bountyId)],
+    }),
+    lane = BigInt(
+      "0x" + (await hex("v3-timeout:" + attemptId)).slice(0, 48),
+    ),
+    validBefore = Math.floor(now() / 1000) + 24 * 60 * 60,
+    wallet = createWalletClient({
+      account,
+      chain: tempo,
+      transport: http(config.rpcUrl, { timeout: 15_000, retryCount: 0 }),
+    }),
+    prepared = await wallet.prepareTransactionRequest({
+      account,
+      to: config.escrowAddress,
+      data: call,
+      value: 0n,
+      nonce: 0,
+      nonceKey: lane,
+      feeToken: config.token,
+      validBefore,
+    }),
+    raw = await wallet.signTransaction({
+      chainId: config.chainId,
+      type: "tempo",
+      to: config.escrowAddress,
+      data: call,
+      value: 0n,
+      nonce: 0,
+      nonceKey: lane,
+      feeToken: prepared.feeToken,
+      validBefore,
+      gas: prepared.gas,
+      maxFeePerGas: prepared.maxFeePerGas,
+      maxPriorityFeePerGas: prepared.maxPriorityFeePerGas,
+    });
+  return { raw, hash: keccak256(raw), validBefore };
+}
+
+const timeoutReceiptPending = (error) =>
+  /not confirmed yet|awaiting finality|awaiting canonical finality/i.test(
+    String(error?.message || error),
+  );
+
+async function finalizeOnchainV3Timeout(db, env, config, attempt, bounty) {
+  const requestKey = "automatic-timeout-" + attempt.id,
+    bodyValue = {
+      automatic: true,
+      action: "timeout-forfeit",
+      escrowBountyId: String(bounty.escrow_bounty_id),
+      attemptId: attempt.id,
+    },
+    digest = await hex(json(bodyValue));
+  let hold = await db
+    .prepare(
+      "SELECT * FROM payment_holds WHERE account=? AND bounty=? AND request_key=? AND purpose='direct-timeout-forfeit' ORDER BY created DESC LIMIT 1",
+    )
+    .bind(attempt.account, bounty.id, requestKey)
+    .first();
+  if (!hold) {
+    const created = now();
+    await db
+      .prepare(
+        "INSERT INTO payment_holds (id,account,bounty,request_key,digest,body,amount_units,purpose,expires,status,provider_ref,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(
+        id(),
+        attempt.account,
+        bounty.id,
+        requestKey,
+        digest,
+        json(bodyValue),
+        "0",
+        "direct-timeout-forfeit",
+        created + 7 * 24 * 60 * 60 * 1000,
+        "awaiting-onchain",
+        null,
+        created,
+        created,
+      )
+      .run();
+    hold = await db
+      .prepare(
+        "SELECT * FROM payment_holds WHERE account=? AND bounty=? AND request_key=? AND purpose='direct-timeout-forfeit' ORDER BY created DESC LIMIT 1",
+      )
+      .bind(attempt.account, bounty.id, requestKey)
+      .first();
+  }
+  if (!hold || hold.status === "accepted") return;
+
+  let stored = {};
+  try {
+    stored = parse(hold.body);
+  } catch {
+    stored = { ...bodyValue };
+  }
+  let raw = typeof stored.rawTransaction === "string" ? stored.rawTransaction : null,
+    hash = validHash(hold.provider_ref) ? hold.provider_ref : null,
+    validBefore = Number(stored.validBefore || 0);
+  if (hash && validBefore > 0 && validBefore <= Math.floor(now() / 1000)) {
+    raw = null;
+    hash = null;
+  }
+  if (!hash || !raw) {
+    const prepared = await prepareV3Timeout(
+      env,
+      config,
+      bounty.escrow_bounty_id,
+      attempt.id,
+    );
+    raw = prepared.raw;
+    hash = prepared.hash;
+    validBefore = prepared.validBefore;
+    const saved = await db
+      .prepare(
+        "UPDATE payment_holds SET body=?,provider_ref=?,updated=? WHERE id=? AND status='awaiting-onchain'",
+      )
+      .bind(
+        json({ ...bodyValue, rawTransaction: raw, validBefore }),
+        hash,
+        now(),
+        hold.id,
+      )
+      .run();
+    if (saved.meta.changes !== 1) return;
+  }
+
+  const client = createClient({
+    account: v3SettlementAccount(env),
+    feeToken: config.token,
+    transport: http(config.rpcUrl, { timeout: 15_000, retryCount: 0 }),
+  });
+  try {
+    await client.sendRawTransaction({ serializedTransaction: raw });
+  } catch (error) {
+    // A lost relay response is recoverable because the exact raw transaction
+    // and its deterministic hash are already durable in the hold.
+    if (!timeoutReceiptPending(error)) {
+      const message = String(error?.message || error);
+      if (!/already known|already imported|nonce/i.test(message)) throw error;
+    }
+  }
+  try {
+    await confirmDirectControl(
+      db,
+      { account: attempt.account, role: "owner" },
+      hold.id,
+      hash,
+      config,
+    );
+  } catch (error) {
+    if (!timeoutReceiptPending(error)) throw error;
+  }
+}
+
+export async function finalizeExpiredV3Builds(db, env, config) {
   const expired = (
     await db
       .prepare(
@@ -3881,10 +4050,16 @@ async function finalizeExpiredV3Builds(db) {
       .first();
     if (!attempt || attempt.status !== "engineering") continue;
     const bounty = await bountyRow(db, attempt.bounty);
-    const deadline = Math.floor(
-      Number(bounty.escrow_attempt_deadline || 0) / 1000,
-    );
-    if (deadline <= Math.floor(now() / 1000)) continue;
+    const state = automaticTimeoutState(attempt, bounty);
+    if (state === "onchain-finalizer") {
+      try {
+        await finalizeOnchainV3Timeout(db, env, config, attempt, bounty);
+      } catch (error) {
+        console.error("War Machines V3 timeout finalizer:", error);
+      }
+      continue;
+    }
+    if (state !== "signable-loss") continue;
     const record = await immutableRecord(
       db,
       attempt,
@@ -3942,7 +4117,7 @@ export async function runAutomaticSettlement(env) {
   try {
     v3SettlementAccount(env);
     await reopenDefendedBounties(env.DB);
-    await finalizeExpiredV3Builds(env.DB);
+    await finalizeExpiredV3Builds(env.DB, env, config);
     const jobs = (
       await env.DB.prepare(
         "SELECT * FROM settlement_jobs WHERE state!='complete' AND next_run<=? AND lease_until<=? ORDER BY next_run,created LIMIT 10",
