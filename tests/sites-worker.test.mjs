@@ -1090,12 +1090,12 @@ test("Sites Worker + D1 supports private build vaults and authoritative sandbox 
       reward: 100,
       maxPlatformFeeBps: 250,
       hours: 1,
-      listed: true,
     },
     owner.token,
     "create_worker_bounty_0001",
   );
   assert.equal(created.status, 201);
+  assert.equal(created.body.listed, true);
   assert.equal(created.body.platformFee, 2.5);
   assert.equal(created.body.payout, 97.5);
   const inspection = await call(env, "/api/blueprints/validate", "POST", {

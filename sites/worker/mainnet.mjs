@@ -1515,7 +1515,7 @@ async function createBounty(db, request, auth, body, key, config) {
     409,
   );
   integer(body.hours, 0, 8760, "Duration");
-  check(typeof body.listed === "boolean", "Choose board visibility.");
+  const listed = body.listed !== false;
   const entry = await amount(body.entry, "Entry", config),
     reward = await amount(body.reward, "Gross reward", config, {
       allowZero: false,
@@ -1571,7 +1571,7 @@ async function createBounty(db, request, auth, body, key, config) {
           entry: String(entry),
           reward: String(reward),
           hours: body.hours,
-          listed: body.listed,
+          listed,
         }),
         String(reward),
         "reward-funding",
@@ -1622,7 +1622,7 @@ async function createBounty(db, request, auth, body, key, config) {
           0,
           0,
           "open",
-          body.listed ? 1 : 0,
+          listed ? 1 : 0,
           body.hours ? created + body.hours * 3600000 : null,
           null,
           null,
@@ -2616,7 +2616,7 @@ async function directCreateIntent(db, auth, body, key, config) {
     409,
   );
   integer(body.hours, 0, 8760, "Duration");
-  check(typeof body.listed === "boolean", "Choose board visibility.");
+  const listed = body.listed !== false;
   const entry = boundedUnits(body.entry),
     reward = boundedUnits(body.reward),
     blueprint = canonicalBlueprint(body.blueprint),
@@ -2669,7 +2669,7 @@ async function directCreateIntent(db, auth, body, key, config) {
       entry: entry.toString(),
       reward: reward.toString(),
       expiresAt,
-      listed: body.listed,
+      listed,
       platformFeeBps: PLATFORM_FEE_BPS,
     };
   const termsHash = "0x" + (await hex(json(terms)));
@@ -2688,7 +2688,7 @@ async function directCreateIntent(db, auth, body, key, config) {
         blueprint,
         entry: entry.toString(),
         reward: reward.toString(),
-        listed: body.listed,
+        listed,
         expires,
         expiresAt,
         termsHash,
