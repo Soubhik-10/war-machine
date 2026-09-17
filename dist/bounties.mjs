@@ -357,10 +357,10 @@ export function createBountyUI(adapter) {
   function status(s) {
     const label =
       {
-        busy: "IN TRIAL",
+        busy: "IN PROGRESS",
         completed: "COMPLETED",
         claimed: "REWARD PAID",
-        cancelled: "DELETED",
+        cancelled: "CLOSED",
         expired: "EXPIRED",
       }[s] || s.toUpperCase();
     return `<span class="contract-status ${s}">${esc(label)}</span>`;
@@ -486,7 +486,7 @@ export function createBountyUI(adapter) {
     ARENAS.find((arena) => arena.id === (b.blueprint?.a || scout(b).arena));
   const bountyRules = (b) => b.blueprint?.q || scout(b).rules;
   const sealedPreview = (b) =>
-    `<div class="sealed-defender" role="img" aria-label="Concealed defender: ${scout(b).cost} build credits, ${scout(b).mass} tonnes"><span>◆</span><small>DEFENDER SEALED</small></div>`;
+    `<div class="sealed-defender" role="img" aria-label="Hidden opponent: ${scout(b).cost} build credits, ${scout(b).mass} tonnes"><span>◆</span><small>OPPONENT HIDDEN</small></div>`;
   function drawThumbs(data) {
     $$("[data-contract-thumb]").forEach((c) => {
       const b = data.find((b) => b.id === c.dataset.contractThumb);
@@ -498,7 +498,7 @@ export function createBountyUI(adapter) {
     return `<div class="terrain-tags">${arena.climate ? `<span class="terrain-tag climate" title="${esc(arena.desc)}">${esc(arena.climate.name)}</span>` : ""}${types.map((t) => `<span class="terrain-tag ${t}" title="${esc(TERRAIN_INFO[t]?.effect || "")}">${esc(TERRAIN_INFO[t]?.name || t)}</span>`).join("")}</div>`;
   }
   function feeNotice(b) {
-    return `<div class="notice fee-disclosure"><strong>${b.platformFeeBps ? money(b.platformFeeBps / 100) + "% platform fee on a win" : "No platform fee · original bounty terms"}</strong><br>Gross reward ${money(b.reward)} − platform fee ${money(b.platformFee)} = <strong>${money(b.payout)} paid to the winner</strong>. Entry costs ${money(b.entry)} separately. On a loss, draw, or missed counter deadline, that entry is paid to the <strong>bounty creator</strong>. Net if you win: ${signed(b.netIfWin)} ${esc(runtime.currency)}.</div>`;
+    return `<div class="notice fee-disclosure"><strong>${b.platformFeeBps ? money(b.platformFeeBps / 100) + "% platform fee on a win" : "No platform fee · original bounty terms"}</strong><br>Gross reward ${money(b.reward)} − platform fee ${money(b.platformFee)} = <strong>${money(b.payout)} paid to the winner</strong>. Entry costs ${money(b.entry)} separately. On a loss, draw, or missed build deadline, that entry is paid to the <strong>bounty creator</strong>. Net if you win: ${signed(b.netIfWin)} ${esc(runtime.currency)}.</div>`;
   }
   function card(b) {
     const s = scout(b),
@@ -507,7 +507,7 @@ export function createBountyUI(adapter) {
       fee = b.platformFeeBps
         ? `${money(b.payout)} winner payout · ${money(b.platformFeeBps / 100)}% platform fee`
         : `${money(b.payout)} winner payout · legacy terms / no platform fee`;
-    return `<article class="contract-card"><div class="contract-card-top">${status(b.status)}<small>${complete ? "RESULT · 10 MINUTES" : b.listed ? "OPEN BOUNTY" : "UNLISTED LINK"}</small></div><div class="contract-preview">${b.blueprint ? `<canvas data-contract-thumb="${b.id}" width="300" height="260" aria-label="Defender machine"></canvas>` : sealedPreview(b)}<span class="contract-reward"><b>${money(b.reward)}</b><small>GROSS REWARD</small></span></div><div class="contract-content"><h2>${esc(b.title)}</h2><p>${esc(a.name)} · ${s.cost} build credits · ${s.mass} t · ${s.parts} fitted parts + core</p>${terrain(a)}<div class="contract-class">${esc(rulesLabel(bountyRules(b)))}</div><p class="card-fee">${fee}</p><div class="contract-footer"><span><b>${b.entry}</b> entry · ${b.attempts} trials</span><button data-contract="${b.id}">${complete ? "Watch result" : b.blueprint ? "View bounty" : "View sealed bounty"} ↗</button></div></div></article>`;
+    return `<article class="contract-card"><div class="contract-card-top">${status(b.status)}<small>${complete ? "RESULT · 10 MINUTES" : b.listed ? "AVAILABLE CHALLENGE" : "LINK ONLY"}</small></div><div class="contract-preview">${b.blueprint ? `<canvas data-contract-thumb="${b.id}" width="300" height="260" aria-label="Opponent machine"></canvas>` : sealedPreview(b)}<span class="contract-reward"><b>${money(b.reward)}</b><small>GROSS REWARD</small></span></div><div class="contract-content"><h2>${esc(b.title)}</h2><p>${esc(a.name)} · ${s.cost} build credits · ${s.mass} t · ${s.parts} fitted parts</p>${terrain(a)}<div class="contract-class">${esc(rulesLabel(bountyRules(b)))}</div><p class="card-fee">${fee}</p><div class="contract-footer"><span><b>${b.entry}</b> entry · ${b.attempts} runs</span><button data-contract="${b.id}">${complete ? "Watch result" : b.blueprint ? "View challenge" : "View challenge"} ↗</button></div></div></article>`;
   }
   function refreshHeaderAccount() {
     const node = $(".bounty-heading"),
@@ -528,8 +528,8 @@ export function createBountyUI(adapter) {
     );
     app.innerHTML =
       header(
-        "THE BOUNTY BOARD.",
-        "Build a counter. Break a machine. Claim the bounty.",
+        "CHOOSE A CHALLENGE.",
+        "Choose a challenge. Build your machine.",
       ) +
       '<div class="bounty-loading" role="status" aria-live="polite"><span class="loading-mark" aria-hidden="true"></span><strong>Loading bounties</strong><span>Fetching live challenges and payment status…</span><div class="bounty-loading-grid" aria-hidden="true"><i></i><i></i><i></i></div></div>';
     wireHeader();
@@ -574,10 +574,10 @@ export function createBountyUI(adapter) {
       }
       app.innerHTML =
         header(
-          "THE BOUNTY BOARD.",
-          "Build a counter. Break a machine. Claim the bounty.",
+          "CHOOSE A CHALLENGE.",
+          "Choose a challenge. Build your machine.",
         ) +
-        `<section class="contract-hero"><div><span class="eyebrow">OPEN BOUNTIES</span><h2>Set the challenge.<br>Build the counter.</h2><p>${runtime.paid ? "Scout the defender. Pay the entry to open a timed counter window. The deterministic result is signed by two independent result keys, then the escrow settles the exact on-chain payout." : "Scout the defender. Refine your build in local simulation. The deterministic result is signed by two independent result keys, then the escrow settles the exact on-chain payout."}</p><div class="contract-hero-actions"><button class="primary" id="new-contract" ${runtime.paid && !runtime.acceptingNewBounties ? "disabled" : ""}>${runtime.paid && !runtime.acceptingNewBounties ? "New paid bounties paused" : "＋ Create a bounty"}</button><button id="my-history">My runs</button></div>${runtime.paid && !runtime.acceptingNewBounties ? `<p class="notice bounty-footnote">${esc(runtime.settlementReason)}</p>` : ""}</div><div class="credit-summary"><span class="status-stamp">${runtime.paid ? "TEMPO MAINNET · pathUSD" : "SANDBOX CREDITS · NO CASH VALUE"}</span><div><b>${runtime.paid ? (me ? money(me.reserved || 0) : "PAY AS YOU GO") : me ? money(me.balance) : "1,000"}</b><span>${runtime.paid ? (me ? "RESERVED IN BOUNTIES" : "TEMPO WALLET") : me ? "AVAILABLE" : "STARTING CREDITS"}</span></div><p>${runtime.paid ? (me ? "Your wallet approves pathUSD and calls the verified escrow directly. Use Swap to pathUSD in the header for any supported Tempo stablecoin." : "Create or enter by confirming the shown pathUSD transaction in Tempo Wallet.") : me ? money(me.reserved) + " reserved in your bounties" : "Create a sandbox profile to enter local trials."}</p><small>Creators choose entry, gross reward and build limits. New bounties: 2.5% platform fee on wins.<br>Read the terms before you enter.</small></div></section><div class="contract-filter"><div class="segmented">${[
+        `<section class="contract-hero"><div><span class="eyebrow">AVAILABLE CHALLENGES</span><h2>Choose a challenge.<br>Build your machine.</h2><p>${runtime.paid ? "Read the summary. Pay the entry to reveal the full machine and start a timed build window. Both machines then fight automatically and the verified escrow pays the result." : "Read the summary. Refine your machine in local simulation. The same automatic fight runs without a payment."}</p><div class="contract-hero-actions"><button class="primary" id="new-contract" ${runtime.paid && !runtime.acceptingNewBounties ? "disabled" : ""}>${runtime.paid && !runtime.acceptingNewBounties ? "New paid bounties paused" : "＋ Create a challenge"}</button><button id="my-history">My runs</button></div>${runtime.paid && !runtime.acceptingNewBounties ? `<p class="notice bounty-footnote">${esc(runtime.settlementReason)}</p>` : ""}</div><div class="credit-summary"><span class="status-stamp">${runtime.paid ? "TEMPO MAINNET · pathUSD" : "SANDBOX CREDITS · NO CASH VALUE"}</span><div><b>${runtime.paid ? (me ? money(me.reserved || 0) : "PAY AS YOU GO") : me ? money(me.balance) : "1,000"}</b><span>${runtime.paid ? (me ? "RESERVED IN BOUNTIES" : "TEMPO WALLET") : me ? "AVAILABLE" : "STARTING CREDITS"}</span></div><p>${runtime.paid ? (me ? "Your wallet approves pathUSD and calls the verified escrow directly. Use Swap to pathUSD in the header for any supported Tempo stablecoin." : "Create or enter by confirming the shown pathUSD transaction in Tempo Wallet.") : me ? money(me.reserved) + " reserved in your bounties" : "Create a sandbox profile to enter local trials."}</p><small>Creators choose entry, gross reward and build limits. New bounties: 2.5% platform fee on wins.<br>Read the terms before you enter.</small></div></section><div class="contract-filter"><div class="segmented">${[
           ["open", "Available"],
           ["mine", "My bounties"],
           ["saved", "Saved"],
@@ -589,7 +589,7 @@ export function createBountyUI(adapter) {
           )
           .join(
             "",
-          )}</div><button id="refresh-contracts">⟳ Refresh board</button></div><div class="contract-search"><input id="contract-search" type="search" aria-label="Search bounties" placeholder="Search machines or bounties" value="${esc(searchText)}"><select id="arena-filter" aria-label="Filter bounties by arena"><option value="">All arenas</option>${ARENAS.map((a) => `<option value="${a.id}" ${a.id === arenaFilter ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select><input id="fee-filter" type="number" min="0" step="${runtime.paid ? ".01" : "1"}" aria-label="Maximum entry fee" placeholder="Max entry · any" value="${esc(feeFilter)}"></div><div class="contract-grid" id="contract-grid"></div><div class="notice bounty-footnote">${runtime.paid ? "Construction limits are separate from bounty funds. An official attempt locks both builds, the arena, terrain, and rules. A fresh server seed decides the trial." : "Construction limits are separate from bounty funds. An official attempt locks both builds, the arena, terrain, and rules. A fresh server seed decides the trial. Local simulation never pays rewards."}</div>`;
+          )}</div><button id="refresh-contracts">⟳ Refresh board</button></div><div class="contract-search"><input id="contract-search" type="search" aria-label="Search bounties" placeholder="Search machines or bounties" value="${esc(searchText)}"><select id="arena-filter" aria-label="Filter bounties by arena"><option value="">All arenas</option>${ARENAS.map((a) => `<option value="${a.id}" ${a.id === arenaFilter ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select><input id="fee-filter" type="number" min="0" step="${runtime.paid ? ".01" : "1"}" aria-label="Maximum entry fee" placeholder="Max entry · any" value="${esc(feeFilter)}"></div><div class="contract-grid" id="contract-grid"></div><div class="notice bounty-footnote">${runtime.paid ? "Construction limits are separate from the reward. A paid run locks both machines, the arena, terrain and rules. A fresh seed decides the match." : "Construction limits are separate from the reward. A paid run locks both machines, the arena, terrain and rules. A fresh seed decides the match. Local simulation never pays rewards."}</div>`;
       if (runtime.paid) {
         const feeInput = $("#fee-filter");
         if (feeInput) feeInput.step = "0.01";
@@ -687,31 +687,31 @@ export function createBountyUI(adapter) {
           ? esc(issues[0])
           : stats(draft.machine).cost +
             " build credits · eligible for this bounty"
-        : "Pay the entry to reveal the defender, then build and deploy your counter before the deadline.",
+        : "Pay the entry to reveal the opponent, then build and submit your machine before the deadline.",
       preview = revealed
-        ? '<canvas id="defender-preview" width="650" height="500" aria-label="Defender machine preview"></canvas>'
+        ? '<canvas id="defender-preview" width="650" height="500" aria-label="Opponent machine preview"></canvas>'
         : sealedPreview(b),
       defenderCaption = revealed
-        ? `<h2>${esc(m.name)}</h2><p>${s.cost} build credits · ${s.mass} t · ${s.parts} fitted parts + core · ${s.height} ${s.height === 1 ? "level" : "levels"}</p><span>${esc(m.tactic)} · targets ${esc(m.target)} · range ${m.range} · front ${["north", "east", "south", "west"][m.front || 0]}</span>`
-        : `<h2>Defender sealed</h2><p>${s.cost} build credits · ${s.mass} t · ${s.parts} fitted parts + core · ${s.weapons} weapons · ${s.height} ${s.height === 1 ? "level" : "levels"}</p><span>Exact modules, colors, doctrine, layout, and firing arcs reveal only after a confirmed entry.</span>`,
+        ? `<h2>${esc(m.name)}</h2><p>${s.cost} build credits · ${s.mass} t · ${s.parts} fitted parts · ${s.height} ${s.height === 1 ? "level" : "levels"}</p><span>${esc(m.tactic)} · targets ${esc(m.target)} · range ${m.range} · front ${["north", "east", "south", "west"][m.front || 0]}</span>`
+        : `<h2>Opponent hidden</h2><p>${s.cost} build credits · ${s.mass} t · ${s.parts} fitted parts · ${s.weapons} weapons · ${s.height} ${s.height === 1 ? "level" : "levels"}</p><span>The full layout, colors and movement settings appear after payment is confirmed.</span>`,
       defenderActions = revealed
-        ? `<button id="inspect-defender" ${!b.compatible ? "disabled" : ""}>◎ Scout in 3D</button><button id="export-defender">↓ Blueprint JSON</button>`
-        : '<span class="sealed-note">PAY TO REVEAL · BLUEPRINT HIDDEN</span>',
+        ? `<button id="inspect-defender" ${!b.compatible ? "disabled" : ""}>◎ View machine in 3D</button><button id="export-defender">↓ Blueprint JSON</button>`
+        : '<span class="sealed-note">PAY TO REVEAL · MACHINE HIDDEN</span>',
       entryAction =
         b.status === "open" && !own
-          ? `<button id="official-entry" class="primary contract-enter" ${!b.compatible || (!runtime.paid && !me) || (runtime.paid && !runtime.acceptingNewBounties) ? "disabled" : ""}>${runtime.paid && !runtime.acceptingNewBounties ? "Paid entries paused" : `Pay entry & reveal defender · ${b.entry} ${runtime.currency}`}</button>`
+          ? `<button id="official-entry" class="primary contract-enter" ${!b.compatible || (!runtime.paid && !me) || (runtime.paid && !runtime.acceptingNewBounties) ? "disabled" : ""}>${runtime.paid && !runtime.acceptingNewBounties ? "Paid entries paused" : `Pay entry & reveal opponent · ${b.entry} ${runtime.currency}`}</button>`
           : b.status === "busy" && revealed && !own
             ? '<button id="resume-attempt" class="primary contract-enter">Resume paid challenge</button>'
             : "",
       participantPrompt =
         b.status === "open" && !own
-          ? `<div class="participant-prompt"><div class="participant-prompt-heading"><strong>Make your run memorable</strong><span>Optional</span></div><p>Choose a friendly callsign for the attempt board. Leave it blank to appear as Anonymous engineer.</p><label class="field"><span>Pilot / machine name</span><input id="participant-name" maxlength="28" placeholder="e.g. Nova or ByteForge" autocomplete="nickname"></label>${runtime.paid ? '<label class="identity-check"><input id="participant-show-address" type="checkbox"><span>Show my shortened wallet address on this attempt</span></label><p class="hint">Your wallet still authorizes the payment. The address stays hidden unless you opt in.</p>' : '<p class="hint">This name appears on the local attempt board. Your profile remains private.</p>'}</div>`
+          ? `<div class="participant-prompt"><div class="participant-prompt-heading"><strong>Add your name</strong><span>Optional</span></div><p>Add an optional name for the results board. Leave it blank to appear as Anonymous engineer.</p><label class="field"><span>Your name or machine name</span><input id="participant-name" maxlength="28" placeholder="e.g. Nova or ByteForge" autocomplete="nickname"></label>${runtime.paid ? '<label class="identity-check"><input id="participant-show-address" type="checkbox"><span>Show my shortened wallet address on this attempt</span></label><p class="hint">Your wallet still authorizes the payment. The address stays hidden unless you opt in.</p>' : '<p class="hint">This name appears on the local attempt board. Your profile remains private.</p>'}</div>`
           : "";
     const completionNotice =
         b.status === "completed"
           ? `<div class="notice fee-disclosure"><strong>Completed.</strong> The defense held, so the reward remains available for the creator to return. This replay and result stay on the board for 10 minutes.</div>`
           : b.status === "claimed"
-            ? `<div class="notice fee-disclosure"><strong>Reward paid.</strong> The challenger won and the escrow sent the payout. This replay and result stay on the board for 10 minutes.</div>`
+            ? `<div class="notice fee-disclosure"><strong>Reward paid.</strong> Your machine won and the escrow sent the payout. This replay and result stay on the board for 10 minutes.</div>`
             : "",
       returnAction =
         own && ["open", "completed"].includes(b.status)
@@ -719,10 +719,10 @@ export function createBountyUI(adapter) {
           : "";
     app.innerHTML =
       header(
-        revealed ? "ENGINEER THE COUNTER." : "SCOUT THE TARGET.",
+        revealed ? "BUILD YOUR MACHINE." : "VIEW THE CHALLENGE.",
         esc(b.title),
       ) +
-      `<div class="contract-detail"><section class="panel defender-card"><div class="contract-card-top">${status(b.status)}<small>${b.status === "completed" ? "UNCLAIMED REWARD RESERVED" : b.funded ? "REWARD RESERVED" : "BOUNTY CLOSED"}</small></div>${preview}<div class="defender-caption">${defenderCaption}</div><div class="bounty-actions">${defenderActions}<button id="copy-contract">↗ Copy bounty link</button><button id="save-contract">${savedIds.has(b.id) ? "★ Saved bounty" : "☆ Save bounty"}</button>${navigator.share ? '<button id="native-share-contract">Share…</button>' : ""}</div></section><section class="panel contract-terms"><span class="eyebrow">${esc(b.ownerName)} / BOUNTY TERMS</span><h2>${esc(b.title)}</h2><div class="contract-economy"><div><b>${money(b.reward)}</b><small>GROSS REWARD</small></div><div><b>${money(b.entry)}</b><small>ENTRY COST</small></div><div><b>${signed(b.netIfWin)}</b><small>NET AFTER ALL FEES</small></div></div>${feeNotice(b)}${completionNotice}<div class="contract-rule"><strong>${esc(a.name)}</strong><p>${esc(a.desc)}</p>${terrain(a)}</div><div class="contract-rule"><strong>${esc(rulesLabel(lockedRules))}</strong><p>Locked for both machines. Autonomous combat · 100 seconds · one official attempt at a time.</p></div><div class="contract-rule"><strong>Your counter: ${esc(draft.machine.name)}</strong><p>${counterStatus}</p></div>${revealed ? `<div class="bounty-actions"><button id="refit-counter" ${!b.compatible ? "disabled" : ""}>Refit counter</button>${runtime.paid ? "" : '<button id="local-simulation">Local simulation</button>'}</div>` : ""}${entryAction}${!runtime.paid && !me ? '<button id="join-profile">Sign in to enter this sandbox bounty</button>' : ""}<p class="hint">${revealed ? runtime.paid ? "Your paid entry is active. Deploy one valid counter before the engineering clock closes." : "This local reveal can be tested without transferring funds." : runtime.paid && !runtime.acceptingNewBounties ? runtime.settlementReason : runtime.paid ? "Any Tempo Wallet can pay this entry. One confirmation atomically approves pathUSD if needed and enters the escrow, then reveals the exact defender and starts your timed counter-build window." : "The entry is sent directly to the verified escrow. After confirmation, you get the exact defender and a timed counter-build window. A loss sends the entry to the creator; a technical refund returns it."} ${own ? "You cannot claim your own reward." : ""}</p><p class="error-message" id="bounty-error">${!b.compatible ? "This engine version is archived. Its receipt remains available, but current-engine counter deployment is unavailable." : ""}</p><p class="contract-expiry">${b.expires ? "Expires " + time(b.expires) : "No deadline · until claimed or closed"} · ${b.attempts} attempts<br>${b.listed ? "Visible on the board" : "Unlisted: anyone with the link can scout and pay the posted entry."}</p>${returnAction}${me && isExpired && ["open", "busy"].includes(b.status) ? '<button id="expire-contract">Settle expiry onchain</button>' : ""}</section></div><section class="panel contract-history"><h3>Verified attempts</h3>${b.history.length ? b.history.map((a) => (revealed ? `<button data-attempt="${a.id}" class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : "REFUNDED"}</span><small>${time(a.created)}</small><strong>${a.result?.time ? Number(a.result.time).toFixed(1) + "s" : "Technical refund"} ↗</strong></button>` : `<div class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : "REFUNDED"}</span><small>${time(a.created)}</small><strong>Defender replay sealed</strong></div>`)).join("") : "<p>No completed runs yet. Start the first one.</p>"}</section>`;
+      `<div class="contract-detail"><section class="panel defender-card"><div class="contract-card-top">${status(b.status)}<small>${b.status === "completed" ? "UNCLAIMED REWARD RESERVED" : b.funded ? "REWARD RESERVED" : "BOUNTY CLOSED"}</small></div>${preview}<div class="defender-caption">${defenderCaption}</div><div class="bounty-actions">${defenderActions}<button id="copy-contract">↗ Copy challenge link</button><button id="save-contract">${savedIds.has(b.id) ? "★ Saved challenge" : "☆ Save challenge"}</button>${navigator.share ? '<button id="native-share-contract">Share…</button>' : ""}</div></section><section class="panel contract-terms"><span class="eyebrow">${esc(b.ownerName)} / CHALLENGE TERMS</span><h2>${esc(b.title)}</h2><div class="contract-economy"><div><b>${money(b.reward)}</b><small>GROSS REWARD</small></div><div><b>${money(b.entry)}</b><small>ENTRY COST</small></div><div><b>${signed(b.netIfWin)}</b><small>NET AFTER ALL FEES</small></div></div>${feeNotice(b)}${completionNotice}<div class="contract-rule"><strong>${esc(a.name)}</strong><p>${esc(a.desc)}</p>${terrain(a)}</div><div class="contract-rule"><strong>${esc(rulesLabel(lockedRules))}</strong><p>Both machines use the same locked rules and fight automatically for up to 100 seconds.</p></div><div class="contract-rule"><strong>Your machine: ${esc(draft.machine.name)}</strong><p>${counterStatus}</p></div>${revealed ? `<div class="bounty-actions"><button id="refit-counter" ${!b.compatible ? "disabled" : ""}>Edit your machine</button>${runtime.paid ? "" : '<button id="local-simulation">Local simulation</button>'}</div>` : ""}${entryAction}${!runtime.paid && !me ? '<button id="join-profile">Sign in to enter this sandbox challenge</button>' : ""}<p class="hint">${revealed ? runtime.paid ? "Your entry is active. Submit a valid machine before the timer ends." : "This local challenge can be tested without transferring funds." : runtime.paid && !runtime.acceptingNewBounties ? runtime.settlementReason : runtime.paid ? "Pay the entry in Tempo Wallet. Once it confirms, the full opponent appears and the build timer starts." : "Your entry goes to the verified escrow. After confirmation, the full opponent appears and the build timer starts. If your machine loses, the entry goes to the challenge creator. Technical failures are refunded."} ${own ? "You cannot claim your own reward." : ""}</p><p class="error-message" id="bounty-error">${!b.compatible ? "This challenge uses an older engine version. Its result remains available, but you cannot submit a new machine." : ""}</p><p class="contract-expiry">${b.expires ? "Expires " + time(b.expires) : "No deadline · until claimed or closed"} · ${b.attempts} runs<br>${b.listed ? "Visible on the board" : "Unlisted: anyone with the link can view and pay the posted entry."}</p>${returnAction}${me && isExpired && ["open", "busy"].includes(b.status) ? '<button id="expire-contract">Settle expiry onchain</button>' : ""}</section></div><section class="panel contract-history"><h3>Past results</h3>${b.history.length ? b.history.map((a) => (revealed ? `<button data-attempt="${a.id}" class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : "REFUNDED"}</span><small>${time(a.created)}</small><strong>${a.result?.time ? Number(a.result.time).toFixed(1) + "s" : "Technical refund"} ↗</strong></button>` : `<div class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : "REFUNDED"}</span><small>${time(a.created)}</small><strong>Opponent replay sealed</strong></div>`)).join("") : "<p>No results yet. Be the first to try.</p>"}</section>`;
     if (participantPrompt) {
       const template = document.createElement("template");
       template.innerHTML = participantPrompt;
@@ -849,7 +849,7 @@ export function createBountyUI(adapter) {
         "SET THE CHALLENGE.",
         "Fund a reward. Share your machine. See who can break it.",
       ) +
-      `<form id="create-contract" class="contract-create"><section class="panel create-preview"><canvas id="create-preview" width="480" height="420" aria-label="Your defending machine"></canvas><h2>${esc(build.name)}</h2><p id="create-stats"></p><p class="hint">This snapshots your current workshop build, including paint, front, upgrades, height and doctrine.</p><button type="button" id="back-build">Edit in workshop</button></section><section class="panel contract-form"><label class="field"><span>Bounty title</span><input id="contract-title" required maxlength="70" value="${esc("Break " + build.name)}"></label><div class="form-two"><label class="field"><span>Entry · ${runtime.paid ? "pathUSD" : "sandbox credits"}</span><input id="contract-entry" type="number" min="${runtime.paid ? ".01" : "0"}" max="1000000000" step="${runtime.paid ? ".01" : "1"}" value="${runtime.paid ? ".10" : "10"}" required></label><label class="field"><span>Gross reward · ${runtime.paid ? "pathUSD" : "sandbox credits"}</span><input id="contract-reward" type="number" min="${runtime.paid ? ".01" : "0"}" max="1000000000" step="${runtime.paid ? ".01" : "1"}" value="${runtime.paid ? "1.00" : "100"}" required></label></div><div class="notice" id="reserve-note"></div><div class="form-two"><label class="field"><span>Arena & terrain</span><select id="contract-arena">${ARENAS.map((a) => `<option value="${a.id}" ${a.id === draft.arena ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></label><label class="field"><span>Construction class</span><select id="contract-class"><option value="standard">Standard · 1200 credits</option><option value="custom">Custom limits</option><option value="unlimited">Unlimited · 243 sockets</option></select></label></div><div id="contract-terrain" class="notice"></div><div class="form-four" id="contract-caps">${[
+      `<form id="create-contract" class="contract-create"><section class="panel create-preview"><canvas id="create-preview" width="480" height="420" aria-label="Your machine"></canvas><h2>${esc(build.name)}</h2><p id="create-stats"></p><p class="hint">This saves your current machine, including its paint, front, upgrades, height and behavior.</p><button type="button" id="back-build">Edit in workshop</button></section><section class="panel contract-form"><label class="field"><span>Challenge title</span><input id="contract-title" required maxlength="70" value="${esc("Challenge " + build.name)}"></label><div class="form-two"><label class="field"><span>Entry · ${runtime.paid ? "pathUSD" : "sandbox credits"}</span><input id="contract-entry" type="number" min="${runtime.paid ? ".01" : "0"}" max="1000000000" step="${runtime.paid ? ".01" : "1"}" value="${runtime.paid ? ".10" : "10"}" required></label><label class="field"><span>Gross reward · ${runtime.paid ? "pathUSD" : "sandbox credits"}</span><input id="contract-reward" type="number" min="${runtime.paid ? ".01" : "0"}" max="1000000000" step="${runtime.paid ? ".01" : "1"}" value="${runtime.paid ? "1.00" : "100"}" required></label></div><div class="notice" id="reserve-note"></div><div class="form-two"><label class="field"><span>Arena & terrain</span><select id="contract-arena">${ARENAS.map((a) => `<option value="${a.id}" ${a.id === draft.arena ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></label><label class="field"><span>Construction class</span><select id="contract-class"><option value="standard">Standard · 1200 credits</option><option value="custom">Custom limits</option><option value="unlimited">Unlimited · 243 sockets</option></select></label></div><div id="contract-terrain" class="notice"></div><div class="form-four" id="contract-caps">${[
         ["credits", "Construction credits", 1200, 1000000],
         ["parts", "Part count", 32, 243],
         ["mass", "Mass (tonnes)", 360, 100000],
@@ -861,7 +861,7 @@ export function createBountyUI(adapter) {
         )
         .join(
           "",
-        )}</div><p class="hint">Custom cap 0 = no limit. Unlimited removes all four caps; supports and the 9×9×3 grid still apply.</p><div class="form-two"><label class="field"><span>Duration · hours (0 = no deadline)</span><input id="contract-hours" type="number" min="0" max="8760" step="1" value="24" required></label><label class="field"><span>Sharing</span><select id="contract-listed"><option value="true">Listed on bounty board</option><option value="false">Unlisted · share by link</option></select></label></div><p class="hint">New bounties appear on the board by default. Choose unlisted when you want access by link only. Anyone with an unlisted link can scout this bounty. Any Tempo Wallet can pay its posted entry and attempt it. Terms lock after funding; close an idle bounty to return its unused reward.</p><p id="bounty-error" class="error-message" role="status"></p><button class="primary contract-enter" id="fund-contract" type="submit">Fund & create bounty</button></section></form>`;
+        )}</div><p class="hint">Custom cap 0 = no limit. Unlimited removes all four caps; supports and the 9×9×3 grid still apply.</p><div class="form-two"><label class="field"><span>Duration · hours (0 = no deadline)</span><input id="contract-hours" type="number" min="0" max="8760" step="1" value="24" required></label><label class="field"><span>Sharing</span><select id="contract-listed"><option value="true">Listed on bounty board</option><option value="false">Unlisted · share by link</option></select></label></div><p class="hint">New bounties appear on the board by default. Choose unlisted when you want access by link only. Anyone with an unlisted link can view this challenge. Any Tempo Wallet can pay the posted entry and try the challenge. Terms lock after funding; close an idle bounty to return its unused reward.</p><p id="bounty-error" class="error-message" role="status"></p><button class="primary contract-enter" id="fund-contract" type="submit">Fund & create challenge</button></section></form>`;
     if (runtime.paid) {
       const entryInput = $("#contract-entry"),
         rewardInput = $("#contract-reward");
@@ -995,7 +995,7 @@ export function createBountyUI(adapter) {
     }
     if (!a.defender)
       throw Error(
-        "The paid defender reveal is unavailable. Reopen this attempt with the wallet that paid the entry.",
+        "The opponent reveal is unavailable. Reopen this challenge with the wallet that paid the entry.",
       );
     const source = savedBlueprint
         ? unpackChallenge(savedBlueprint, true)
@@ -1025,7 +1025,7 @@ export function createBountyUI(adapter) {
     const g = begin();
     app.innerHTML =
       header(
-        "OFFICIAL TRIAL.",
+        "PAID RESULT.",
         "The deterministic arena result is settled by the verified Tempo escrow.",
       ) + '<div class="bounty-loading">Loading attempt…</div>';
     wireHeader();
@@ -1065,7 +1065,7 @@ export function createBountyUI(adapter) {
         try {
           sessionStorage.removeItem(replayKey);
         } catch {}
-        adapter.toast(error.message || "The official replay is unavailable.");
+        adapter.toast(error.message || "The replay is unavailable.");
         return false;
       }
     }
@@ -1093,16 +1093,16 @@ export function createBountyUI(adapter) {
               : null;
           if (!defender)
             throw Error(
-              "The paid defender reveal is unavailable. Reopen this attempt with the wallet that paid the entry.",
+              "The opponent reveal is unavailable. Reopen this challenge with the wallet that paid the entry.",
             );
           if (!seconds) {
             app.innerHTML =
               header(
-                "ENGINEERING WINDOW CLOSED.",
-                "No counter was deployed before the deadline.",
+                "BUILD WINDOW CLOSED.",
+                "No machine was submitted before the deadline.",
               ) +
               paymentPanel(a) +
-              '<button id="pending-contract">View bounty</button>';
+              '<button id="pending-contract">View challenge</button>';
             wireHeader();
             $("#pending-contract").onclick = () => open(a.bounty);
             schedule(poll, g, 5000);
@@ -1110,10 +1110,10 @@ export function createBountyUI(adapter) {
           }
           app.innerHTML =
             header(
-              "OPPONENT REVEALED.",
-              "Build, test, then commit one counter before the engineering clock closes.",
+              "OPPONENT READY.",
+              "Build and test your machine, then submit it before the timer ends.",
             ) +
-            `<section class="panel trial-wait"><span class="eyebrow">ENTRY CONFIRMED · DEFENDER REVEALED</span><h2>${clock} to deploy.</h2><p><strong>${esc(defender.title)}</strong> is now available for your timed counter build. The current verified escrow leaves the remaining time for two independent result signatures after you deploy.</p><div class="notice fee-disclosure">Build limit: ${esc(rulesLabel(defender.blueprint.q))} · Arena: ${esc(bountyArena({ blueprint: defender.blueprint }).name)} · Your entry remains in the direct escrow until the signed result settles.</div><div class="bounty-actions"><button id="refit-counter" class="primary">Build counter</button><button id="select-counter">Use a saved build</button><button id="deploy-counter">Deploy current counter</button><button id="pending-contract">View bounty</button></div><p id="bounty-error" class="error-message"></p></section>`;
+            `<section class="panel trial-wait"><span class="eyebrow">ENTRY CONFIRMED · OPPONENT REVEALED</span><h2>${clock} to submit.</h2><p><strong>${esc(defender.title)}</strong> is now available for your timed build. The verified escrow keeps enough time to record the result after you submit.</p><div class="notice fee-disclosure">Build limit: ${esc(rulesLabel(defender.blueprint.q))} · Arena: ${esc(bountyArena({ blueprint: defender.blueprint }).name)} · Your entry remains in the direct escrow until the signed result settles.</div><div class="bounty-actions"><button id="refit-counter" class="primary">Build your machine</button><button id="select-counter">Use a saved build</button><button id="deploy-counter">Submit current machine</button><button id="pending-contract">View challenge</button></div><p id="bounty-error" class="error-message"></p></section>`;
           wireHeader();
           $("#refit-counter").onclick = () => adapter.edit(defender);
           $("#select-counter").onclick = () => vault(a.id);
@@ -1129,7 +1129,7 @@ export function createBountyUI(adapter) {
               "YOUR MACHINE IS COMMITTED.",
               "The entry is recorded once. You can leave and return safely.",
             ) +
-            `<section class="panel trial-wait"><div class="trial-spinner" aria-hidden="true">◈</div><span class="eyebrow">${a.status === "queued" ? "RESULT IN REVIEW" : "SIMULATING"}</span><h2>Simulation running.</h2><p>Both builds are locked. Other challengers wait until this bounty reopens or its reward is claimed.</p><p class="hint">No need to keep this tab open. Find the result under My runs.</p><button id="pending-contract">View bounty</button></section>`;
+            `<section class="panel trial-wait"><div class="trial-spinner" aria-hidden="true">◈</div><span class="eyebrow">${a.status === "queued" ? "RESULT IN REVIEW" : "SIMULATING"}</span><h2>Simulation running.</h2><p>Both builds are locked. The result is being recorded. You can leave this page and find it under My runs.</p><p class="hint">No need to keep this tab open. Find the result under My runs.</p><button id="pending-contract">View challenge</button></section>`;
           wireHeader();
           $("#pending-contract").onclick = () => open(a.bounty);
           schedule(poll, g, 1000);
@@ -1147,7 +1147,7 @@ export function createBountyUI(adapter) {
           if (await autoplayOfficialReplay(a)) return;
           app.innerHTML =
             header(
-              "OFFICIAL RESULT.",
+              "RESULT.",
               "Your settlement continues automatically.",
             ) +
             paymentPanel(a) +
@@ -1157,7 +1157,7 @@ export function createBountyUI(adapter) {
             (a.replay
               ? '<button id="watch-official-replay">Watch exact battle</button>'
               : "") +
-            '<button id="pending-contract">View bounty</button></div></section>';
+            '<button id="pending-contract">View challenge</button></div></section>';
           wireHeader();
           $("#pending-contract").onclick = () => open(a.bounty);
           if ($("#watch-official-replay"))
@@ -1177,11 +1177,11 @@ export function createBountyUI(adapter) {
             r?.payoutStatus === "settled-onchain"
               ? "The Tempo escrow settled this result onchain."
               : r
-                ? "Recorded official result."
+                ? "Recorded paid result."
                 : "Your entry was returned onchain.",
           ) +
           paymentPanel(a) +
-          `<section class="panel official-result ${won ? "won" : ""}"><span class="eyebrow">${r?.payoutStatus === "settled-onchain" ? "ESCROW SETTLED" : technical ? "TECHNICAL REFUND" : "ON-CHAIN RESULT"}</span><h2>${won ? "BOUNTY CLAIMED." : technical ? "ENTRY RETURNED." : reopened ? "DEFENSE HELD — BOUNTY REOPENED." : "ENTRY RETURNED."}</h2><div class="contract-economy"><div><b>${r ? (Number(r.net) > 0 ? "+" : "") + r.net : "REFUND"}</b><small>${esc(runtime.currency).toUpperCase()} CHANGE</small></div><div><b>${r?.time ? Number(r.time).toFixed(1) + "s" : "—"}</b><small>TRIAL DURATION</small></div><div><b>${r?.payoutStatus === "settled-onchain" ? "✓" : "—"}</b><small>ESCROW</small></div></div><p>${r?.integrity ? `Your integrity: ${(r.integrity[0] * 100).toFixed(1)}% · Defender: ${(r.integrity[1] * 100).toFixed(1)}%. ${won ? "The payout was sent by the escrow after the 2.5% platform fee." : reopened ? "Your entry was paid to the creator. The reward stays funded and the bounty is open for the next challenger." : "The escrow processed this official result."}` : esc(a.error || "No server-side balance was held.")}</p>${r ? `<div class="notice fee-disclosure">Gross reward: ${money(r.grossReward ?? r.reward ?? 0)} · Platform fee: ${money(r.platformFee ?? 0)} (${money((r.platformFeeBps ?? 0) / 100)}% on wins) · Paid to challenger: ${money(r.payout ?? 0)} · Separate entry: ${money(r.entry ?? 0)} ${esc(runtime.currency)}.</div>` : ""}<div class="bounty-actions">${a.replay ? '<button id="verified-replay" class="primary">▶ Watch exact replay</button>' : ""}<button id="result-contract">${reopened ? "View reopened bounty" : "Back to bounty"}</button><button id="result-refit">Refit counter</button></div><p class="hint">Attempt ${esc(a.id)} · ${time(a.updated)}<br>The replay reconstructs the committed machine pair, arena, seed and engine release.</p><p id="bounty-error" class="error-message"></p></section>`;
+          `<section class="panel official-result ${won ? "won" : ""}"><span class="eyebrow">${r?.payoutStatus === "settled-onchain" ? "ESCROW SETTLED" : technical ? "TECHNICAL REFUND" : "ON-CHAIN RESULT"}</span><h2>${won ? "REWARD PAID." : technical ? "ENTRY RETURNED." : reopened ? "OPPONENT SURVIVED — CHALLENGE OPEN." : "ENTRY RETURNED."}</h2><div class="contract-economy"><div><b>${r ? (Number(r.net) > 0 ? "+" : "") + r.net : "REFUND"}</b><small>${esc(runtime.currency).toUpperCase()} CHANGE</small></div><div><b>${r?.time ? Number(r.time).toFixed(1) + "s" : "—"}</b><small>TRIAL DURATION</small></div><div><b>${r?.payoutStatus === "settled-onchain" ? "✓" : "—"}</b><small>ESCROW</small></div></div><p>${r?.integrity ? `Your machine: ${(r.integrity[0] * 100).toFixed(1)}% · Opponent: ${(r.integrity[1] * 100).toFixed(1)}%. ${won ? "The payout was sent by the escrow after the 2.5% platform fee." : reopened ? "Your entry was paid to the creator. The reward stays funded and the challenge is open for another player." : "The escrow processed this result."}` : esc(a.error || "No server-side balance was held.")}</p>${r ? `<div class="notice fee-disclosure">Gross reward: ${money(r.grossReward ?? r.reward ?? 0)} · Platform fee: ${money(r.platformFee ?? 0)} (${money((r.platformFeeBps ?? 0) / 100)}% on wins) · Paid to winner: ${money(r.payout ?? 0)} · Separate entry: ${money(r.entry ?? 0)} ${esc(runtime.currency)}.</div>` : ""}<div class="bounty-actions">${a.replay ? '<button id="verified-replay" class="primary">▶ Watch exact replay</button>' : ""}<button id="result-contract">${reopened ? "View reopened bounty" : "Back to challenge"}</button><button id="result-refit">Edit your machine</button></div><p class="hint">Attempt ${esc(a.id)} · ${time(a.updated)}<br>The replay reconstructs the committed machine pair, arena, seed and engine release.</p><p id="bounty-error" class="error-message"></p></section>`;
         const identityNotice = document.createElement("div");
         identityNotice.className = "result-identity";
         identityNotice.innerHTML = `This run appears as ${attemptIdentity(a)}`;
@@ -1216,15 +1216,15 @@ export function createBountyUI(adapter) {
     if (!me) return profile();
     const g = begin();
     app.innerHTML =
-      header("YOUR TRIALS.", "Official attempts persist across reloads.") +
+      header("YOUR TRIALS.", "Paid runs persist across reloads.") +
       '<div class="bounty-loading">Loading history…</div>';
     wireHeader();
     try {
       const rows = await api("/me/attempts");
       if (g !== generation) return;
       app.innerHTML =
-        header("YOUR TRIALS.", "Official attempts persist across reloads.") +
-        `<section class="panel contract-history">${rows.map((a) => `<button data-attempt="${a.id}" class="attempt-row"><span>${esc(runtime.paid ? paymentStatus(a).label : a.result?.outcome || a.status)}</span><small>${time(a.created)}</small><strong>${a.result?.net !== undefined ? esc(a.result.net) + (runtime.paid ? " pathUSD" : " credits") : "View status"} ↗</strong></button>${runtime.paid ? transactionLink(a.payment?.transactionHash, "Settlement transaction") : ""}`).join("") || "<p>No official trials yet. Choose an available bounty to start.</p>"}</section>`;
+        header("YOUR TRIALS.", "Paid runs persist across reloads.") +
+        `<section class="panel contract-history">${rows.map((a) => `<button data-attempt="${a.id}" class="attempt-row"><span>${esc(runtime.paid ? paymentStatus(a).label : a.result?.outcome || a.status)}</span><small>${time(a.created)}</small><strong>${a.result?.net !== undefined ? esc(a.result.net) + (runtime.paid ? " pathUSD" : " credits") : "View status"} ↗</strong></button>${runtime.paid ? transactionLink(a.payment?.transactionHash, "Settlement transaction") : ""}`).join("") || "<p>No paid runs yet. Choose an available challenge to start.</p>"}</section>`;
       $$(".contract-history .attempt-row").forEach((row, index) => {
         const attempt = rows[index],
           first = row.querySelector("span");
@@ -1302,7 +1302,7 @@ export function createBountyUI(adapter) {
           "YOUR SANDBOX PROFILE.",
           "Sign in for bounties. Building, local saves and free play need no login.",
         ) +
-        `<form id="join-sandbox" class="panel profile-form"><span class="status-stamp">NO WALLETS · NO CASH VALUE</span><h2>Your bounty account.</h2><p class="sign-in-note">Create, enter and save bounties here. Start with 1,000 sandbox credits. Local blueprint saves and ordinary play always work as a guest.</p><label class="field"><span>Pilot name</span><input id="pilot-name" required maxlength="28" value="Independent engineer"></label><p>Your balance and official trials live on this server. This browser stores your access key. Sandbox profiles are for gameplay testing, not an economy with real value.</p><button class="primary">Create bounty account</button><button type="button" class="account-guest-link" id="continue-guest">Continue to guest workshop ↗</button><p id="bounty-error" class="error-message"></p><details><summary>Restore a saved profile key</summary><input id="restore-token" type="password" aria-label="Profile access key" autocomplete="off"><button type="button" id="restore-profile">Restore profile</button></details></form>`;
+        `<form id="join-sandbox" class="panel profile-form"><span class="status-stamp">NO WALLETS · NO CASH VALUE</span><h2>Your bounty account.</h2><p class="sign-in-note">Create, enter and save bounties here. Start with 1,000 practice credits. Local blueprint saves and ordinary play always work as a guest.</p><label class="field"><span>Pilot name</span><input id="pilot-name" required maxlength="28" value="Independent engineer"></label><p>Your balance and paid challenge history lives on this server. This browser stores your access key. Practice profiles are for local testing and have no cash value.</p><button class="primary">Create bounty account</button><button type="button" class="account-guest-link" id="continue-guest">Continue to guest workshop ↗</button><p id="bounty-error" class="error-message"></p><details><summary>Restore a saved profile key</summary><input id="restore-token" type="password" aria-label="Profile access key" autocomplete="off"><button type="button" id="restore-profile">Restore profile</button></details></form>`;
       wireHeader();
       $("#continue-guest").onclick = adapter.workshop;
       $("#join-sandbox").onsubmit = (e) => {
@@ -1391,7 +1391,7 @@ export function createBountyUI(adapter) {
       header(
         "YOUR BUILD VAULT.",
         attemptId
-          ? "Choose a saved counter and deploy it directly to your active bounty."
+          ? "Choose a saved machine and submit it to your active bounty."
           : "Keep up to 50 private blueprints with your account. Loading one replaces this device’s workshop draft.",
       ) + '<div class="bounty-loading">Opening build vault…</div>';
     wireHeader();
@@ -1401,16 +1401,16 @@ export function createBountyUI(adapter) {
       const card = (b) => {
         const machine = unpackChallenge(b.blueprint, true).machine,
           s = stats(machine);
-        return `<div class="vault-row"><div><strong>${esc(b.name)}</strong><small>${s.cost} build credits · ${s.parts} fitted parts + core · saved ${time(b.updated)}</small></div><div class="bounty-actions">${attemptId ? `<button class="primary" data-deploy-build="${b.id}">Use & deploy</button>` : ""}<button data-load-build="${b.id}">Load</button><button data-export-build="${b.id}">Export</button><button data-delete-build="${b.id}">Delete</button></div></div>`;
+        return `<div class="vault-row"><div><strong>${esc(b.name)}</strong><small>${s.cost} build credits · ${s.parts} fitted parts · saved ${time(b.updated)}</small></div><div class="bounty-actions">${attemptId ? `<button class="primary" data-deploy-build="${b.id}">Use and submit</button>` : ""}<button data-load-build="${b.id}">Load</button><button data-export-build="${b.id}">Export</button><button data-delete-build="${b.id}">Delete</button></div></div>`;
       };
       app.innerHTML =
         header(
           "YOUR BUILD VAULT.",
           attemptId
-            ? "Choose a private saved blueprint to commit as your one official counter."
+            ? "Choose a private saved blueprint to submit as your machine."
             : "Private to your signed-in account. A load updates this device’s workshop draft.",
         ) +
-        `<section class="panel profile-form vault-panel"><span class="eyebrow">ACCOUNT BLUEPRINTS</span><h2>${builds.length} / 50 saved</h2><p>${attemptId ? "Use & deploy checks the bounty’s locked limits and commits this saved machine. Deployment cannot be changed afterward." : "Save your current workshop machine, its arena and its construction rules. These builds are not public and do not affect a listed bounty."}</p><button class="primary" id="save-account-build" ${builds.length >= 50 ? "disabled" : ""}>Save current workshop build</button><p id="bounty-error" class="error-message"></p><div class="vault-list">${builds.length ? builds.map(card).join("") : '<p class="hint">No account builds yet. Your local blueprint library remains available without signing in.</p>'}</div></section>`;
+        `<section class="panel profile-form vault-panel"><span class="eyebrow">ACCOUNT BLUEPRINTS</span><h2>${builds.length} / 50 saved</h2><p>${attemptId ? "Use and submit checks the bounty’s locked limits and commits this saved machine. Deployment cannot be changed afterward." : "Save your current workshop machine, its arena and its construction rules. These builds are not public and do not affect a listed bounty."}</p><button class="primary" id="save-account-build" ${builds.length >= 50 ? "disabled" : ""}>Save current workshop build</button><p id="bounty-error" class="error-message"></p><div class="vault-list">${builds.length ? builds.map(card).join("") : '<p class="hint">No account builds yet. Your local blueprint library remains available without signing in.</p>'}</div></section>`;
       wireHeader();
       $("#save-account-build")?.addEventListener("click", (e) =>
         act(e.currentTarget, async () => {
