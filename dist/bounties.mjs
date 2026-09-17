@@ -892,6 +892,8 @@ export function createBountyUI(adapter) {
                   title: a.bountyTitle,
                   blueprint: a.defender,
                   attemptId: a.id,
+                  buildDeadline: Number(a.build?.deadline || 0),
+                  escrowAttemptDeadline: Number(a.escrowAttemptDeadline || 0),
                 }
               : null;
           if (!defender)

@@ -726,7 +726,8 @@ let arenaIdleRAF = 0,
   modalCleanup = null,
   replaceFitted = false,
   focusBattle = true,
-  scoutRenderer = null;
+  scoutRenderer = null,
+  bountyClock = 0;
 let portal = null,
   bountyUI = null,
   bountyContext = null,
@@ -806,6 +807,8 @@ function stopBattle() {
 function cleanupView() {
   portal?.leave();
   bountyUI?.leave();
+  clearInterval(bountyClock);
+  bountyClock = 0;
   cancelAnimationFrame(arenaIdleRAF);
   stopBattle();
   cancelAnimationFrame(benchRAF);
@@ -2674,8 +2677,15 @@ function renderTerrainKey(arena) {
 }
 function renderContractContext() {
   if (!bountyContext) return;
+  clearInterval(bountyClock);
+  bountyClock = 0;
   const el = document.createElement("section");
   el.className = "bounty-context";
+  const paidAttempt =
+    bountyContext.attemptId &&
+    !officialReceipt &&
+    view === "workshop" &&
+    Number(bountyContext.buildDeadline || 0) > 0;
   el.innerHTML =
     "<div><strong>" +
     esc(bountyContext.title) +
@@ -2691,6 +2701,14 @@ function renderContractContext() {
       : "") +
     "</div>";
   app.prepend(el);
+  if (paidAttempt) {
+    const clock = document.createElement("span");
+    clock.className = "bounty-clock";
+    clock.id = "counter-clock";
+    clock.setAttribute("role", "timer");
+    clock.setAttribute("aria-live", "polite");
+    el.querySelector(".bounty-actions")?.prepend(clock);
+  }
   $("#return-contract").onclick = () =>
     officialReceipt && officialAttemptId
       ? bountyUI.attempt(officialAttemptId)
@@ -2720,6 +2738,32 @@ function renderContractContext() {
     if (p && !matchIssues().length)
       p.textContent =
         "Test your counter against the fixed defense. Practice uses a different seed and never spends credits.";
+  }
+  if (paidAttempt) {
+    const deadline = Number(bountyContext.buildDeadline);
+    const clock = $("#counter-clock");
+    const deploy = $("#deploy-official-counter");
+    const tick = () => {
+      const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      if (!seconds) {
+        clock.textContent = "BUILD WINDOW CLOSED";
+        clock.classList.add("closed");
+        if (deploy) {
+          deploy.disabled = true;
+          deploy.textContent = "Build window closed";
+        }
+        clearInterval(bountyClock);
+        bountyClock = 0;
+        return;
+      }
+      clock.textContent =
+        "BUILD WINDOW \xB7 " +
+        Math.floor(seconds / 60) +
+        ":" +
+        String(seconds % 60).padStart(2, "0");
+    };
+    tick();
+    if (deadline > Date.now()) bountyClock = setInterval(tick, 1000);
   }
 }
 bountyUI = createBountyUI({
@@ -3607,6 +3651,16 @@ if (document.modelContext?.registerTool) {
 .bounty-context .bounty-actions {
   margin: 0;
   flex-shrink: 0;
+}
+.bounty-context .bounty-clock {
+  align-self: center;
+  color: var(--gold);
+  font: 11px monospace;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.bounty-context .bounty-clock.closed {
+  color: #e39a86;
 }
 .terrain-key {
   margin-top: 13px !important;
@@ -4762,6 +4816,8 @@ export function createBountyUI(adapter) {
                   title: a.bountyTitle,
                   blueprint: a.defender,
                   attemptId: a.id,
+                  buildDeadline: Number(a.build?.deadline || 0),
+                  escrowAttemptDeadline: Number(a.escrowAttemptDeadline || 0),
                 }
               : null;
           if (!defender)

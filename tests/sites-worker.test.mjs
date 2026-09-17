@@ -815,6 +815,8 @@ test("official bounty trials replay before the signing result is shown", async (
   assert.match(app, /bountyUI\.attempt\(officialAttemptId\)/);
   assert.match(app, /deploy-official-counter/);
   assert.match(app, /bountyUI\.deploy\(bountyContext\.attemptId\)/);
+  assert.match(app, /BUILD WINDOW/);
+  assert.match(client, /buildDeadline: Number\(a\.build\?\.deadline \|\| 0\)/);
 });
 
 test("completed paid bounties retain a public replay window", async () => {
