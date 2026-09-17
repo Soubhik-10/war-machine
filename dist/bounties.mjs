@@ -94,6 +94,21 @@ export function createBountyUI(adapter) {
     runtime = { mode: "sandbox", paid: false, currency: "sandbox credits" },
     walletBalance = null,
     tempoClient = null;
+  const getCache = new Map();
+  const cacheTtl = (path) =>
+    path === "/rules"
+      ? 5 * 60_000
+      : path === "/bounties"
+        ? 8_000
+        : /^\/bounties\//.test(path)
+          ? 4_000
+          : 0;
+  const invalidateBoardCache = () => {
+    for (const key of getCache.keys()) {
+      if (key === "/bounties" || key.startsWith("/bounties/"))
+        getCache.delete(key);
+    }
+  };
   const app = $("#app");
   async function ensureTempoClient() {
     if (tempoClient) return tempoClient;
@@ -124,6 +139,11 @@ export function createBountyUI(adapter) {
     return runtime;
   }
   async function api(path, method = "GET", body, key) {
+    const ttl = !body && method === "GET" ? cacheTtl(path) : 0;
+    if (ttl) {
+      const cached = getCache.get(path);
+      if (cached && Date.now() - cached.time < ttl) return cached.value;
+    }
     let response;
     try {
       const request = {
@@ -156,6 +176,7 @@ export function createBountyUI(adapter) {
       e.status = response.status;
       throw e;
     }
+    if (ttl) getCache.set(path, { time: Date.now(), value: result });
     return result;
   }
   async function ensurePaidWalletSession() {
@@ -227,12 +248,14 @@ export function createBountyUI(adapter) {
       if (request.intentId && request.transactionHash) {
         const confirmed = await confirmDirectIntent(request);
         clearOutbox();
+        invalidateBoardCache();
         return confirmed;
       }
       if (request.intentId) {
         prepared = await api(path, "POST", body, request.key);
         if (prepared.final) {
           clearOutbox();
+          invalidateBoardCache();
           return prepared.value;
         }
       } else {
@@ -259,6 +282,7 @@ export function createBountyUI(adapter) {
       }
       const confirmed = await confirmDirectIntent(request);
       clearOutbox();
+      invalidateBoardCache();
       return confirmed;
     } catch (e) {
       if (!request.intentId && e.status && e.status < 500) clearOutbox();
@@ -429,9 +453,19 @@ export function createBountyUI(adapter) {
       header(
         "THE BOUNTY BOARD.",
         "Build a counter. Break a machine. Claim the bounty.",
-      ) + '<div class="bounty-loading">Connecting to the arena…</div>';
+      ) +
+      '<div class="bounty-loading" role="status" aria-live="polite"><span class="loading-mark" aria-hidden="true"></span><strong>Opening the bounty board</strong><span>Loading live challenges and the latest settlement state…</span><div class="bounty-loading-grid" aria-hidden="true"><i></i><i></i><i></i></div></div>';
     wireHeader();
     try {
+      // Start the public board request immediately and overlap it with the
+      // rules/config request. The board does not need wallet state to load.
+      let dataError = null;
+      const dataRequest = api(id ? "/bounties/" + id : "/bounties").catch(
+        (error) => {
+          dataError = error;
+          return null;
+        },
+      );
       const catalog = await api("/rules");
       await configureRuntime(catalog);
       currentFeeBps = catalog.economics.platformFee.basisPoints;
@@ -439,8 +473,10 @@ export function createBountyUI(adapter) {
         throw Error(
           "This tab has an older game release. Reload the page before entering or replaying bounties.",
         );
-      await refreshMe();
-      const data = await api(id ? "/bounties/" + id : "/bounties");
+      const meRequest = refreshMe();
+      const data = await dataRequest;
+      if (dataError) throw dataError;
+      await meRequest;
       const saved = me ? await api("/me/bookmarks") : [];
       savedIds = new Set(saved.map((b) => b.id));
       if (!id)

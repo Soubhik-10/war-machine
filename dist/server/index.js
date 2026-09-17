@@ -4079,6 +4079,21 @@ export function createBountyUI(adapter) {
     runtime = { mode: "sandbox", paid: false, currency: "sandbox credits" },
     walletBalance = null,
     tempoClient = null;
+  const getCache = new Map();
+  const cacheTtl = (path) =>
+    path === "/rules"
+      ? 5 * 60_000
+      : path === "/bounties"
+        ? 8_000
+        : /^\\/bounties\\//.test(path)
+          ? 4_000
+          : 0;
+  const invalidateBoardCache = () => {
+    for (const key of getCache.keys()) {
+      if (key === "/bounties" || key.startsWith("/bounties/"))
+        getCache.delete(key);
+    }
+  };
   const app = $("#app");
   async function ensureTempoClient() {
     if (tempoClient) return tempoClient;
@@ -4109,6 +4124,11 @@ export function createBountyUI(adapter) {
     return runtime;
   }
   async function api(path, method = "GET", body, key) {
+    const ttl = !body && method === "GET" ? cacheTtl(path) : 0;
+    if (ttl) {
+      const cached = getCache.get(path);
+      if (cached && Date.now() - cached.time < ttl) return cached.value;
+    }
     let response;
     try {
       const request = {
@@ -4141,6 +4161,7 @@ export function createBountyUI(adapter) {
       e.status = response.status;
       throw e;
     }
+    if (ttl) getCache.set(path, { time: Date.now(), value: result });
     return result;
   }
   async function ensurePaidWalletSession() {
@@ -4212,12 +4233,14 @@ export function createBountyUI(adapter) {
       if (request.intentId && request.transactionHash) {
         const confirmed = await confirmDirectIntent(request);
         clearOutbox();
+        invalidateBoardCache();
         return confirmed;
       }
       if (request.intentId) {
         prepared = await api(path, "POST", body, request.key);
         if (prepared.final) {
           clearOutbox();
+          invalidateBoardCache();
           return prepared.value;
         }
       } else {
@@ -4244,6 +4267,7 @@ export function createBountyUI(adapter) {
       }
       const confirmed = await confirmDirectIntent(request);
       clearOutbox();
+      invalidateBoardCache();
       return confirmed;
     } catch (e) {
       if (!request.intentId && e.status && e.status < 500) clearOutbox();
@@ -4414,9 +4438,19 @@ export function createBountyUI(adapter) {
       header(
         "THE BOUNTY BOARD.",
         "Build a counter. Break a machine. Claim the bounty.",
-      ) + '<div class="bounty-loading">Connecting to the arena\u2026</div>';
+      ) +
+      '<div class="bounty-loading" role="status" aria-live="polite"><span class="loading-mark" aria-hidden="true"></span><strong>Opening the bounty board</strong><span>Loading live challenges and the latest settlement state\u2026</span><div class="bounty-loading-grid" aria-hidden="true"><i></i><i></i><i></i></div></div>';
     wireHeader();
     try {
+      // Start the public board request immediately and overlap it with the
+      // rules/config request. The board does not need wallet state to load.
+      let dataError = null;
+      const dataRequest = api(id ? "/bounties/" + id : "/bounties").catch(
+        (error) => {
+          dataError = error;
+          return null;
+        },
+      );
       const catalog = await api("/rules");
       await configureRuntime(catalog);
       currentFeeBps = catalog.economics.platformFee.basisPoints;
@@ -4424,8 +4458,10 @@ export function createBountyUI(adapter) {
         throw Error(
           "This tab has an older game release. Reload the page before entering or replaying bounties.",
         );
-      await refreshMe();
-      const data = await api(id ? "/bounties/" + id : "/bounties");
+      const meRequest = refreshMe();
+      const data = await dataRequest;
+      if (dataError) throw dataError;
+      await meRequest;
       const saved = me ? await api("/me/bookmarks") : [];
       savedIds = new Set(saved.map((b) => b.id));
       if (!id)
@@ -5378,7 +5414,7 @@ export function createBountyUI(adapter) {
   }
   return { open, leave, profile, attempt, deploy: deployCounter };
 }
-`,"text/javascript; charset=utf-8","8fe4bb6a4fa34f88"],"/camera.mjs":[`const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+`,"text/javascript; charset=utf-8","ec55b15fb5f69c05"],"/camera.mjs":[`const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 export function newCamera(battle=false){return {yaw:battle?-.65:-2.55,elevation:battle?.86:.68,zoom:1,panX:0,panZ:0,follow:'both',drag:'orbit',current:null};}
 export function screenDirection(x,y,camera){return {x:Math.cos(camera.yaw)*x+Math.sin(camera.yaw)*y,y:-Math.sin(camera.yaw)*x+Math.cos(camera.yaw)*y};}
 export function fittedSpan(machine,aspect,yaw,elevation,gap=1.65){const xs=machine.modules.map(m=>m.x-4),zs=machine.modules.map(m=>m.y-4),heights=machine.modules.map(m=>(m.z||0)*gap+1.7);const minX=Math.min(...xs)-.8,maxX=Math.max(...xs)+.8,minZ=Math.min(...zs)-.8,maxZ=Math.max(...zs)+.8,maxH=Math.max(...heights),center=[(minX+maxX)/2,maxH*.46,(minZ+maxZ)/2];let minU=Infinity,maxU=-Infinity,minV=Infinity,maxV=-Infinity;for(const x of [minX,maxX])for(const z of [minZ,maxZ])for(const h of [0,maxH]){const u=x*Math.cos(yaw)-z*Math.sin(yaw),v=-x*Math.sin(yaw)*Math.sin(elevation)+h*Math.cos(elevation)-z*Math.cos(yaw)*Math.sin(elevation);minU=Math.min(minU,u);maxU=Math.max(maxU,u);minV=Math.min(minV,v);maxV=Math.max(maxV,v);}return {center,span:Math.max(6,maxV-minV+1.8,(maxU-minU+1.8)/Math.max(.3,aspect))};}
@@ -5865,7 +5901,104 @@ button,input,select,textarea,.file-button{border-radius:10px}.panel{border-radiu
 .app-loading{min-height:62vh;display:grid;place-content:center;justify-items:center;gap:12px;color:var(--muted);text-align:center}.app-loading strong{font:21px Foundry,Arial;color:var(--text);letter-spacing:.5px}.app-loading>span:last-child{font:12px 'Courier New',monospace;letter-spacing:.5px}.loading-mark{width:30px;height:30px;border:2px solid color-mix(in srgb,var(--gold) 22%,transparent);border-top-color:var(--gold);border-right-color:var(--gold);border-radius:50%;animation:loading-spin .8s linear infinite}@keyframes loading-spin{to{transform:rotate(360deg)}}
 @media(max-width:760px){.topbar{height:64px;padding:8px 14px}.topbar .brand{font-size:14px;letter-spacing:.7px}.brand-mark{width:34px;height:36px;font-size:25px}.brand small{font-size:8px;letter-spacing:2px;margin-top:3px}.mobile-nav-toggle{display:flex;margin-left:auto}.topbar nav{position:absolute;top:calc(100% + 8px);left:12px;right:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:8px;background:color-mix(in srgb,var(--panel) 96%,transparent);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 45px #0008;opacity:0;transform:translateY(-8px) scale(.98);pointer-events:none;transition:opacity .18s,transform .18s}.nav-open .topbar nav{opacity:1;transform:none;pointer-events:auto}.topbar .nav{justify-content:flex-start;width:100%;min-height:42px;padding:9px 12px}.header-tools{margin-left:0}.header-tools .local-tag{display:none}.icon-button{min-width:38px;min-height:40px}.app-loading{min-height:70vh}}
 @media(prefers-reduced-motion:reduce){.loading-mark{animation:none}.mobile-nav-toggle span{transition:none}.topbar nav{transition:none}}
-`,"text/css; charset=utf-8","f841c3a939e06959"],"/portal.mjs":[`import {PARTS,ARENAS,PRESETS,clone,packChallenge,stats} from './data.mjs';
+
+/* Bounty board visual pass: cool steel surfaces, readable type and balanced rhythm. */
+:root{
+  --bg:#0b131d;
+  --panel:#162330;
+  --line:#2e4558;
+  --text:#f1f5f7;
+  --muted:#9aabba;
+  --gold:#f5bd62;
+  --green:#72d4c2;
+  --red:#ed8a7d;
+  --portal-bg:#0b131d;
+  --portal-panel:#162330;
+  --portal-line:#2e4558;
+  --portal-text:#f1f5f7;
+  --portal-muted:#9aabba;
+  --portal-accent:#f5bd62;
+  --portal-green:#72d4c2;
+}
+body{
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  background:radial-gradient(ellipse at 50% -20%,#1b334633,transparent 58%),var(--bg);
+  color:var(--text);
+}
+h1,h2,h3,.display,.machine-title,.contract-reward b,.credit-summary b,.contract-economy b{
+  font-family:Bahnschrift,"Arial Narrow","Roboto Condensed",Inter,ui-sans-serif,sans-serif;
+  letter-spacing:-.02em;
+}
+small,.eyebrow,.status-stamp,.contract-status,.terrain-tag,.contract-class,.contract-reward small{
+  font-family:"IBM Plex Mono","SFMono-Regular",Consolas,"Liberation Mono",monospace;
+}
+main{max-width:1500px;padding:34px clamp(18px,4vw,64px) 54px}
+.topbar{background:color-mix(in srgb,var(--bg) 91%,transparent);border-bottom-color:color-mix(in srgb,var(--line) 90%,transparent)}
+.brand{font-size:16px;letter-spacing:.8px}.brand small{color:var(--muted)}
+.page-heading{align-items:flex-end;margin-bottom:28px;gap:22px}
+.page-heading .eyebrow{color:var(--gold);font-size:10px;letter-spacing:2.4px}
+.page-heading h1{font-size:clamp(30px,3vw,42px);line-height:1.05;letter-spacing:-.03em}
+.page-heading p{font-size:14px;color:var(--muted);max-width:700px}
+.heading-actions{align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.heading-actions button{min-height:40px;padding:9px 14px;background:#182632;border-color:#355064;border-radius:11px}
+.heading-actions button:hover{background:#213544;border-color:#55758a}
+.heading-actions .danger{color:#ef9b8d;border-color:#6d4c4b}
+.contract-hero{
+  grid-template-columns:minmax(0,1.35fr) minmax(310px,.85fr);
+  gap:46px;padding:36px 40px;border-radius:18px;border-color:#355064;
+  background:radial-gradient(ellipse at 92% 0%,#3e719032,transparent 58%),linear-gradient(135deg,#182a38,#121d28);
+  box-shadow:0 18px 48px #050b1226,inset 0 1px #d9edf00c;
+}
+.contract-hero h2{font-size:clamp(34px,3.3vw,48px);line-height:1.08;margin:17px 0}
+.contract-hero p{color:#b2c1cc;font-size:14px;line-height:1.75}
+.contract-hero-actions{margin-top:26px}.contract-hero-actions button{border-radius:11px}
+.credit-summary{padding:20px 0 20px 36px;border-left-color:#3a566a}
+.status-stamp{color:#78d5c4;border-color:#356258;background:#10262a;padding:8px 10px;border-radius:7px}
+.credit-summary b{font-size:clamp(48px,4.2vw,66px);color:var(--gold);margin-top:20px}
+.credit-summary span:not(.status-stamp){color:#b7c5ce;letter-spacing:1.8px}
+.credit-summary p{color:#a6b8c4;line-height:1.65}
+.contract-filter{margin:28px 0 16px;align-items:center}
+.segmented{display:flex;gap:6px;flex-wrap:wrap}
+.segmented button{min-height:38px;padding:8px 13px;border-radius:10px;background:#14222e;border-color:#2e4558;color:#aabac6;font-size:12px}
+.segmented button.active{background:#263847;color:#f6c772;border-color:#b2874a;box-shadow:inset 0 1px #f6c77235}
+#refresh-contracts{min-height:38px;border-radius:10px;background:transparent;color:#aac0cc}
+.contract-search{gap:11px;margin:16px 0 22px}
+.contract-search input,.contract-search select{min-height:43px;border-radius:11px;background:#101c27;border-color:#2e4558;color:#dce6eb}
+.contract-search input::placeholder{color:#718697}
+.contract-grid{grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+.contract-card{border-color:#304a5d;border-radius:16px;background:linear-gradient(180deg,#182733,#14202b);box-shadow:0 12px 34px #050b121f;transition:transform .18s,border-color .18s,box-shadow .18s}
+.contract-card:hover{border-color:#5b8197;transform:translateY(-3px);box-shadow:0 18px 42px #050b1233}
+.contract-card-top{padding:15px 18px 13px}.contract-card-top small{color:#8197a7;letter-spacing:.9px}
+.contract-status{border-radius:6px;padding:5px 8px;letter-spacing:1.2px}
+.contract-status.open{color:#78d9c5;border-color:#397969;background:#102b2d}.contract-status.busy{color:#f5c16a;border-color:#80633c;background:#2b2418}
+.contract-preview{height:225px;background:radial-gradient(ellipse at 50% 54%,#3c6b7b30,transparent 60%),repeating-linear-gradient(0deg,transparent 0 31px,#81a9bd0c 32px),repeating-linear-gradient(90deg,transparent 0 31px,#81a9bd0c 32px),#11202b}
+.contract-reward{right:18px;bottom:16px}.contract-reward b{font-size:42px;color:#f6c56b;text-shadow:0 2px 9px #07121b}
+.contract-content{padding:21px 20px 20px;background:transparent}
+.contract-content h2{font-size:22px;line-height:1.15;min-height:0;color:#edf3f5}
+.contract-content p{color:#a7b8c4;line-height:1.55}
+.terrain-tags{gap:6px;margin-top:13px}.terrain-tag{border-radius:6px;padding:5px 7px;color:#a9c6cb;border-color:#3d5c67;background:#12272f}
+.terrain-tag.rubble,.terrain-tag.sand{color:#e9c98e;border-color:#6b5940;background:#2a251b}.terrain-tag.ice{color:#a9dcf0;border-color:#416579;background:#132a39}
+.contract-class{color:#b6b29a!important;letter-spacing:.1px}
+.card-fee{color:#f2bd63!important}.contract-footer{border-top-color:#2d4656;margin-top:18px;padding-top:15px}.contract-footer span{color:#9db0bd}.contract-footer button{border-radius:9px;color:#c6d9e2;background:#1c303d;border-color:#3b5b70}
+.bounty-footnote{color:#8da2b1;background:#111e29;border-color:#2d4557;border-radius:11px;padding:14px 16px;line-height:1.65}
+.bounty-loading{min-height:430px;display:grid;place-content:center;justify-items:center;gap:12px;padding:42px;border:1px solid #304a5d;border-radius:18px;background:linear-gradient(135deg,#142430,#101b26);color:#9eb2c0;box-shadow:0 16px 42px #050b1226}
+.bounty-loading strong{font:22px Bahnschrift,"Arial Narrow",sans-serif;color:#edf3f5;letter-spacing:-.02em}.bounty-loading>span:last-of-type{font:12px "IBM Plex Mono",Consolas,monospace;text-align:center;color:#8fa5b4}
+.bounty-loading-grid{display:grid;grid-template-columns:repeat(3,78px);gap:8px;margin-top:15px}.bounty-loading-grid i{display:block;height:5px;border-radius:99px;background:#294354;overflow:hidden;position:relative}.bounty-loading-grid i::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,#70d4c2,transparent);transform:translateX(-100%);animation:loading-sweep 1.4s ease-in-out infinite}.bounty-loading-grid i:nth-child(2)::after{animation-delay:.18s}.bounty-loading-grid i:nth-child(3)::after{animation-delay:.36s}@keyframes loading-sweep{to{transform:translateX(100%)}}
+.contract-detail{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}.contract-detail>*{min-width:0}
+.defender-card,.contract-terms{border-color:#304a5d;border-radius:18px;background:linear-gradient(180deg,#182733,#14212d);box-shadow:0 14px 38px #050b1226}
+.defender-card>canvas{height:380px;background:radial-gradient(ellipse at 50% 45%,#356a7b44,transparent 63%),linear-gradient(135deg,#162a38,#101c28)}
+.defender-caption{padding:20px 25px}.defender-caption h2{font-size:32px;line-height:1.08}.defender-caption p{color:#a8b9c4;line-height:1.6}.defender-card .bounty-actions{padding:0 25px 25px}
+.contract-terms{padding:30px 32px}.contract-terms>.eyebrow{color:#86caca}.contract-terms>h2{font-size:31px;line-height:1.1;margin:14px 0 20px}
+.contract-economy{gap:24px;padding:22px 0;border-color:#2e4758}.contract-economy b{font-size:36px;color:#f6c46c}.contract-economy small{color:#8fa7b6;letter-spacing:1.2px}
+.contract-rule{margin:20px 0}.contract-rule strong{font-size:14px;color:#e6eff2}.contract-rule p,.contract-terms>.hint{color:#9fb2bf;line-height:1.7}
+.fee-disclosure{margin-top:24px;border-radius:11px;border-color:#9a713a;background:linear-gradient(100deg,#f0b64b18,transparent 80%);color:#d2dce1;line-height:1.65}.fee-disclosure strong{color:#f6c46c}
+.participant-prompt{border-color:#315a5d;border-radius:12px;background:linear-gradient(135deg,#132b31,#15232d)}
+.contract-enter{border-radius:11px;min-height:48px}
+.notice{border-radius:11px}
+@media(max-width:1050px){.contract-hero{gap:28px;padding:30px}.contract-detail{grid-template-columns:1fr 1fr}.credit-summary{padding-left:25px}.contract-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){main{padding:24px 16px 42px}.page-heading{align-items:flex-start;flex-direction:column;gap:15px}.page-heading h1{font-size:34px}.heading-actions{width:100%;justify-content:flex-start}.heading-actions button{flex:1}.contract-hero{grid-template-columns:1fr;padding:25px 22px;gap:24px}.contract-hero h2{font-size:34px}.credit-summary{padding:22px 0 0;border-left:0;border-top-color:#365466}.contract-detail{grid-template-columns:1fr}.contract-terms{padding:24px 21px}.contract-grid{grid-template-columns:1fr}.contract-preview{height:210px}.bounty-loading{min-height:360px;padding:30px 18px}.contract-economy{gap:12px}.contract-economy b{font-size:30px}}
+@media(prefers-reduced-motion:reduce){.bounty-loading-grid i::after{animation:none}.contract-card{transition:none}}
+`,"text/css; charset=utf-8","29fa02f14ab87abb"],"/portal.mjs":[`import {PARTS,ARENAS,PRESETS,clone,packChallenge,stats} from './data.mjs';
 import {Renderer,Geometry} from './renderer.mjs';
 import {fittedSpan} from './camera.mjs';
 import {installAgentActivity} from './activity.mjs';
