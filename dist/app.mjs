@@ -363,7 +363,7 @@ function workshop() {
   setNav();
   hover = null;
   focus = machine.modules.some((m) => keyOf(m) === focus) ? focus : null;
-  app.innerHTML = `<div class="page-heading"><div><span class="eyebrow">BUILD / TEST / REFINE</span><h1>THE FOUNDRY</h1><p>Place parts, manage the tradeoffs, and see what survives.</p></div><div class="heading-actions"><button id="blueprints-btn">▦ Blueprints</button><button id="share-btn">↗ Challenge a friend</button></div></div>
+  app.innerHTML = `<div class="page-heading"><div><span class="eyebrow">BUILD / TEST / REFINE</span><h1>WORKSHOP</h1><p>Place parts, manage the tradeoffs, and see what survives.</p></div><div class="heading-actions"><button id="blueprints-btn">▦ Blueprints</button><button id="share-btn">↗ Challenge a friend</button></div></div>
  <div class="workspace"><aside class="panel parts-panel"><div class="panel-head"><h3>Parts</h3><small>${PARTS.length} PARTS</small></div><div class="parts-tabs">${["All", "Weapons", "Defense", "Structure", "Mobility", "Systems"].map((c) => `<button data-category="${c}" class="${c === category ? "active" : ""}">${c}</button>`).join("")}</div><div class="parts-list" id="parts-list"></div><div class="selection-details" id="selection-details"></div></aside>
  <section class="panel bench"><div class="bench-top"><input class="machine-title" id="machine-name" aria-label="Machine name" maxlength="28" value="${esc(machine.name)}"><small id="module-count"></small></div>
  <div class="bench-tools">${[
