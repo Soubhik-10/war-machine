@@ -806,6 +806,29 @@ test("paid bounty actions establish a Tempo session only when payment starts", a
   assert.match(source, /Tempo RPC/i);
 });
 
+test("static assets use validators while HTML stays immediately refreshable", async () => {
+  const { serveStaticAsset } = await import(
+    `../sites/worker/static-assets.mjs?cache-test=${Date.now()}`
+  );
+  const first = serveStaticAsset(
+    new Request("https://foundry.example/style.css"),
+  );
+  assert.equal(first.status, 200);
+  assert.match(first.headers.get("cache-control"), /stale-while-revalidate/);
+  const etag = first.headers.get("etag");
+  assert.match(etag, /^"[0-9a-f]+"$/);
+  const cached = serveStaticAsset(
+    new Request("https://foundry.example/style.css", {
+      headers: { "if-none-match": etag },
+    }),
+  );
+  assert.equal(cached.status, 304);
+  const document = serveStaticAsset(
+    new Request("https://foundry.example/index.html"),
+  );
+  assert.equal(document.headers.get("cache-control"), "no-cache");
+});
+
 test("Tempo RPC transport failures remain retry-safe payment errors", async () => {
   const source = await readFile(
     new URL("../sites/worker/mainnet.mjs", import.meta.url),

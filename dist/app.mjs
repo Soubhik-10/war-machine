@@ -2199,19 +2199,37 @@ portal = createPortal({
     arenaView();
   },
 });
+const mobileNavToggle = $("#nav-toggle");
+const setMobileNav = (open) => {
+  document.body.classList.toggle("nav-open", open);
+  mobileNavToggle?.setAttribute("aria-expanded", String(open));
+  mobileNavToggle?.setAttribute(
+    "aria-label",
+    open ? "Close navigation" : "Open navigation",
+  );
+};
+mobileNavToggle?.addEventListener("click", () => {
+  setMobileNav(!document.body.classList.contains("nav-open"));
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".topbar")) setMobileNav(false);
+});
 $$("[data-view]").forEach(
   (b) =>
-    (b.onclick = () =>
-      b.dataset.view === "workshop"
+    (b.onclick = () => {
+      setMobileNav(false);
+      return b.dataset.view === "workshop"
         ? workshop()
         : b.dataset.view === "bounties"
           ? bountyUI.open()
           : b.dataset.view === "agents"
             ? portal.agents()
-            : arenaView()),
+            : arenaView();
+    }),
 );
 $(".brand").onclick = (e) => {
   e.preventDefault();
+  setMobileNav(false);
   portal.home();
 };
 $("#manual-btn").onclick = () => {

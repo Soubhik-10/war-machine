@@ -95,6 +95,17 @@ export function createBountyUI(adapter) {
     walletBalance = null,
     tempoClient = null;
   const app = $("#app");
+  async function ensureTempoClient() {
+    if (tempoClient) return tempoClient;
+    const response = await fetch("/.well-known/war-machines.json", {
+      credentials: "include",
+    });
+    if (!response.ok) throw Error("Tempo payment discovery is unavailable.");
+    const discovery = await response.json();
+    tempoClient = await import("./tempo-client.mjs");
+    await tempoClient.configure(discovery);
+    return tempoClient;
+  }
   async function configureRuntime(catalog) {
     runtime = {
       mode: catalog.mode,
@@ -110,13 +121,6 @@ export function createBountyUI(adapter) {
         null,
       currency: catalog.economics.amountUnit || "sandbox credits",
     };
-    if (runtime.paid && !tempoClient) {
-      const discovery = await fetch("/.well-known/war-machines.json", {
-        credentials: "include",
-      }).then((response) => response.json());
-      tempoClient = await import("./tempo-client.mjs");
-      await tempoClient.configure(discovery);
-    }
     return runtime;
   }
   async function api(path, method = "GET", body, key) {
@@ -156,7 +160,7 @@ export function createBountyUI(adapter) {
   }
   async function ensurePaidWalletSession() {
     if (!runtime.paid || me) return me;
-    await tempoClient.signInWallet();
+    await (await ensureTempoClient()).signInWallet();
     await refreshMe();
     if (!me)
       throw Error("Tempo Wallet did not complete the bounty identity check.");
@@ -248,7 +252,7 @@ export function createBountyUI(adapter) {
         save(OUTBOX_KEY, request);
       }
       if (!request.transactionHash) {
-        request.transactionHash = await tempoClient.executeEscrowPlan(
+        request.transactionHash = await (await ensureTempoClient()).executeEscrowPlan(
           prepared.plan,
         );
         save(OUTBOX_KEY, request);
@@ -365,7 +369,7 @@ export function createBountyUI(adapter) {
     return me;
   }
   async function disconnectWallet(returnId) {
-    await tempoClient.logout();
+    await (await ensureTempoClient()).logout();
     me = null;
     walletBalance = null;
     await open(returnId);
@@ -1132,7 +1136,7 @@ export function createBountyUI(adapter) {
       $("#continue-guest").onclick = adapter.workshop;
       $("#tempo-wallet-login").onclick = (e) =>
         act(e.currentTarget, async () => {
-          await tempoClient.signInWallet();
+          await (await ensureTempoClient()).signInWallet();
           await refreshMe();
           await profile();
         });

@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { createHash } from "node:crypto";
 import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, extname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,14 +30,16 @@ const assets = {};
 for (const file of await files(dist)) {
   const path = "/" + relative(dist, file).replaceAll("\\", "/");
   if (path.startsWith("/server/") || path.startsWith("/.openai/")) continue;
+  const content = await readFile(file, "utf8");
   assets[path] = [
-    await readFile(file, "utf8"),
+    content,
     mime[extname(file)] || "application/octet-stream",
+    createHash("sha256").update(content).digest("hex").slice(0, 16),
   ];
 }
 await writeFile(
   resolve(root, "sites", "worker", "static-assets.mjs"),
-  `const assets=${JSON.stringify(assets)};\nexport function serveStaticAsset(request){const path=new URL(request.url).pathname==='/'?'/index.html':new URL(request.url).pathname,asset=assets[path];return asset?new Response(asset[0],{headers:{'content-type':asset[1],'cache-control':'no-cache','x-content-type-options':'nosniff'}}):new Response('Not found.',{status:404,headers:{'content-type':'text/plain; charset=utf-8','x-content-type-options':'nosniff'}});}\n`,
+  `const assets=${JSON.stringify(assets)};\nexport function serveStaticAsset(request){const path=new URL(request.url).pathname==='/'?'/index.html':new URL(request.url).pathname,asset=assets[path];if(!asset)return new Response('Not found.',{status:404,headers:{'content-type':'text/plain; charset=utf-8','x-content-type-options':'nosniff'}});const etag=\`"\${asset[2]}"\`,headers={'content-type':asset[1],'cache-control':path==='/index.html'?'no-cache':'public, max-age=60, stale-while-revalidate=86400','etag':etag,'x-content-type-options':'nosniff'};return request.headers.get('if-none-match')===etag?new Response(null,{status:304,headers}):new Response(asset[0],{headers});}\n`,
 );
 await mkdir(resolve(dist, "server"), { recursive: true });
 await build({
