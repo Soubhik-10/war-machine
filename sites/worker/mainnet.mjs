@@ -4033,8 +4033,11 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         403,
       );
     const body = ["POST", "PATCH"].includes(method)
-        ? await bodyOf(request)
-        : {},
+      // Keep the original request readable for MPP authentication. The
+      // Tempo CLI may need the request clone when normalizing its standard
+      // Authorization header to Payment-Authorization.
+      ? await bodyOf(request.clone())
+      : {},
       auth = await dbAuth(db, request);
     if (path === "/api/rules" && method === "GET")
       return response(catalog(config));
