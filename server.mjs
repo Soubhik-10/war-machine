@@ -25,10 +25,10 @@ export async function startServer({port=8770,host='127.0.0.1',database,seed=true
   w.once('message',m=>finish(m.result,m.error));w.once('error',()=>finish(null,'Simulation worker failed; entry refunded.'));w.once('exit',code=>{if(!settled)finish(null,'Simulation interrupted; entry refunded.');});
  }catch(e){console.error('Arena queue:',e.message);}}
  function practice(job){
-  check(!worker&&!practiceWorker&&!store.db.prepare("SELECT id FROM attempts WHERE status IN ('queued','running') LIMIT 1").get(),'Official trials have priority. Retry free practice later or simulate locally.',429);
+  check(!worker&&!practiceWorker&&!store.db.prepare("SELECT id FROM attempts WHERE status IN ('queued','running') LIMIT 1").get(),'Official trials have priority. Retry the local simulation later.',429);
   return new Promise((resolve,reject)=>{const w=new Worker(new URL('./server/battle-worker.mjs',import.meta.url),{workerData:job,resourceLimits:{maxOldGenerationSizeMb:192}});practiceWorker=w;let finished=false;
    const finish=(result,error)=>{if(finished)return;finished=true;clearTimeout(timeout);practiceWorker=null;void w.terminate();setImmediate(pump);error?reject(new ApiError(503,error)):resolve({kind:'practice',official:false,creditsChanged:0,versions:discovery(runtime).versions,result});};
-   const timeout=setTimeout(()=>finish(null,'Free practice exceeded its 30-second limit. No credits were spent.'),30000);
+   const timeout=setTimeout(()=>finish(null,'Local simulation exceeded its 30-second limit. No credits were spent.'),30000);
    w.once('message',m=>finish(m.result,m.error));w.once('error',()=>finish(null,'Practice worker failed. No credits were spent.'));w.once('exit',()=>finish(null,'Practice interrupted. No credits were spent.'));
   });
  }
@@ -65,7 +65,7 @@ export async function startServer({port=8770,host='127.0.0.1',database,seed=true
    const token=req.headers.authorization?.replace(/^Bearer /,''),publicRoute=(method==='GET'&&!path.startsWith('/api/me')&&!path.startsWith('/api/agents'))||['/api/session','/api/blueprints/validate','/api/practice'].includes(path);let auth=null;
    if(token){try{auth=store.auth(token);}catch(e){if(!tempoAuth&&!publicRoute)throw e;}}
    if(!auth&&tempoAuth){const identity=await tempoAuth.session(fetchRequest(path));if(identity)auth={account:identity.account,role:'owner',identity};else if(token&&!publicRoute)throw new ApiError(401,'Invalid or revoked session.');}
-   const requireAuth=()=>{check(auth,'Sign in for bounty actions. Building and practice are open to guests.',401);return auth;},key=req.headers['idempotency-key'];
+   const requireAuth=()=>{check(auth,'Sign in for bounty actions. Building and local simulations are open to guests.',401);return auth;},key=req.headers['idempotency-key'];
    store.expire();
    if(method==='GET'&&path==='/api/rules')return send(200,store.catalog());
    if(method==='GET'&&path==='/api/openapi.json')return send(200,OPENAPI);

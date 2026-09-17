@@ -369,7 +369,6 @@ function catalog(config) {
       "share machines",
       "browse",
       "validate",
-      "practice",
       ...(acceptingNewBounties
         ? [
             "create and fund a bounty with Tempo Wallet",
@@ -394,7 +393,7 @@ function catalog(config) {
       method: "tempo",
       intent: "charge",
       scope:
-        "A zero-value Tempo proof authenticates the wallet for autonomous agent operations; paid practice remains a separate charge.",
+        "A zero-value Tempo proof authenticates the wallet for autonomous agent operations; MPP agent simulations remain separately priced.",
       ...(config.agentMppEnabled
         ? {
             routes: [
@@ -516,7 +515,7 @@ const discovery = (config) => ({
           : { ready: false, reason: config.settlementReason },
         mpp: !!config.agentMppEnabled,
         mppScope: config.agentMppEnabled
-          ? "Zero-value Tempo proof authorizes the wallet for autonomous REST and MCP bounty operations; paid practice is separately priced."
+          ? "Zero-value Tempo proof authorizes the wallet for autonomous REST and MCP bounty operations; MPP agent simulations are separately priced."
           : "MPP agent billing is not configured.",
         ...(config.agentMppEnabled
           ? {
@@ -548,7 +547,7 @@ const discovery = (config) => ({
         reason: config.reason,
       },
   authentication: {
-    guest: ["catalog", "bounties", "validation", "practice"],
+    guest: ["catalog", "bounties", "validation"],
     account: [
       "create/cancel bounty",
       "official entry",
@@ -566,7 +565,6 @@ const discovery = (config) => ({
     results: "deterministic replay; two escrow signer attestations required",
     timeout:
       "counter-build expiry settles as a loss; entry goes to bounty creator",
-    practicePays: false,
     officialSeed: "server chosen",
   },
 });
@@ -596,7 +594,7 @@ const openapi = {
       post: {
         summary: "Stateless MCP Streamable HTTP endpoint",
         description:
-          "Connect an MCP client to this endpoint. Read, validation and practice tools are public; bounty mutations accept the same zero-value Tempo MPP proof in Payment-Authorization as the REST API. Returned direct escrow plans must be signed by the caller's own Tempo wallet/access key.",
+          "Connect an MCP client to this endpoint. Read and validation tools are public; bounty mutations accept the same zero-value Tempo MPP proof in Payment-Authorization as the REST API. MPP-priced agent simulations are separate from bounty entries. Returned direct escrow plans must be signed by the caller's own Tempo wallet/access key.",
       },
     },
     "/rules": { get: {} },
@@ -625,7 +623,7 @@ const openapi = {
     },
     "/agent/practice": {
       post: {
-        summary: "Run one MPP-paid practice battle",
+        summary: "Run one MPP-paid simulation",
         description:
           "Available only when discovery payments.mpp is true. The first request returns an MPP 402 challenge; retry with the exact Payment-Authorization credential. This route is paid separately from autonomous bounty operations and requires an existing wallet session or agent key.",
         security: [{ bearerAuth: [] }],
@@ -754,7 +752,7 @@ async function dbAuth(db, request) {
 const requireAuth = (auth) =>
   check(
     auth,
-    "Connect a Tempo wallet for bounty actions. Building and practice are open to guests.",
+    "Connect a Tempo wallet for bounty actions. Building and local simulations are open to guests.",
     401,
   );
 const requireOwner = (auth) =>
@@ -1001,7 +999,7 @@ async function activity(db, accountId) {
   for (const row of finances.results) {
     const message =
       {
-        "agent-mpp-practice": "Paid agent practice",
+        "agent-mpp-practice": "Paid agent simulation",
         "entry-paid": "Entry payment",
         "reward-funded": "Reward funding",
         "winner-payout": "Winner payout",
@@ -1701,7 +1699,7 @@ async function enterBounty(db, request, auth, bountyId, body, key, config) {
   const row = await bountyRow(db, bountyId);
   check(
     auth.account !== row.owner,
-    "You can practice against your own bounty, but cannot claim it.",
+    "You cannot enter your own bounty.",
     403,
   );
   check(
@@ -4316,7 +4314,10 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     if (path === "/api/blueprints/validate" && method === "POST")
       return response(await inspection(db, body, auth?.account));
     if (path === "/api/practice" && method === "POST")
-      return response(await practice(db, body, auth?.account));
+      fail(
+        410,
+        "Mainnet bounty simulations are not available through this route. A paid entry unlocks one timed counter deployment.",
+      );
     if (path === "/api/auth/challenge" && method === "POST")
       return response(await signInChallenge(db, body, url.origin));
     if (path === "/api/auth/verify" && method === "POST") {
@@ -4355,7 +4356,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         const cached = await savedMppResult(db, previous);
         check(
           cached,
-          "The paid practice result is temporarily unavailable; retry with the same idempotency key.",
+          "The paid agent simulation is temporarily unavailable; retry with the same idempotency key.",
           503,
         );
         return response(cached.result, 200, {
@@ -4366,7 +4367,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         amountUnits: config.agentMppPriceUnits,
         recipient: config.agentMppRecipient,
         operation,
-        description: "War Machines paid agent practice",
+        description: "War Machines paid agent simulation",
         meta: {
           kind: "agent-practice",
           engineHash: CLIENT_ENGINE_HASH,

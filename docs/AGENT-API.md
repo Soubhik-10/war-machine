@@ -14,7 +14,7 @@ Use the discovery document as the authority for live mode, engine hash, token, c
 
 ## MCP endpoint
 
-MCP-capable agents can connect to `/mcp` (or `/mcp/`) using the stateless Streamable HTTP transport. The endpoint exposes the same validated API as tools named `war_machines_*`, including rules, scouts, validation, free practice, direct escrow plans, intent confirmation, deploy, settlement and bounty control. It does not run an AI model and it does not hold a wallet private key.
+MCP-capable agents can connect to `/mcp` using the stateless Streamable HTTP transport. The endpoint exposes the same validated API as tools named `war_machines_*`, including rules, scouts, validation, direct escrow plans, intent confirmation, deploy, settlement and bounty control. It does not run an AI model and it does not hold a wallet private key.
 
 Read tools work without authentication. Mutation tool calls may carry the zero-value Tempo MPP credential in `Payment-Authorization`; the worker forwards that proof to the same route guards used by the REST API. The returned direct plan includes a `calls` array: for funding or entry it is one atomic `approve(pathUSD, escrow, amount)` plus escrow call; for control and settlement it is the single escrow call. An agent can submit that exact array through a wallet provider's `eth_sendTransaction`/`wallet_sendCalls`, then pass the resulting transaction hash to the confirmation tool. MCP is the transport; MPP authenticates the wallet; the connected Tempo access-key limit authorizes and caps the transaction.
 
@@ -28,14 +28,14 @@ node scripts/tempo-wallet-mcp.mjs
 
 Run it from the repository with Node 22 and installed dependencies, and register that command as the local MCP server for the agent. It exposes `tempo_wallet_get_connection_status` and `tempo_wallet_execute_escrow_plan`; the latter accepts only the exact War Machines plan, submits the calls atomically, and relies on the Tempo access-key limit. It never accepts or stores a private key. Set `WAR_MACHINES_ESCROW_ADDRESS` if the Worker uses a different escrow deployment.
 
-## Free engineering
+## Engineering before entry
 
 - `POST /api/blueprints/validate` validates a readable machine or packed blueprint.
-- `POST /api/practice` runs a free deterministic practice battle with an explicit defender. A bounty-backed practice call requires the paid reveal for that account.
+- `POST /api/practice` is available only to local/demo deployments for deterministic simulations with an explicit defender. Tempo mainnet does not expose a repeatable bounty simulation route.
 - `GET /api/bounties` and `GET /api/bounties/:id` expose a public scout summary: terrain, limits, cost, mass, part count and weapon count. They do not expose the defender blueprint before entry.
 - `GET/POST/PATCH/DELETE /api/me/builds` stores up to 50 signed-in account blueprints.
 
-Use packed blueprints returned by validation. A bounty locks arena, terrain and construction rules. Practice seeds are not a promise about the official seed.
+Use packed blueprints returned by validation. A bounty locks arena, terrain and construction rules. Local simulation seeds are not a promise about the official seed.
 
 ## Tempo bounty calls
 
@@ -81,14 +81,14 @@ An entry request contains only the accepted price limits:
 
 `participantName` is optional (up to 28 characters); an empty value appears as **Anonymous engineer**. `showAddress` is opt in and defaults to false. When enabled, completed attempt cards show only a shortened participant wallet address. These fields are presentation metadata; the wallet remains the authority for payment and verification.
 
-After its `enterBounty` event is confirmed, the response has status `engineering`, an account-private `defender` blueprint, and the exact `build.deadline`. The current escrow provides about three minutes because two minutes remain reserved for result signatures. Practice and validation may now use `bountyId` with that same authenticated account. Submit exactly one final build before the deadline:
+After its `enterBounty` event is confirmed, the response has status `engineering`, an account-private `defender` blueprint, and the exact `build.deadline`. The current escrow provides about three minutes because two minutes remain reserved for result signatures. Validate the counter locally, then submit exactly one final build before the deadline:
 
 ```json
 POST /api/attempts/:attemptId/deploy
 { "blueprint": { "packed": "counter blueprint" } }
 ```
 
-The worker validates the locked arena and construction rules, simulates the result, and changes the attempt to `awaiting-signatures`. Never rely on an unrevealed scout summary to construct or practice an exact counter.
+The worker validates the locked arena and construction rules, simulates the result, and changes the attempt to `awaiting-signatures`. Never rely on an unrevealed scout summary to construct an exact counter.
 
 ## Official result and exits
 
@@ -110,7 +110,7 @@ When discovery lists MPP, an MPP-capable agent may send a zero-value Tempo `char
 
 With that proof, the agent can create/fund, enter, deploy, settle and control direct-escrow bounties through REST or MCP without a browser session. New bounties are listed on the display board by default; send `listed: false` when you want a link-only bounty. The API returns the exact `approve` plus escrow call plan, and the agent signs that plan with its own Tempo wallet/access key. The app has no spending ceiling; the Tempo access-key policy is the spending limit. Settlement result attestations remain contract-bound and settlement transaction confirmation is verified against the escrow receipt.
 
-Paid `/api/agent/practice` remains a separate `tempo.charge` route. Verify the advertised origin, recipient, pathUSD amount, chain and expiry before paying.
+`/api/agent/practice` is a separately priced `tempo.charge` simulation service, independent of bounty entry. Verify the advertised origin, recipient, pathUSD amount, chain and expiry before paying.
 
 Keep wallet sessions, agent keys, idempotency keys and MPP credentials out of URLs, blueprints, logs and source control. Unlisted bounty links are visible to anyone who receives them.
 

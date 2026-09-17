@@ -1225,7 +1225,7 @@ function arenaView() {
         }
       : ENEMIES[enemyIndex],
     arena = ARENAS.find((a) => a.id === arenaId);
-  app.innerHTML = `<div class="page-heading"><div><span class="eyebrow">PROVING GROUNDS / ENGINEERING TRIAL</span><h1>PROVE YOUR DESIGN.</h1><p>Build. Observe. Diagnose. Rebuild.</p></div><div class="heading-actions"><button id="return-workshop">← Workshop</button><button id="scout-rival">◎ Scout rival</button><button id="arena-share">↗ Challenge a friend</button></div></div>${challenge ? `<div class="arena-challenge">${officialReceipt ? "VERIFIED TRIAL" : bountyContext ? "BOUNTY PRACTICE" : "FRIEND CHALLENGE"} · ${esc(enemy.name)} · ${stats(enemy).cost} credits <button id="leave-challenge">Leave challenge</button></div>` : ""}
+  app.innerHTML = `<div class="page-heading"><div><span class="eyebrow">PROVING GROUNDS / ENGINEERING TRIAL</span><h1>PROVE YOUR DESIGN.</h1><p>Build. Observe. Diagnose. Rebuild.</p></div><div class="heading-actions"><button id="return-workshop">← Workshop</button><button id="scout-rival">◎ Scout rival</button><button id="arena-share">↗ Challenge a friend</button></div></div>${challenge ? `<div class="arena-challenge">${officialReceipt ? "VERIFIED TRIAL" : bountyContext ? bountyContext.attemptId ? "BOUNTY COUNTER WINDOW" : "LOCAL SIMULATION" : "FRIEND CHALLENGE"} · ${esc(enemy.name)} · ${stats(enemy).cost} credits <button id="leave-challenge">Leave challenge</button></div>` : ""}
  <div class="match-rules-banner"><strong>${challenge ? "LOCKED CHALLENGE RULES" : "MATCH RULES"}</strong><span>${esc(rulesLabel(rules))} · Autonomous engineering match</span></div><div class="arena-layout"><aside class="panel opponents-panel"><div class="panel-head"><h3>Rival machines</h3><small>${Object.keys(wins).length}/${ENEMIES.length} BEATEN</small></div><button id="mirror-rival" class="mirror-rival ${mirrorOpponent ? "active" : ""}" ${challenge ? "disabled" : ""}><strong>◈ Mirror my build</strong><small>Exact copy · always matches your limits</small></button><div class="opponent-list">${ENEMIES.map((e, i) => `<button class="opponent ${!challenge && !mirrorOpponent && i === enemyIndex ? "active" : ""}" data-enemy="${i}" ${challenge ? "disabled" : ""}><canvas class="opponent-preview" width="160" height="160" data-thumb="factory:${i}" aria-hidden="true"></canvas><span><strong>${e.name}</strong><small>${e.rank} · ${stats(e.machine).cost} ¢</small></span>${wins[i] ? '<span class="win" title="Defeated">◆</span>' : ""}</button>`).join("")}</div></aside>
  <div class="arena-main"><section class="panel arena-top"><div><small>${arena.label.toUpperCase()}</small><h2>${arena.name}</h2><p>${arena.desc}</p></div><div class="arena-controls"><select id="arena-select" aria-label="Arena" ${challenge ? "disabled" : ""}>${ARENAS.map((a) => `<option value="${a.id}" ${a.id === arenaId ? "selected" : ""}>${a.name}</option>`).join("")}</select><button id="seed-btn" ${challenge ? "disabled" : ""} title="New battle seed">⟳ Seed</button></div></section>
  <section class="combat-stage" id="combat-stage"><div class="arena-screen"><canvas id="arena-canvas" width="1200" height="800" tabindex="0" aria-label="Autonomous battle arena. Drag to orbit, pinch to zoom. Tap a part to inspect its condition."></canvas>
@@ -1982,7 +1982,7 @@ function manual() {
  <section><h3>Use the ground</h3><p>Sand and mud slow wheels; treads retain most of their traction. Ice cools systems but reduces grip. Oil also reduces grip. Furnace vents erupt for four seconds in every twelve, starting at eight seconds. Lava and active vents damage parts and add heat. Redline Ridge has raised firing positions. Coolant channels increase cooling by 70% but slow wheels; rubble cuts wheel speed by 35%. Treads preserve most speed on both. Raised terrain also blocks low shots crossing the ridge. Most cover can be destroyed.</p></section>
  <section><h3>Fight for resources</h3><p>Occupy the central ring alone for three seconds to gain eight energy per second. Leave it and you lose control. Green caches restore up to 100 HP across surviving parts and 30 energy, then respawn after 25 seconds. At 55 seconds the containment field starts closing. At 100 seconds the higher percentage of surviving integrity wins; within 2.5 points is a draw.</p></section>
  <section><h3>Test and replay</h3><p>Every match runs automatically from the saved doctrine and seed. Exact replay repeats that same experiment. Playback speed and camera movement only change how you watch. Focus battle gives the machines room on small screens. Tap a part to inspect it. Weapon status explains reloads, firing arcs, and shortages; Battle report shows damage contribution and refit advice. Scout rival before building your counter. Older live-command challenges import as autonomous trials.</p></section>
- <section><h3>Keep and share your machines</h3><p>Your build autosaves on this device. Save up to eight named blueprints or export JSON files. Old Foundry blueprints still import. Challenge links contain all parts, layers, upgrades, colors, front direction, arena, seed, and match rules. Host the static game anywhere you choose. Your friend needs access to your host; for large builds or another host, exchange JSON challenge files. Sandbox battles stay on each player’s device. Bounty links use your game server and keep authoritative results there.</p></section><section><h3>Tempo bounties</h3><p>Connect the Tempo wallet that will fund, enter or receive a reward. Creating and entering a bounty each send one transaction that batches the pathUSD approval and direct escrow call. Practice is free. The Worker commits the locked builds, terrain and engine release, then two result signers attest the deterministic outcome before the escrow settles the exact payout. One challenger is accepted at a time. A loss, draw, or missed counter-build deadline sends the entry to the bounty creator; creators can cancel an idle bounty.</p></section></div><div class="modal-footer"><button class="primary" data-close>Back to the foundry</button></div>`,
+ <section><h3>Keep and share your machines</h3><p>Your build autosaves on this device. Save up to eight named blueprints or export JSON files. Old Foundry blueprints still import. Challenge links contain all parts, layers, upgrades, colors, front direction, arena, seed, and match rules. Host the static game anywhere you choose. Your friend needs access to your host; for large builds or another host, exchange JSON challenge files. Sandbox battles stay on each player’s device. Bounty links use your game server and keep authoritative results there.</p></section><section><h3>Tempo bounties</h3><p>Connect the Tempo wallet that will fund, enter or receive a reward. Creating and entering a bounty each send one transaction that batches the pathUSD approval and direct escrow call. Use local simulations to iterate before paying an official entry. The Worker commits the locked builds, terrain and engine release, then two result signers attest the deterministic outcome before the escrow settles the exact payout. One challenger is accepted at a time. A loss, draw, or missed counter-build deadline sends the entry to the bounty creator; creators can cancel an idle bounty.</p></section></div><div class="modal-footer"><button class="primary" data-close>Back to the foundry</button></div>`,
   );
 }
 $("#modal").addEventListener("close", () => {
@@ -2056,7 +2056,9 @@ function renderContractContext() {
     (officialReceipt
       ? "Viewing an official trial. Replay never changes your balance."
       : view === "arena"
-        ? "FREE PRACTICE · No entry charge or reward. Return to the bounty to enter an official trial."
+        ? bountyContext.attemptId
+          ? "OFFICIAL COUNTER WINDOW · Deploy once before the deadline."
+          : "LOCAL SIMULATION · No entry charge or reward. Return to the bounty to enter an official trial."
         : "COUNTER WORKSHOP · Construction limits are locked to this bounty. Your engineering changes stay in your local draft.") +
     '</p></div><div class="bounty-actions"><button id="return-contract">← Bounty & official entry</button>' +
     (bountyContext.attemptId && !officialReceipt && view === "workshop"
@@ -2088,11 +2090,13 @@ function renderContractContext() {
   }
   if (view === "arena" && bountyContext && !officialReceipt) {
     const small = $(".match-card>small");
-    if (small) small.textContent = "FREE BOUNTY PRACTICE";
+    const paidAttempt = !!bountyContext.attemptId;
+    if (small) small.textContent = paidAttempt ? "OFFICIAL COUNTER DEPLOYMENT" : "LOCAL BOUNTY SIMULATION";
     const p = $(".match-card>p");
     if (p && !matchIssues().length)
-      p.textContent =
-        "Test your counter against the fixed defense. Practice uses a different seed and never spends credits.";
+      p.textContent = paidAttempt
+        ? "Deploy your counter before the deadline. The verified result uses the locked seed and settles the entry."
+        : "Test your counter against the fixed defense. Local simulations do not affect a bounty.";
   }
 }
 bountyUI = createBountyUI({

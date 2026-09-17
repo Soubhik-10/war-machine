@@ -15,7 +15,7 @@ War Machines uses a non-upgradeable pathUSD bounty escrow on Tempo Mainnet. The 
 
 1. The creator approves the exact gross reward and calls `createBounty` directly from their wallet.
 2. A challenger approves the exact entry and calls `enterBounty` directly from their wallet. That confirmed entry reveals the defender only to the challenger; public routes retain a cost, mass, part-count, weapon-count, terrain and limit summary.
-3. The challenger gets the current three-minute construction window, can practice for free against the revealed defender, then deploys one counter. The worker records the deterministic replay and its hash.
+3. The challenger gets the current construction window, then deploys one counter before the deadline. The worker records the deterministic replay and its hash.
 4. Two result keystores sign the escrow's exact EIP-712 settlement payload. Anyone can relay `settleAttempt`; the escrow verifies both signatures and sends the winner payout, platform fee, and entry recipient payment itself.
 5. A creator can cancel an idle bounty. A loss or draw pays the entry to the bounty creator once two result signatures attest it. A missed clock or unsigned timeout can be finalized onchain by anyone; it also pays the entry to the creator. Only idle bounties can expire and return their unused reward.
 
@@ -44,7 +44,7 @@ WM_AGENT_MPP_PRICE=<exact positive pathUSD decimal>
 MPP_SECRET_KEY=<32+ character server secret>
 ```
 
-That enables `POST /api/agent/practice` for MPP-capable agents. It never funds a bounty, pays an entry, decides a winner, or receives the 2.5% bounty fee.
+That enables `POST /api/agent/practice` for MPP-capable agents. It is a separately priced simulation service: it never funds a bounty, pays an entry, decides a winner, or receives the 2.5% bounty fee.
 
 ## Site configuration
 

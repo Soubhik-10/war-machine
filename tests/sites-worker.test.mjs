@@ -215,6 +215,13 @@ test("Tempo mode is fail-closed and never falls back to sandbox credits", async 
   assert.equal(rules.status, 200);
   assert.equal(rules.body.startingCredits, 0);
   assert.equal(rules.body.mpp.enabled, false);
+  const practice = await call(env, "/api/practice", "POST", {
+    challenger: packChallenge(PRESETS[0], "foundry", 0),
+    defender: packChallenge(PRESETS[1], "foundry", 0),
+    seed: 42,
+  });
+  assert.equal(practice.status, 410);
+  assert.match(practice.body.error, /paid entry.*timed counter deployment/i);
 });
 
 test("MPP practice advertises a bounded Tempo charge and returns a challenge before payment", async (t) => {

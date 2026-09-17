@@ -93,7 +93,7 @@ The 100s boundary is normal integrity scoring, not a worker failure. Random offi
 
 The engineer example ran 60 training battles and four held-out trials against a Marauder starter, selected Longbow and won 4/4 held-out matches with zero credits spent. This proves the workflow, not a guaranteed official win.
 
-Browser QA: desktop and 390×844 home/agent/contract views, live machine art, colorways, API validation/practice, and a saved, free, zero-reward, unlimited, no-deadline Permafrost contract. Free practice ended in a 24.8s victory with 1,311 damage and unchanged balance. Result-panel tint and distracting ice striping were removed. Physical-phone performance remains unmeasured. See PLAYTEST.md.
+Browser QA: desktop and 390×844 home/agent/contract views, live machine art, colorways, API validation and local simulations, and a saved, zero-reward, unlimited, no-deadline Permafrost contract. The local simulation ended in a 24.8s victory with 1,311 damage and unchanged balance. Result-panel tint and distracting ice striping were removed. Physical-phone performance remains unmeasured. See PLAYTEST.md.
 
 ```sh
 node --test tests/*.test.mjs
