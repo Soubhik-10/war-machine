@@ -86,6 +86,12 @@ class D1Mock {
         "utf8",
       ),
     );
+    this.sqlite.exec(
+      await readFile(
+        new URL("../drizzle/0007_attempt_identity.sql", import.meta.url),
+        "utf8",
+      ),
+    );
   }
   close() {
     this.sqlite.close();
@@ -794,6 +800,9 @@ test("paid bounty actions establish a Tempo session only when payment starts", a
   assert.match(source, /request\.intentId && request\.transactionHash/);
   assert.match(source, /prepared\.transactionHash/);
   assert.match(source, /Discard request/);
+  assert.match(source, /A wallet transaction is already saved for a different request/);
+  assert.match(source, /No transaction hash means the wallet has not been charged/);
+  assert.match(source, /entryInput\.value = "0\.01"/);
   assert.match(source, /Tempo RPC/i);
 });
 
@@ -1115,6 +1124,8 @@ test("Sites Worker + D1 supports private build vaults and authoritative sandbox 
       ),
       maxEntry: 0,
       maxPlatformFeeBps: 250,
+      participantName: "Copper Fox",
+      showAddress: false,
     },
     challenger.token,
     "enter_worker_bounty_0001",
@@ -1122,7 +1133,16 @@ test("Sites Worker + D1 supports private build vaults and authoritative sandbox 
   assert.equal(entered.status, 202);
   assert.equal(entered.body.status, "settled");
   assert.ok(["win", "loss", "draw"].includes(entered.body.result.outcome));
+  assert.equal(entered.body.participantName, "Copper Fox");
+  assert.equal(entered.body.addressVisible, false);
   const publicAttempt = await call(env, "/api/attempts/" + entered.body.id);
   assert.equal(publicAttempt.status, 200);
+  assert.equal(publicAttempt.body.participantName, "Copper Fox");
+  assert.equal(publicAttempt.body.machineName, PRESETS[1].name);
+  assert.equal(publicAttempt.body.addressVisible, false);
+  const detail = await call(env, "/api/bounties/" + created.body.id);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.history[0].participantName, "Copper Fox");
+  assert.equal(detail.body.history[0].addressVisible, false);
   assert.equal(publicAttempt.body.replay.versions.hash.length, 64);
 });

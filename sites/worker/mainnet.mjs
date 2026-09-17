@@ -88,6 +88,25 @@ const text = (value, max, label) => {
   );
   return value.trim();
 };
+const optionalParticipantName = (value) =>
+  value === undefined || value === null || value === ""
+    ? null
+    : text(value, 28, "pilot or machine name");
+const participantIdentity = (body) => {
+  const name = optionalParticipantName(body.participantName);
+  check(
+    body.showAddress === undefined || typeof body.showAddress === "boolean",
+    "Choose whether to show your wallet address.",
+  );
+  return { participantName: name, showAddress: body.showAddress === true };
+};
+const participantMachineName = (blueprint) => {
+  try {
+    return blueprint ? unpackChallenge(parse(blueprint), true).machine.name : null;
+  } catch {
+    return null;
+  }
+};
 const signInMessage = (value) => {
   check(
     typeof value === "string" &&
@@ -1086,16 +1105,31 @@ async function bountyView(db, row, viewer = null, history = false) {
   if (history) {
     const rows = await db
       .prepare(
-        "SELECT id,result,created,updated FROM attempts WHERE bounty=? AND status IN ('settled','refunded') ORDER BY created DESC LIMIT 20",
+        "SELECT a.id,a.result,a.blueprint,a.participant_name,a.show_address,a.created,a.updated,ac.payout_address FROM attempts a LEFT JOIN accounts ac ON ac.id=a.account WHERE a.bounty=? AND a.status IN ('settled','refunded') ORDER BY a.created DESC LIMIT 20",
       )
       .bind(row.id)
       .all();
-    value.history = rows.results.map((attempt) => ({
-      id: attempt.id,
-      result: attempt.result ? parse(attempt.result) : null,
-      created: attempt.created,
-      updated: attempt.updated,
-    }));
+    value.history = rows.results.map((attempt) => {
+      let machineName = null;
+      try {
+        machineName = attempt.blueprint
+          ? unpackChallenge(parse(attempt.blueprint), true).machine.name
+          : null;
+      } catch {
+        machineName = null;
+      }
+      return {
+        id: attempt.id,
+        participantName: attempt.participant_name || null,
+        machineName,
+        addressVisible: attempt.show_address === 1,
+        participantAddress:
+          attempt.show_address === 1 ? attempt.payout_address || null : null,
+        result: attempt.result ? parse(attempt.result) : null,
+        created: attempt.created,
+        updated: attempt.updated,
+      };
+    });
   }
   return value;
 }
@@ -1647,7 +1681,14 @@ async function createBounty(db, request, auth, body, key, config) {
 
 async function enterBounty(db, request, auth, bountyId, body, key, config) {
   requireOwner(auth);
-  fields(body, ["blueprint", "maxEntry", "maxPlatformFeeBps"]);
+  fields(body, [
+    "blueprint",
+    "maxEntry",
+    "maxPlatformFeeBps",
+    "participantName",
+    "showAddress",
+  ]);
+  const identity = participantIdentity(body);
   const previous = await prior(
     db,
     auth.account,
@@ -1725,7 +1766,11 @@ async function enterBounty(db, request, auth, bountyId, body, key, config) {
           bountyId,
           key,
           digest,
-          json({ blueprint }),
+          json({
+            blueprint,
+            participantName: identity.participantName,
+            showAddress: identity.showAddress,
+          }),
           String(entry),
           "entry",
           expires,
@@ -1774,7 +1819,7 @@ async function enterBounty(db, request, auth, bountyId, body, key, config) {
     await db.batch([
       db
         .prepare(
-          "INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,error,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,error,created,updated,participant_name,show_address) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         )
         .bind(
           attempt,
@@ -1787,6 +1832,8 @@ async function enterBounty(db, request, auth, bountyId, body, key, config) {
           null,
           now(),
           now(),
+          identity.participantName,
+          identity.showAddress ? 1 : 0,
         ),
       db
         .prepare(
@@ -1853,10 +1900,20 @@ async function attemptView(db, attemptId, viewer) {
     "Only the bounty creator and paid challenger can inspect this attempt.",
     403,
   );
+  const participant = attempt.show_address
+    ? await db
+        .prepare("SELECT payout_address FROM accounts WHERE id=?")
+        .bind(attempt.account)
+        .first()
+    : null;
   const value = {
     id: attempt.id,
     bounty: attempt.bounty,
     account: attempt.account,
+    participantName: attempt.participant_name || null,
+    machineName: participantMachineName(attempt.blueprint),
+    addressVisible: attempt.show_address === 1,
+    participantAddress: participant?.payout_address || null,
     economics: payoutQuote(
       bounty.reward_units,
       bounty.entry_units,
@@ -2682,8 +2739,14 @@ function directPlanFromCreate(config, hold) {
 async function directEntryIntent(db, auth, bountyId, body, key, config) {
   requireScope(auth, "enter");
   check(config.acceptingNewBounties, config.settlementReason, 503);
-  fields(body, ["maxEntry", "maxPlatformFeeBps"]);
+  fields(body, [
+    "maxEntry",
+    "maxPlatformFeeBps",
+    "participantName",
+    "showAddress",
+  ]);
   validKey(key);
+  const identity = participantIdentity(body);
   const row = await bountyRow(db, bountyId);
   check(
     row.status === "open",
@@ -2737,7 +2800,11 @@ async function directEntryIntent(db, auth, bountyId, body, key, config) {
       bountyId,
       key,
       digest,
-      json({ escrowBountyId: row.escrow_bounty_id }),
+      json({
+        escrowBountyId: row.escrow_bounty_id,
+        participantName: identity.participantName,
+        showAddress: identity.showAddress,
+      }),
       entry.toString(),
       "direct-entry",
       created + 24 * 60 * 60 * 1000,
@@ -2940,7 +3007,7 @@ async function confirmDirectIntent(db, auth, intentId, hash, config) {
   await db.batch([
     db
       .prepare(
-        "INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,error,created,updated,escrow_entry_tx,settlement_payload,build_deadline,build_requested_seconds) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,error,created,updated,escrow_entry_tx,settlement_payload,build_deadline,build_requested_seconds,participant_name,show_address) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
       )
       .bind(
         attempt,
@@ -2957,6 +3024,8 @@ async function confirmDirectIntent(db, auth, intentId, hash, config) {
         null,
         buildDeadline,
         requestedSeconds,
+        saved.participantName,
+        saved.showAddress ? 1 : 0,
       ),
     db
       .prepare(
