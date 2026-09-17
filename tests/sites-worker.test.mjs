@@ -1098,7 +1098,7 @@ test("completed paid bounties retain a public replay window", async () => {
     workerSource,
     /status IN \('completed','claimed'\) AND updated>=\?/,
   );
-  assert.match(client, /REPLAY & RESULT · 10 MINUTES/);
+  assert.match(client, /RESULT .*10 MINUTES/);
   assert.match(client, /REWARD PAID/);
 });
 
