@@ -32,11 +32,16 @@ Keep the two result signer keystores separate from each other, the Site runtime,
 
 The V4 escrow supports native MPP reward and entry payments for agents. The Worker receives the exact MPP payment at the configured relayer, persists the payment and raw relay transaction, then calls only the matching `createBountyFor` or `enterBountyFor` method. The V4 contract binds the supplied payer identity and limits those methods to the immutable relayer address.
 
+### Multi-token input
+
+V4 still accounts in pathUSD only. Operators may publish a reviewed `WM_TEMPO_SUPPORTED_TOKENS` allowlist (pathUSD is always included) and `WM_TEMPO_SWAP_SLIPPAGE_BPS` from 0 to 500. mppx clients use the published list as `autoSwap.tokenIn`; Tempo DEX approval, exact pathUSD output and the MPP transfer are one atomic Tempo transaction. The server validates the pathUSD transfer and then forwards pathUSD into escrow. This avoids adding arbitrary-token branches to the contract and means a token without a live quote, balance or approved route fails before payment is broadcast.
+
 To enable a paid agent service, configure all of these runtime values:
 
 ```text
 WM_BOUNTY_ESCROW_VERSION=4
 WM_BOUNTY_ESCROW_ADDRESS=<deployed V4 escrow>
+WM_ESCROW_SETTLEMENT_SIGNER=<public V4 settlement signer>
 WM_BOUNTY_RELAYER_ADDRESS=<V4 agentRelayer address>
 WM_BOUNTY_RELAYER_PRIVATE_KEY=<Worker secret>
 WM_AGENT_BOUNTY_MPP_ENABLED=true

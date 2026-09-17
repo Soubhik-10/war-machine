@@ -52,6 +52,7 @@ $relayer = Require-Address 'WM_ESCROW_AGENT_RELAYER'
 $signer = Require-Address 'WM_ESCROW_SETTLEMENT_SIGNER'
 if ($guardian -eq $relayer) { throw 'The pause guardian and agent relayer must be different addresses.' }
 if ($guardian -eq $signer) { throw 'The pause guardian and settlement signer must be different addresses.' }
+if ($relayer -eq $signer) { throw 'The agent relayer and settlement signer must be different addresses; keep the relayer key out of the signer service.' }
 $window = [int][Environment]::GetEnvironmentVariable('WM_ESCROW_ATTEMPT_WINDOW_SECONDS', 'Process')
 if ($window -lt 480 -or $window -gt 3600) { throw 'WM_ESCROW_ATTEMPT_WINDOW_SECONDS must be between 480 and 3600.' }
 if ($DeployerAddress.ToLowerInvariant() -eq $guardian) { throw 'The deployer and pause guardian must be different addresses.' }

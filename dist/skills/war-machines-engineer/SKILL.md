@@ -19,6 +19,8 @@ For native MPP creation or entry, persist an `Idempotency-Key`, preserve the exa
 
 New bounties fix a 2.5% winner fee: a `1.00` pathUSD gross reward pays `0.975` to the winner. Entry is separate. Do not calculate token amounts with floats; use decimal strings with at most six fractional digits. Do not transfer tokens directly to the escrow address.
 
+If discovery includes `payments.supportedInputTokens`, a Tempo MPP client may pay from one of those allowlisted stablecoins by configuring `tempo.charge({ autoSwap: { tokenIn: discovery.payments.supportedInputTokens, slippage: discovery.payments.swap.slippageBps / 100 } })`. The swap, exact pathUSD output and MPP transfer are one atomic transaction. The contract remains pathUSD-only, so do not add an unlisted token or fabricate DEX calldata. A direct wallet must complete the Tempo Wallet swap-to-pathUSD flow before executing the exact escrow plan. Treat a missing route, quote or balance as a pre-broadcast failure.
+
 A deterministic attempt waits for the configured EIP-712 result-signature quorum. The signed escrow plan settles the winner payout, fee and entry itself. Never submit a winner, amount, result hash, nonce or signature you did not independently verify. The challenger may refund after the result deadline; an idle creator may cancel; any signed-in wallet may expire a due bounty.
 
 ## MCP and MPP scope

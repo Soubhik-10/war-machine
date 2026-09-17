@@ -10,6 +10,8 @@ export const TEMPO_MAINNET={
  token:'0x20C0000000000000000000000000000000000000',
  decimals:6,
 };
+export const TEMPO_USDC_TOKEN='0x20C000000000000000000000b9537d11c60E8b50';
+export const DEFAULT_TEMPO_INPUT_TOKENS=Object.freeze([TEMPO_MAINNET.token,TEMPO_USDC_TOKEN]);
 
 /** The disclosed 2.5% fee recipient. Paid mode refuses a substituted destination. */
 export const PLATFORM_FEE_RECIPIENT='0xc20131e9132888993de6519D486E5558A5DbCb7A';
@@ -20,6 +22,24 @@ const positiveInteger=(value,name)=>{
  return n;
 };
 const address=(value,name)=>{try{return getAddress(value);}catch{throw Error(`${name} must be a valid EVM address.`);}};
+const supportedTokens=(value)=>{
+ const raw=typeof value==='string'&&value.trim()?value.split(','):DEFAULT_TEMPO_INPUT_TOKENS;
+ if(raw.length>16)throw Error('WM_TEMPO_SUPPORTED_TOKENS may contain at most 16 addresses.');
+ const seen=new Set(),tokens=[];
+ for(const candidate of raw){
+  const token=address(String(candidate).trim(),'WM_TEMPO_SUPPORTED_TOKENS token');
+  if(token===getAddress('0x0000000000000000000000000000000000000000'))throw Error('WM_TEMPO_SUPPORTED_TOKENS cannot contain the zero address.');
+  if(!seen.has(token.toLowerCase())){seen.add(token.toLowerCase());tokens.push(token);}
+ }
+ for(const fallback of DEFAULT_TEMPO_INPUT_TOKENS){
+  const token=getAddress(fallback);
+  if(seen.has(token.toLowerCase()))continue;
+  if(tokens.length>=16)throw Error('WM_TEMPO_SUPPORTED_TOKENS must leave room for the pathUSD and USDC.e MPP fallbacks.');
+  seen.add(token.toLowerCase());
+  if(token===getAddress(TEMPO_MAINNET.token))tokens.unshift(token);else tokens.push(token);
+ }
+ return tokens;
+};
 
 /** Parse deployment settings. Mainnet deliberately has no partially-configured state. */
 export function runtimeConfig(env=process.env,{root=process.cwd(),database}={}){
@@ -37,6 +57,9 @@ export function runtimeConfig(env=process.env,{root=process.cwd(),database}={}){
  if(env.TEMPO_CHAIN_ID&&Number(env.TEMPO_CHAIN_ID)!==network.chainId)throw Error('Tempo mainnet chain ID must be 4217.');
  if(env.TEMPO_TOKEN&&getAddress(env.TEMPO_TOKEN)!==getAddress(network.token))throw Error('This release only accepts the reviewed Tempo mainnet pathUSD token.');
  if(env.WM_LEDGER_NAMESPACE!==`tempo-mainnet:${network.chainId}:${network.token.toLowerCase()}`)throw Error('WM_LEDGER_NAMESPACE must bind this database to Tempo mainnet and the configured token.');
+ const inputTokens=supportedTokens(env.WM_TEMPO_SUPPORTED_TOKENS);
+ const swapSlippageBps=Number(env.WM_TEMPO_SWAP_SLIPPAGE_BPS||100);
+ if(!Number.isInteger(swapSlippageBps)||swapSlippageBps<0||swapSlippageBps>500)throw Error('WM_TEMPO_SWAP_SLIPPAGE_BPS must be a whole number from 0 to 500.');
  const escrowRecipient=address(env.TEMPO_ESCROW_RECIPIENT,'TEMPO_ESCROW_RECIPIENT');
  const platformRecipient=address(env.TEMPO_PLATFORM_RECIPIENT||PLATFORM_FEE_RECIPIENT,'TEMPO_PLATFORM_RECIPIENT');
  if(platformRecipient!==getAddress(PLATFORM_FEE_RECIPIENT))throw Error(`TEMPO_PLATFORM_RECIPIENT must be the disclosed fee recipient ${PLATFORM_FEE_RECIPIENT}.`);
@@ -50,6 +73,7 @@ export function runtimeConfig(env=process.env,{root=process.cwd(),database}={}){
  return {
   mode,environment:'tempo-mainnet',paymentsEnabled:true,database:resolve(db),origin:origin.origin,network,
   mppSecret:env.MPP_SECRET_KEY,escrowRecipient,platformRecipient,entryRecipient,signer,
+  supportedInputTokens:inputTokens,swapSlippageBps,
   maxOperationUnits:positiveInteger(env.WM_MAX_OPERATION_UNITS,'WM_MAX_OPERATION_UNITS'),
   maxOutstandingUnits:positiveInteger(env.WM_MAX_OUTSTANDING_UNITS,'WM_MAX_OUTSTANDING_UNITS'),
   quoteTtlSeconds:Math.min(600,Math.max(30,Number(env.WM_QUOTE_TTL_SECONDS||180))),

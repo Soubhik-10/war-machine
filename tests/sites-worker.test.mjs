@@ -356,6 +356,20 @@ test("V4 discovery enables exact native MPP bounty routes only for a matching re
   };
   const config = runtimeConfig(env, "https://foundry.example");
   assert.equal(config.agentBountyMppEnabled, true);
+  assert.deepEqual(config.settlementSigners, []);
+  const settlementKey = "0x" + "0a".repeat(32),
+    settlement = privateKeyToAccount(settlementKey),
+    readyConfig = runtimeConfig(
+      {
+        ...env,
+        WM_ESCROW_SETTLEMENT_SIGNER: settlement.address,
+        WM_SETTLEMENT_PRIVATE_KEY: settlementKey,
+        WM_RESULT_SIGNING_READY: "true",
+      },
+      "https://foundry.example",
+    );
+  assert.deepEqual(readyConfig.settlementSigners, [settlement.address]);
+  assert.equal(readyConfig.automaticSettlementReady, true);
   const DB = new D1Mock();
   await DB.migrate();
   try {
@@ -380,6 +394,17 @@ test("V4 discovery enables exact native MPP bounty routes only for a matching re
     ]);
     assert.equal(body.payments.mpp, true);
     assert.equal(body.version, "4.0");
+    assert.deepEqual(body.payments.supportedInputTokens, [
+      PATH_USD_TOKEN,
+      "0x20C000000000000000000000b9537d11c60E8b50",
+    ]);
+    assert.deepEqual(body.payments.swap, {
+      targetToken: PATH_USD_TOKEN,
+      slippageBps: 100,
+      atomic: true,
+      description:
+        "MPP clients swap an allowlisted Tempo stablecoin into pathUSD in the same transaction before payment.",
+    });
     const guarded = await worker.fetch(
       new Request("https://foundry.example/api/bounties", {
         method: "POST",

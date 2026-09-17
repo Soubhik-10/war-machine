@@ -78,7 +78,7 @@ New equipment: Frostbite stud tires, Dune paddle tires, Storm insulation, Therma
 
 Creators choose direct pathUSD entry and gross reward amounts, plus a duration of up to 8,760 hours (zero means no deadline). The contract enforces the selected amounts, single active attempt, exit paths and fixed 2.5% fee. These are independent from construction credits and build limits.
 
-Wallet sign-in and direct escrow calls are described in [Tempo mainnet operations](docs/TEMPO-MAINNET.md). The selected asset is 6-decimal pathUSD. MPP is reserved for separately advertised agent service calls and never funds, enters, or settles a bounty.
+Wallet sign-in, native MPP bounty routes and direct escrow calls are described in [Tempo mainnet operations](docs/TEMPO-MAINNET.md). The escrow and payouts use 6-decimal pathUSD. Native MPP may accept an operator-allowlisted Tempo stablecoin by atomically swapping it into pathUSD before the relayer forwards the bounty call; the contract never holds arbitrary input tokens.
 
 ## Your match rules
 

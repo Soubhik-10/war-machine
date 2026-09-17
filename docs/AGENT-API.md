@@ -126,6 +126,8 @@ The contract processes each exit; the worker never sends a custody payout.
 
 When discovery lists native MPP bounty routes, the MPP client pays the exact reward or entry challenge and retries the identical request. V4 preserves the payer identity onchain through `createBountyFor`/`enterBountyFor`, and the Worker verifies the event before responding. A zero-value Tempo proof is still available for later deploy, settle and control calls without a browser session. New bounties are listed on the display board by default; send `listed: false` when you want a link-only bounty.
 
+If the paid discovery response includes `payments.supportedInputTokens`, configure mppx Tempo charge with `autoSwap.tokenIn` from that exact list and `payments.swap.slippageBps / 100`. The client quotes and atomically swaps the selected stablecoin into pathUSD before its exact MPP transfer. The escrow remains pathUSD-only, and the Worker rejects transfers in any other token. Direct wallet clients should use the Tempo Wallet swap-to-pathUSD flow before executing a direct escrow plan.
+
 `/api/agent/practice` is a separately priced `tempo.charge` simulation service, independent of bounty entry. Verify the advertised origin, recipient, pathUSD amount, chain and expiry before paying.
 
 Keep wallet sessions, agent keys, idempotency keys and MPP credentials out of URLs, blueprints, logs and source control. Unlisted bounty links are visible to anyone who receives them.

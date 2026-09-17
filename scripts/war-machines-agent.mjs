@@ -24,6 +24,12 @@ export const DEFAULT_AGENT_BASE_URL =
   "https://war-machine.sssmpp.chatgpt.site";
 export const TEMPO_CHAIN_ID = 4217;
 export const PATHUSD_DECIMALS = 6;
+export const TEMPO_USDC_TOKEN =
+  "0x20C000000000000000000000b9537d11c60E8b50";
+export const DEFAULT_TEMPO_INPUT_TOKENS = Object.freeze([
+  "0x20C0000000000000000000000000000000000000",
+  TEMPO_USDC_TOKEN,
+]);
 export const DEFAULT_SCREEN_SEEDS = Object.freeze([
   1,
   7,
@@ -451,13 +457,56 @@ export function createTempoWallet({ storagePath } = {}) {
   });
 }
 
-export function createMppClient(wallet) {
+function mppInputTokens(value) {
+  const values = Array.isArray(value) && value.length ? value : DEFAULT_TEMPO_INPUT_TOKENS;
+  const seen = new Set();
+  const tokens = [];
+  for (const value of values) {
+    if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(value))
+      throw new Error("Discovery advertised an invalid Tempo input token.");
+    const token = value.toLowerCase();
+    if (!seen.has(token)) {
+      seen.add(token);
+      tokens.push(value);
+    }
+  }
+  for (const fallback of DEFAULT_TEMPO_INPUT_TOKENS) {
+    const normalized = fallback.toLowerCase();
+    if (seen.has(normalized)) continue;
+    if (tokens.length >= 16)
+      throw new Error(
+        "Discovery input tokens must leave room for pathUSD and USDC.e MPP fallbacks.",
+      );
+    seen.add(normalized);
+    if (fallback === DEFAULT_TEMPO_INPUT_TOKENS[0]) tokens.unshift(fallback);
+    else tokens.push(fallback);
+  }
+  return tokens;
+}
+
+/**
+ * Create an MPP client that can pay the server's canonical pathUSD charge
+ * from any operator-allowlisted Tempo stablecoin. mppx inserts an approve +
+ * DEX buy before the exact pathUSD transfer and keeps the whole payment
+ * atomic; if no route or balance exists it fails before broadcasting.
+ */
+export function createMppClient(
+  wallet,
+  { supportedInputTokens, swapSlippageBps = 100 } = {},
+) {
+  const slippage = Number(swapSlippageBps);
+  if (!Number.isInteger(slippage) || slippage < 0 || slippage > 500)
+    throw new Error("swapSlippageBps must be a whole number from 0 to 500.");
   return Mppx.create({
     methods: [
       tempo.charge({
         ...wallet.getMppxParameters(),
         expectedChainId: TEMPO_CHAIN_ID,
         mode: "pull",
+        autoSwap: {
+          tokenIn: mppInputTokens(supportedInputTokens),
+          slippage: slippage / 100,
+        },
       }),
     ],
     maxPaymentRetries: 1,
@@ -598,7 +647,10 @@ export async function runOptimalBounty({
       selected: safeSummary(ranked[0]),
     };
 
-  const mppx = createMppClient(wallet);
+  const mppx = createMppClient(wallet, {
+    supportedInputTokens: discovery.payments.supportedInputTokens,
+    swapSlippageBps: discovery.payments.swap?.slippageBps,
+  });
   const from = await connectedAccount(wallet);
   const skipped = [];
   let entry;

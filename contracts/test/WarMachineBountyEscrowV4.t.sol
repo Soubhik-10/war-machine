@@ -39,9 +39,8 @@ contract WarMachineBountyEscrowV4Test {
 
     function testRelayerPreservesCreatorAndChallengerIdentity() public {
         vm.prank(RELAYER);
-        uint256 bountyId = escrow.createBountyFor(
-            CREATOR, keccak256("mpp-terms"), 1_000_000, 100_000, 0
-        );
+        uint256 bountyId =
+            escrow.createBountyFor(CREATOR, keccak256("mpp-terms"), 1_000_000, 100_000, 0);
         vm.prank(RELAYER);
         escrow.enterBountyFor(CHALLENGER, bountyId);
 
@@ -49,7 +48,8 @@ contract WarMachineBountyEscrowV4Test {
         _eqAddress(bounty.creator, CREATOR, "creator identity changed");
         _eqAddress(bounty.challenger, CHALLENGER, "challenger identity changed");
         _eq(token.balanceOf(address(escrow)), 1_000_000, "reward reserve is wrong");
-        _eq(token.balanceOf(CREATOR), 9_100_000, "entry was not paid to creator");
+        // The relayer funds the reward and forwards the entry payment to the creator.
+        _eq(token.balanceOf(CREATOR), 10_100_000, "entry was not paid to creator");
         _eq(token.balanceOf(RELAYER), 8_900_000, "relayer amount is wrong");
     }
 
@@ -67,21 +67,27 @@ contract WarMachineBountyEscrowV4Test {
         escrow.createBountyFor(CREATOR, keccak256("blocked"), 1_000_000, 100_000, 0);
 
         vm.prank(RELAYER);
-        uint256 bountyId = escrow.createBountyFor(
-            CREATOR, keccak256("mpp-terms"), 1_000_000, 100_000, 0
-        );
+        uint256 bountyId =
+            escrow.createBountyFor(CREATOR, keccak256("mpp-terms"), 1_000_000, 100_000, 0);
         vm.expectRevert();
         escrow.enterBountyFor(CHALLENGER, bountyId);
     }
 
+    function testRelayerCannotBeSettlementSigner() public {
+        address[] memory signers = new address[](1);
+        signers[0] = RELAYER;
+        vm.expectRevert();
+        new WarMachineBountyEscrowV4(token, GUARDIAN, RELAYER, 10 minutes, signers, 1);
+    }
+
     function testCancelReleasesRelayedReward() public {
         vm.prank(RELAYER);
-        uint256 bountyId = escrow.createBountyFor(
-            CREATOR, keccak256("cancel-terms"), 1_000_000, 100_000, 0
-        );
+        uint256 bountyId =
+            escrow.createBountyFor(CREATOR, keccak256("cancel-terms"), 1_000_000, 100_000, 0);
         vm.prank(RELAYER);
         escrow.cancelBountyFor(CREATOR, bountyId);
-        _eq(token.balanceOf(CREATOR), 10_000_000, "cancel did not return reward to creator");
+        // The relayer supplied the reserve, so cancellation returns it to the creator.
+        _eq(token.balanceOf(CREATOR), 11_000_000, "cancel did not return reward to creator");
         _eq(escrow.reservedRewards(), 0, "cancel left a reserved reward");
     }
 

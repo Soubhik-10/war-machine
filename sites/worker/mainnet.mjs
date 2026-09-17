@@ -43,6 +43,7 @@ import {
   PATH_USD_TOKEN,
   PLATFORM_FEE_RECIPIENT,
   TEMPO_MAINNET_CHAIN_ID,
+  parseTempoInputTokens,
   pathUsdToUnits,
   payoutQuote,
   unitsToPathUsd,
@@ -279,27 +280,64 @@ export function runtimeConfig(env, origin) {
       reason:
         "WM_BOUNTY_ESCROW_VERSION must be 3 or 4.",
     };
-  const settlementKey = String(env.WM_SETTLEMENT_PRIVATE_KEY || "");
+  let supportedInputTokens;
+  try {
+    supportedInputTokens = parseTempoInputTokens(
+      env.WM_TEMPO_SUPPORTED_TOKENS,
+    ).map((token) => getAddress(token));
+  } catch (error) {
+    return {
+      mode: "tempo-mainnet",
+      enabled: false,
+      reason: error.message,
+    };
+  }
+  const swapSlippageBps = Number(env.WM_TEMPO_SWAP_SLIPPAGE_BPS || 100);
+  if (
+    !Number.isInteger(swapSlippageBps) ||
+    swapSlippageBps < 0 ||
+    swapSlippageBps > 500
+  )
+    return {
+      mode: "tempo-mainnet",
+      enabled: false,
+      reason:
+        "WM_TEMPO_SWAP_SLIPPAGE_BPS must be a whole number from 0 to 500.",
+    };
+  const configuredSettlementSigner = String(
+      env.WM_ESCROW_SETTLEMENT_SIGNER ||
+        (escrowVersion === "3" ? DEFAULT_V3_SETTLEMENT_SIGNER : ""),
+    ),
+    settlementKey = String(env.WM_SETTLEMENT_PRIVATE_KEY || "");
   let automaticSettlementReady = false,
     settlementReason =
-      "Automatic payouts are paused until the server-side V3 settlement key is configured.";
-  if (!/^0x[0-9a-fA-F]{64}$/.test(settlementKey)) {
+      "Automatic payouts are paused until the server-side settlement key is configured.";
+  let settlementSigner = null;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(configuredSettlementSigner)) {
     settlementReason =
-      "WM_SETTLEMENT_PRIVATE_KEY must be one raw 0x-prefixed, 64-hex-character private key. Do not use a wallet address, JSON keystore, quotes, or spaces.";
-  } else if (env.WM_RESULT_SIGNING_READY !== "true") {
-    settlementReason =
-      "Set WM_RESULT_SIGNING_READY to true before enabling automatic payouts.";
-  } else if (env.WM_EMERGENCY_PAUSE === "true") {
-    settlementReason = "Automatic payouts are paused by WM_EMERGENCY_PAUSE.";
+      escrowVersion === "4"
+        ? "WM_ESCROW_SETTLEMENT_SIGNER must be the public settlement signer configured in the deployed V4 escrow."
+        : "The deployed V3 settlement signer is not configured.";
   } else {
-    try {
-      const account = getAddress(privateKeyToAccount(settlementKey).address);
-      automaticSettlementReady = account === ESCROW_SETTLEMENT_SIGNERS[0];
-      if (!automaticSettlementReady)
-        settlementReason = `The settlement key must derive ${ESCROW_SETTLEMENT_SIGNERS[0]}, but it derives ${account}.`;
-    } catch {
+    settlementSigner = getAddress(configuredSettlementSigner);
+    if (!/^0x[0-9a-fA-F]{64}$/.test(settlementKey)) {
       settlementReason =
-        "WM_SETTLEMENT_PRIVATE_KEY could not be decoded as an EVM private key.";
+        "WM_SETTLEMENT_PRIVATE_KEY must be one raw 0x-prefixed, 64-hex-character private key. Do not use a wallet address, JSON keystore, quotes, or spaces.";
+    } else if (env.WM_RESULT_SIGNING_READY !== "true") {
+      settlementReason =
+        "Set WM_RESULT_SIGNING_READY to true before enabling automatic payouts.";
+    } else if (env.WM_EMERGENCY_PAUSE === "true") {
+      settlementReason = "Automatic payouts are paused by WM_EMERGENCY_PAUSE.";
+    } else {
+      try {
+        const account = getAddress(privateKeyToAccount(settlementKey).address);
+        automaticSettlementReady = account === settlementSigner;
+        if (!automaticSettlementReady)
+          settlementReason = `The settlement key must derive ${settlementSigner}, but it derives ${account}.`;
+      } catch {
+        settlementReason =
+          "WM_SETTLEMENT_PRIVATE_KEY could not be decoded as an EVM private key.";
+      }
     }
   }
   const mppRecipient = String(env.WM_AGENT_MPP_RECIPIENT || ""),
@@ -368,6 +406,10 @@ export function runtimeConfig(env, origin) {
     escrowVersion,
     escrowAddress: getAddress(escrow),
     token: PATH_USD_TOKEN,
+    supportedInputTokens,
+    swapSlippageBps,
+    settlementSigner,
+    settlementSigners: settlementSigner ? [settlementSigner] : [],
     chainId: TEMPO_MAINNET_CHAIN_ID,
     decimals: PATH_USD_DECIMALS,
     rpcUrl: env.WM_TEMPO_RPC_URL || "https://rpc.tempo.xyz",
@@ -499,6 +541,15 @@ function catalog(config) {
                 { path: "/api/bounties/{id}/timeout-forfeit", method: "POST", scope: "control" },
               ],
             },
+            currency: PATH_USD_TOKEN,
+            supportedInputTokens: config.supportedInputTokens,
+            swap: {
+              targetToken: PATH_USD_TOKEN,
+              slippageBps: config.swapSlippageBps,
+              atomic: true,
+              description:
+                "MPP clients may atomically swap an allowlisted Tempo stablecoin into pathUSD before the exact transfer.",
+            },
           }
         : {}),
     },
@@ -508,10 +559,21 @@ function catalog(config) {
           version: config.escrowVersion,
           acceptingNewBounties,
           settlement: acceptingNewBounties
-            ? { ready: true }
-            : { ready: false, reason: config.settlementReason },
+            ? { ready: true, quorum: 1, signers: config.settlementSigners }
+            : {
+                ready: false,
+                reason: config.settlementReason,
+                quorum: 1,
+                signers: config.settlementSigners,
+              },
           address: config.escrowAddress,
           token: config.token,
+          supportedInputTokens: config.supportedInputTokens,
+          swap: {
+            targetToken: config.token,
+            slippageBps: config.swapSlippageBps,
+            atomic: true,
+          },
           chainId: config.chainId,
           requiredCalls: [
             "approve",
@@ -560,8 +622,8 @@ function catalog(config) {
       payments: paid
         ? acceptingNewBounties
           ? config.agentBountyMppEnabled
-            ? "Direct Tempo mainnet pathUSD escrow. Browser wallets may use exact direct calls; native MPP agent payments use the bounded V4 relayer path."
-            : "Direct Tempo mainnet pathUSD escrow. Agents may separately use MPP only for explicitly priced API work; MPP never funds or enters a bounty."
+            ? "Direct Tempo mainnet pathUSD escrow. MPP clients may atomically swap an allowlisted Tempo stablecoin into pathUSD before the bounded V4 relayer forwards the payment."
+            : "Direct Tempo mainnet pathUSD escrow. MPP clients may use the same allowlisted stablecoin swap for separately priced API work; the escrow still receives pathUSD."
           : config.settlementReason
         : "Payments are unavailable until escrow configuration is complete. No synthetic credits are issued.",
     },
@@ -596,8 +658,13 @@ const discovery = (config) => ({
         directEscrow: true,
         acceptingNewBounties: !!config.acceptingNewBounties,
         settlement: config.acceptingNewBounties
-          ? { ready: true }
-          : { ready: false, reason: config.settlementReason },
+          ? { ready: true, quorum: 1, signers: config.settlementSigners }
+          : {
+              ready: false,
+              reason: config.settlementReason,
+              quorum: 1,
+              signers: config.settlementSigners,
+            },
         mpp: !!(config.agentMppEnabled || config.agentBountyMppEnabled),
         mppScope: config.agentBountyMppEnabled
           ? "Native MPP payments fund and enter bounties through the configured bounded relayer; zero-value proof remains available for later agent operations."
@@ -633,6 +700,14 @@ const discovery = (config) => ({
         tempoMainnet: true,
         currency: "pathUSD",
         token: PATH_USD_TOKEN,
+        supportedInputTokens: config.supportedInputTokens,
+        swap: {
+          targetToken: PATH_USD_TOKEN,
+          slippageBps: config.swapSlippageBps,
+          atomic: true,
+          description:
+            "MPP clients swap an allowlisted Tempo stablecoin into pathUSD in the same transaction before payment.",
+        },
         decimals: PATH_USD_DECIMALS,
         chainId: TEMPO_MAINNET_CHAIN_ID,
         escrow: config.escrowAddress,
@@ -2520,9 +2595,16 @@ const ESCROW_EVENTS = {
     "0xb92806ef23ff7f73544c7018ae5c0c865c4103b6c6a9a497430e6e8961763298",
   settled: "0xf1bd0b9955d3af8c0f3ef37ea58ba05a0df5b81798cb73c84f62c093fa013e66",
 };
-const ESCROW_SETTLEMENT_SIGNERS = [
+// V3's deployed signer remains the compatibility default. V4 publishes its
+// signer in WM_ESCROW_SETTLEMENT_SIGNER so the Worker cannot attest against a
+// hard-coded key that differs from the constructor arguments.
+const DEFAULT_V3_SETTLEMENT_SIGNER = getAddress(
   "0xCA57cA8E21670fCaD76aD6485223fc231fd020D5",
-].map(getAddress);
+);
+const settlementSigners = (config) =>
+  Array.isArray(config?.settlementSigners)
+    ? config.settlementSigners
+    : [DEFAULT_V3_SETTLEMENT_SIGNER];
 const ESCROW_SETTLEMENT_TYPES = {
   Settlement: [
     { name: "bountyId", type: "uint256" },
@@ -4382,7 +4464,7 @@ async function settlementRecord(db, attemptId) {
 function settlementPlan(config, payload) {
   check(
     Array.isArray(payload.signatures) && payload.signatures.length === 1,
-    "The automatic V3 result signature is not ready yet.",
+    "The automatic result signature is not ready yet.",
     409,
   );
   const call = encodeFunctionData({
@@ -4410,22 +4492,26 @@ async function settlementInfo(db, attemptId, config) {
       signatures: payload.signatures || [],
     },
     typedData: settlementWire(config, payload),
-    signing: { quorum: 1, signers: ESCROW_SETTLEMENT_SIGNERS },
+    signing: { quorum: 1, signers: settlementSigners(config) },
   };
 }
 export async function validateEscrowAttestation(
   config,
   payload,
   signatures,
-  approvedSigners = ESCROW_SETTLEMENT_SIGNERS,
+  approvedSigners,
 ) {
   check(
     Array.isArray(signatures) && signatures.length === 1,
     "Submit exactly one V3 result signature.",
     400,
   );
-  const approved = new Set(
-      approvedSigners.map((value) => getAddress(value).toLowerCase()),
+  const authorities =
+      approvedSigners === undefined
+        ? settlementSigners(config)
+        : approvedSigners,
+    approved = new Set(
+      authorities.map((value) => getAddress(value).toLowerCase()),
     ),
     typed = settlementTypedData(config, payload),
     recovered = [];
@@ -4687,7 +4773,7 @@ async function materializeV3Result(db, attemptId, time = now()) {
     .run();
 }
 
-function v3SettlementAccount(env) {
+function v3SettlementAccount(env, config) {
   const key = String(env.WM_SETTLEMENT_PRIVATE_KEY || "");
   check(
     /^0x[0-9a-fA-F]{64}$/.test(key),
@@ -4695,16 +4781,17 @@ function v3SettlementAccount(env) {
     503,
   );
   const account = privateKeyToAccount(key);
+  const expected = settlementSigners(config)[0];
   check(
-    getAddress(account.address) === ESCROW_SETTLEMENT_SIGNERS[0],
-    "The configured settlement key does not match the V3 escrow signer.",
+    expected && getAddress(account.address) === getAddress(expected),
+    `The configured settlement key does not match the ${config?.escrowVersion === "4" ? "V4" : "V3"} escrow signer.`,
     503,
   );
   return account;
 }
 
 async function sendV3Settlement(env, config, attempt, payload) {
-  const account = v3SettlementAccount(env);
+  const account = v3SettlementAccount(env, config);
   check(
     Number(payload.validUntil) > Math.floor(now() / 1000),
     "The automatic settlement window elapsed before broadcast.",
@@ -4774,7 +4861,7 @@ export function automaticTimeoutState(attempt, bounty, at = now()) {
 }
 
 async function prepareV3Timeout(env, config, bountyId, attemptId) {
-  const account = v3SettlementAccount(env),
+  const account = v3SettlementAccount(env, config),
     call = encodeFunctionData({
       abi: ESCROW_ABI,
       functionName: "forfeitTimedOutAttempt",
@@ -4905,7 +4992,7 @@ async function finalizeOnchainV3Timeout(db, env, config, attempt, bounty) {
   }
 
   const client = createClient({
-    account: v3SettlementAccount(env),
+    account: v3SettlementAccount(env, config),
     feeToken: config.token,
     transport: http(config.rpcUrl, { timeout: 15_000, retryCount: 0 }),
   });
@@ -5013,7 +5100,7 @@ export async function runAutomaticSettlement(env) {
   const config = runtimeConfig(env, "https://service.internal");
   if (!config.enabled || !config.automaticSettlementReady || !env.DB) return;
   try {
-    v3SettlementAccount(env);
+    v3SettlementAccount(env, config);
     await reopenDefendedBounties(env.DB);
     await finalizeExpiredV3Builds(env.DB, env, config);
     const jobs = (

@@ -42,6 +42,7 @@ V4 enables a native MPP payment challenge on `POST /api/bounties` and `POST /api
 ```text
 WM_BOUNTY_ESCROW_VERSION=4
 WM_BOUNTY_ESCROW_ADDRESS=<deployed V4 escrow address>
+WM_ESCROW_SETTLEMENT_SIGNER=<public signer passed to the V4 constructor>
 WM_BOUNTY_RELAYER_ADDRESS=<same address passed to the V4 constructor>
 WM_BOUNTY_RELAYER_PRIVATE_KEY=<Worker secret for that relayer>
 WM_AGENT_BOUNTY_MPP_ENABLED=true
@@ -53,6 +54,17 @@ The relayer must hold enough pathUSD for reward/entry forwarding and fee payment
 
 The optional `/api/agent/practice` charge remains separately configured with `WM_AGENT_MPP_ENABLED`, `WM_AGENT_MPP_RECIPIENT` and `WM_AGENT_MPP_PRICE`.
 
+### Allowlisted stablecoin inputs
+
+The escrow deliberately remains single-token: it holds and settles pathUSD, which keeps reward reserves, exact balance deltas and payout accounting unambiguous. V4 MPP clients can still pay from other operator-reviewed Tempo stablecoins. Set the public `WM_TEMPO_SUPPORTED_TOKENS` list and optional `WM_TEMPO_SWAP_SLIPPAGE_BPS` (0–500; default 100). The mppx client uses `autoSwap` to quote and atomically approve, swap the exact pathUSD output, and transfer pathUSD to the MPP recipient. The Worker verifies the pathUSD transfer and relays only the matching V4 call. A source token is never sent directly to the escrow, and an unlisted token or missing DEX route fails before broadcast.
+
+```text
+WM_TEMPO_SUPPORTED_TOKENS=0x20C0000000000000000000000000000000000000,0x20C000000000000000000000b9537d11c60E8b50
+WM_TEMPO_SWAP_SLIPPAGE_BPS=100
+```
+
+All TIP-20 source addresses must be checked against Tempo Mainnet liquidity before adding them. Testnet-only faucet tokens are not automatically valid mainnet inputs.
+
 ## Site configuration
 
 For the current direct-wallet deployment:
@@ -63,6 +75,6 @@ WM_BOUNTY_ESCROW_VERSION=3
 WM_BOUNTY_ESCROW_ADDRESS=0xb14a3aA99C9349094612143089F55aE5372DeB24
 ```
 
-For V4 native MPP, set `WM_BOUNTY_ESCROW_VERSION=4` and replace the address with the newly deployed V4 address. The Worker fails closed when the version/address/relayer configuration is incomplete. `WM_TEMPO_RPC_URL` is optional and defaults to `https://rpc.tempo.xyz`.
+For V4 native MPP, set `WM_BOUNTY_ESCROW_VERSION=4`, replace the address with the newly deployed V4 address, and set `WM_ESCROW_SETTLEMENT_SIGNER` to the public signer passed to the V4 constructor. The Worker fails closed when the version/address/signer/relayer configuration is incomplete. `WM_TEMPO_RPC_URL` is optional and defaults to `https://rpc.tempo.xyz`.
 
 Do not send pathUSD straight to the escrow address. Use the contract methods prepared by the game, or call the verified ABI yourself after checking its terms. The contract is source-verified, not independently audited.

@@ -20,6 +20,10 @@ The winner receives 97.5% of a gross reward; the fixed 2.5% platform fee is disp
 
 Native MPP bounty routes charge the exact reward on create or exact entry on entry, bind that payer to the escrow call, and return the normal game response after finality. A zero-value Tempo proof can authorize later deploy, settle and control calls without a browser session. A separately priced route such as `/api/agent/practice` remains an actual MPP charge; verify its origin, recipient, exact pathUSD amount, chain and expiry before paying. If native MPP is not advertised, use the direct wallet plan instead.
 
+## Multi-token payment flow
+
+The escrow accepts pathUSD only. Discovery may advertise `payments.supportedInputTokens` and a `payments.swap` policy. An MPP-capable client can pass those addresses as its `tempo.charge` `autoSwap.tokenIn` list; mppx obtains a DEX quote, approves the selected input token, swaps the exact output amount to pathUSD, and transfers pathUSD in one atomic Tempo transaction. The server verifies the final pathUSD transfer and never treats an arbitrary token transfer as payment. Keep the allowlist, target token, slippage and chain from the same discovery response; if no route or balance is available, fail before broadcasting. Direct wallet users should use the Tempo Wallet swap flow first, then submit the exact pathUSD escrow plan.
+
 Use your own program/model for design search. Keep credentials and payment artifacts out of blueprints, links, logs and source control.
 
 Source: https://github.com/Soubhik-10/war-machine

@@ -1,6 +1,7 @@
 import {fields,check,canonicalBlueprint,versions} from './store.mjs';
 import {PRESETS,ARENAS,DEFAULT_RULES,MAX_MODULES,PARTS,clone,normalizeRules,packChallenge,unpackChallenge,stats,validate,terrainAt,environmentProfile} from '../dist/data.mjs';
 import {engineeringReport} from '../dist/engineering.mjs';
+import {DEFAULT_TEMPO_INPUT_TOKENS} from './runtime-config.mjs';
 
 // Agents may use readable part IDs; compact numeric tuples are only the share format.
 export function inspectBlueprint(body,store){
@@ -41,11 +42,11 @@ export function practiceJob(body,store){
  return {challenger,defender,arena:defender.a,seed,swapSpawns:!!(seed&1),engineHash:versions.hash};
 }
 
-export function discovery(config={mode:'demo',paymentsEnabled:false}){const paid=config.paymentsEnabled;return {
+export function discovery(config={mode:'demo',paymentsEnabled:false}){const paid=config.paymentsEnabled;const paymentTokens=config.supportedInputTokens||DEFAULT_TEMPO_INPUT_TOKENS;return {
  name:'War Machines',version:'2.2',mode:config.mode,description:'Engineer autonomous machines with your own code or model. Same engine, rules and contract economy as human players.',
  base:'/api',openapi:'/api/openapi.json',instructions:'/agents.md',skill:'/skills/war-machines-engineer/SKILL.md',catalog:'/api/rules',
  workflow:['Read rules and terrain','Inspect a contract','Build using readable part IDs','Validate and obtain a packed blueprint','Evaluate candidates locally before entry','Read gross reward, 2.5% platform fee, payout and entry; acknowledge maxPlatformFeeBps','Save an idempotency key and submit one authorized official attempt','Poll its receipt; never submit a winner'],
  authentication:{guest:['catalog','contracts','validation'],account:['create/cancel bounty','official entry','save bounty','history'],scheme:'Bearer or Secure HttpOnly session cookie',ownerOnly:['set spending caps','issue/revoke agent keys'],wallet:paid?{challenge:'/api/auth/challenge',verify:'/api/auth/verify',session:'/api/auth/session',logout:'/api/auth/logout',passkeyBase:'/api/auth/passkey',chainId:config.network.chainId}:'disabled'},
- payments:paid?{enabled:true,mpp:true,tempoMainnet:true,method:'tempo',intent:'charge',credentialHeader:'Payment-Authorization',currency:config.network.currency,token:config.network.token,decimals:config.network.decimals,chainId:config.network.chainId,explorer:config.network.explorer,recipients:[config.escrowRecipient,config.platformRecipient],feePolicy:'/api/rules#economics',payouts:'requested/submitted/confirmed/failed-needs-reconciliation; never infer cash receipt from a battle result'}:{enabled:false,mpp:false,tempoMainnet:false,currency:'demo credits',cashValue:false,prerequisitesForPaidMode:['MPP-compatible client and server payment verification','Tempo wallet, approved network and token','Explicit fail-closed production configuration'],feePolicy:'/api/rules#economics',disclosure:'New contracts deduct 2.5% from a winning gross reward. Entry is separate.'},
+ payments:paid?{enabled:true,mpp:true,tempoMainnet:true,method:'tempo',intent:'charge',credentialHeader:'Payment-Authorization',currency:config.network.currency,token:config.network.token,decimals:config.network.decimals,chainId:config.network.chainId,explorer:config.network.explorer,recipients:[config.escrowRecipient,config.platformRecipient],supportedInputTokens:paymentTokens,swap:{targetToken:config.network.token,slippageBps:config.swapSlippageBps??100,atomic:true,description:'MPP clients may swap an allowlisted Tempo stablecoin into pathUSD in the same transaction before the escrow transfer.'},feePolicy:'/api/rules#economics',payouts:'requested/submitted/confirmed/failed-needs-reconciliation; never infer cash receipt from a battle result'}:{enabled:false,mpp:false,tempoMainnet:false,currency:'demo credits',cashValue:false,prerequisitesForPaidMode:['MPP-compatible client and server payment verification','Tempo wallet, approved network and token','Explicit fail-closed production configuration'],feePolicy:'/api/rules#economics',disclosure:'New contracts deduct 2.5% from a winning gross reward. Entry is separate.'},
  invariants:{oneActiveAttemptPerBounty:true,creatorSetsEconomics:true,creatorSetsConstructionRules:true,results:'server generated',officialSeed:'server chosen',externalAgentCodeRuns:'on the agent’s infrastructure'},versions
 };}

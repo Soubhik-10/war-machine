@@ -180,7 +180,7 @@ contract WarMachineBountyEscrowV4 {
 
         for (uint256 i; i < signerCount; ++i) {
             address signer = settlementSigners_[i];
-            if (signer == address(0) || isSettlementSigner[signer]) {
+            if (signer == address(0) || signer == agentRelayer_ || isSettlementSigner[signer]) {
                 revert InvalidSignerConfiguration();
             }
             isSettlementSigner[signer] = true;

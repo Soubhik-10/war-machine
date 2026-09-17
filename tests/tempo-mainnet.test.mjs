@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {privateKeyToAccount} from 'viem/accounts';
-import {runtimeConfig,amountToUnits,unitsToAmount,TEMPO_MAINNET,PLATFORM_FEE_RECIPIENT} from '../server/runtime-config.mjs';
+import {runtimeConfig,amountToUnits,unitsToAmount,TEMPO_MAINNET,TEMPO_USDC_TOKEN,PLATFORM_FEE_RECIPIENT} from '../server/runtime-config.mjs';
 import {Store} from '../server/store.mjs';
 import {packChallenge,PRESETS} from '../dist/data.mjs';
 import {startServer} from '../server.mjs';
+import {parseTempoInputTokens} from '../sites/worker/pathusd.mjs';
 
 const privateKey='0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const signer=privateKeyToAccount(privateKey);
@@ -16,7 +17,9 @@ const body=(reward=100)=>({title:'Funded fixture',blueprint:packChallenge(PRESET
 test('mainnet configuration is fail-closed and binds the dedicated ledger, signer, network and ceilings',()=>{
  assert.throws(()=>runtimeConfig({WM_MODE:'tempo-mainnet'}),/locked/);
  const env={WM_MODE:'tempo-mainnet',WM_MAINNET_ENABLE:'tempo-mainnet-real-funds',WM_LEGAL_REVIEWED:'true',WM_PUBLIC_ORIGIN:'https://arena.example',DATABASE_PATH:'var/war-machines.mainnet.sqlite',WM_LEDGER_NAMESPACE:`tempo-mainnet:4217:${TEMPO_MAINNET.token.toLowerCase()}`,TEMPO_ESCROW_RECIPIENT:signer.address,TEMPO_ENTRY_RECIPIENT:signer.address,TEMPO_PLATFORM_RECIPIENT:platform,TEMPO_ESCROW_PRIVATE_KEY:privateKey,MPP_SECRET_KEY:'x'.repeat(32),WM_MAX_OPERATION_UNITS:'1000000000',WM_MAX_OUTSTANDING_UNITS:'2000000000'};
- const config=runtimeConfig(env,{root:process.cwd()});assert.equal(config.network.chainId,4217);assert.equal(config.network.decimals,6);assert.equal(config.signer.address,signer.address);assert.equal(config.origin,'https://arena.example');
+ const config=runtimeConfig(env,{root:process.cwd()});assert.equal(config.network.chainId,4217);assert.equal(config.network.decimals,6);assert.equal(config.signer.address,signer.address);assert.equal(config.origin,'https://arena.example');assert.deepEqual(config.supportedInputTokens,[TEMPO_MAINNET.token,TEMPO_USDC_TOKEN]);assert.equal(config.swapSlippageBps,100);
+ assert.deepEqual(runtimeConfig({...env,WM_TEMPO_SUPPORTED_TOKENS:`${TEMPO_USDC_TOKEN},${TEMPO_USDC_TOKEN}`},{root:process.cwd()}).supportedInputTokens,[TEMPO_MAINNET.token,TEMPO_USDC_TOKEN]);
+ assert.throws(()=>runtimeConfig({...env,WM_TEMPO_SWAP_SLIPPAGE_BPS:'501'},{root:process.cwd()}),/SWAP_SLIPPAGE/);
  assert.throws(()=>runtimeConfig({...env,TEMPO_ENTRY_RECIPIENT:platform},{root:process.cwd()}),/entry fees to enter escrow/);
  assert.throws(()=>runtimeConfig({...env,TEMPO_PLATFORM_RECIPIENT:'0x0000000000000000000000000000000000000001'},{root:process.cwd()}),/disclosed fee recipient/);
  assert.throws(()=>runtimeConfig({...env,WM_LEDGER_NAMESPACE:'wrong'},{root:process.cwd()}),/WM_LEDGER_NAMESPACE/);
@@ -25,6 +28,11 @@ test('mainnet configuration is fail-closed and binds the dedicated ledger, signe
 test('token amount conversion never uses floating point and preserves six decimal places',()=>{
  for(const value of ['0','0.000001','1','1.025','999999999.999999'])assert.equal(unitsToAmount(amountToUnits(value)),value.replace(/\.0+$/,''));
  assert.throws(()=>amountToUnits('0.0000001'),/at most 6/);
+});
+
+test('MPP input discovery includes the same built-in pathUSD and USDC.e fallbacks as mppx',()=>{
+ const custom='0x1111111111111111111111111111111111111111';
+ assert.deepEqual(parseTempoInputTokens(custom),[TEMPO_MAINNET.token,custom,TEMPO_USDC_TOKEN]);
 });
 
 test('mainnet HTTP surface publishes a domain-bound SIWE challenge and truthful payment discovery',async t=>{
