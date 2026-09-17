@@ -6,6 +6,8 @@
 // preflight and sign the exact escrow plan returned by the Worker.
 
 import { randomUUID } from "node:crypto";
+import { availableParallelism } from "node:os";
+import { Worker } from "node:worker_threads";
 import { Provider, Storage } from "accounts/cli";
 import { Mppx, tempo } from "mppx/client";
 import { Battle } from "../dist/engine.mjs";
@@ -32,6 +34,8 @@ export const DEFAULT_SCREEN_SEEDS = Object.freeze([
 
 const sleep = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const DEFAULT_BATTLE_WORKERS = Math.min(12, Math.max(1, availableParallelism()));
 
 const randomKey = (prefix) =>
   `${prefix}_${randomUUID().replaceAll("-", "")}`.slice(0, 100);
@@ -143,8 +147,7 @@ export function rankBounties(
     .sort(rankPair);
 }
 
-function candidateBlueprints(defender) {
-  const locked = unpackChallenge(defender);
+function candidateBlueprints(defender, locked = unpackChallenge(defender)) {
   return PRESETS.map((machine, index) => {
     const issues = validate(machine, locked.rules);
     return {
@@ -157,62 +160,278 @@ function candidateBlueprints(defender) {
   }).filter((candidate) => candidate.issues.length === 0);
 }
 
-/**
- * Fast deterministic matchup sweep. The official seed remains server-chosen;
- * this selects the most robust legal preset over a small fixed seed set.
- */
-export function optimizeCounter(
+function compareCandidates(left, right) {
+  return (
+    right.wins - left.wins ||
+    right.draws - left.draws ||
+    right.meanIntegrity - left.meanIntegrity ||
+    left.meanTime - right.meanTime ||
+    left.stats.cost - right.stats.cost
+  );
+}
+
+function summarizeCandidate(candidate, results) {
+  const wins = results.filter((result) => result.winner === 0).length;
+  const draws = results.filter((result) => result.winner < 0).length;
+  const meanIntegrity =
+    results.reduce((total, result) => total + Number(result.integrity?.[0] || 0), 0) /
+    results.length;
+  const meanTime =
+    results.reduce((total, result) => total + Number(result.time || 100), 0) / results.length;
+  return {
+    ...candidate,
+    wins,
+    draws,
+    losses: results.length - wins - draws,
+    meanIntegrity,
+    meanTime,
+    results,
+  };
+}
+
+function scoreCandidate(candidate, locked, seedList, existingResults = []) {
+  const seenSeeds = new Set(existingResults.map((result) => result.seed));
+  const results = existingResults.concat(
+    seedList
+      .filter((seed) => !seenSeeds.has(seed))
+      .map((seed) => {
+        const result = new Battle(
+          candidate.machine,
+          locked.machine,
+          locked.arena,
+          seed,
+          { mode: "auto", swapSpawns: !!(seed & 1) },
+        ).run();
+        return { seed, winner: result.winner, time: result.time, integrity: result.integrity };
+      }),
+  );
+  return summarizeCandidate(candidate, results);
+}
+
+function prepareCounterSearch(
   defender,
-  { seeds = DEFAULT_SCREEN_SEEDS, maxCandidates = 12 } = {},
+  {
+    seeds = DEFAULT_SCREEN_SEEDS,
+    maxCandidates = 12,
+    initialSeeds = 2,
+    shortlist = 3,
+  } = {},
 ) {
   const locked = unpackChallenge(defender);
-  const seedList = [...new Set(seeds)].map(Number);
+  const seedList = [...new Set([...seeds].map(Number))];
   if (
     !seedList.length ||
     seedList.some((seed) => !Number.isInteger(seed) || seed < 0 || seed > 4294967295)
   )
     throw new Error("screen seeds must be uint32 integers.");
-  const candidates = candidateBlueprints(defender).slice(0, maxCandidates);
+  if (!Number.isInteger(initialSeeds) || initialSeeds < 1)
+    throw new Error("initialSeeds must be a positive integer.");
+  if (!Number.isInteger(shortlist) || shortlist < 1)
+    throw new Error("shortlist must be a positive integer.");
+  const candidates = candidateBlueprints(defender, locked).slice(0, maxCandidates);
   if (!candidates.length)
     throw new Error("No legal local counter is available for the locked rules.");
-  const rows = candidates.map((candidate) => {
-    const results = seedList.map((seed) => {
-      const result = new Battle(
-        candidate.machine,
-        locked.machine,
-        locked.arena,
-        seed,
-        { mode: "auto", swapSpawns: !!(seed & 1) },
-      ).run();
-      return { seed, winner: result.winner, time: result.time, integrity: result.integrity };
+  const firstSeeds = seedList.slice(0, Math.min(initialSeeds, seedList.length));
+  return {
+    locked,
+    candidates,
+    seedList,
+    firstSeeds,
+    shouldScreen: firstSeeds.length < seedList.length && candidates.length > shortlist,
+    shortlist,
+  };
+}
+
+class BattleWorkerPool {
+  constructor(count) {
+    this.workers = Array.from(
+      { length: count },
+      () => new Worker(new URL("./agent-battle-worker.mjs", import.meta.url), { type: "module" }),
+    );
+  }
+
+  run(candidates, locked, seedList) {
+    const results = new Array(candidates.length);
+    let next = 0;
+    let completed = 0;
+    let settled = false;
+    return new Promise((resolve, reject) => {
+      const handlers = [];
+      const cleanup = () => {
+        for (const [worker, onMessage, onError] of handlers) {
+          worker.removeListener("message", onMessage);
+          worker.removeListener("error", onError);
+        }
+      };
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      const finish = () => {
+        if (settled || completed !== candidates.length) return;
+        settled = true;
+        cleanup();
+        resolve(results);
+      };
+      const assign = (worker) => {
+        if (next >= candidates.length) return;
+        const index = next++;
+        try {
+          worker.postMessage({
+            index,
+            candidate: { index: candidates[index].index, machine: candidates[index].machine },
+            locked: { machine: locked.machine, arena: locked.arena },
+            seeds: seedList,
+          });
+        } catch (error) {
+          fail(error);
+        }
+      };
+      for (const worker of this.workers) {
+        const onMessage = (message) => {
+          if (message.error) {
+            fail(new Error(message.error));
+            return;
+          }
+          results[message.index] = message.results;
+          completed += 1;
+          assign(worker);
+          finish();
+        };
+        const onError = (error) => fail(error);
+        handlers.push([worker, onMessage, onError]);
+        worker.on("message", onMessage);
+        worker.on("error", onError);
+        assign(worker);
+      }
     });
-    const wins = results.filter((result) => result.winner === 0).length;
-    const draws = results.filter((result) => result.winner < 0).length;
-    const meanIntegrity =
-      results.reduce((total, result) => total + Number(result.integrity?.[0] || 0), 0) /
-      results.length;
-    const meanTime =
-      results.reduce((total, result) => total + Number(result.time || 100), 0) /
-      results.length;
-    return {
-      ...candidate,
-      wins,
-      draws,
-      losses: results.length - wins - draws,
-      meanIntegrity,
-      meanTime,
-      results,
-    };
-  });
-  rows.sort(
-    (left, right) =>
-      right.wins - left.wins ||
-      right.draws - left.draws ||
-      right.meanIntegrity - left.meanIntegrity ||
-      left.meanTime - right.meanTime ||
-      left.stats.cost - right.stats.cost,
+  }
+
+  close() {
+    return Promise.all(this.workers.map((worker) => worker.terminate()));
+  }
+}
+
+function scoreCandidatesParallel(pool, candidates, locked, seedList) {
+  if (pool) return pool.run(candidates, locked, seedList).then((rows) =>
+    rows.map((results, index) => summarizeCandidate(candidates[index], results)),
   );
-  return { locked, selected: rows[0], candidates: rows };
+  return Promise.resolve(candidates.map((candidate) => scoreCandidate(candidate, locked, seedList)));
+}
+
+/**
+ * Fast deterministic matchup sweep. The official seed remains server-chosen;
+ * this selects the most robust legal preset over a small fixed seed set. The
+ * first pass scores every candidate on a small seed sample, then expands only
+ * the shortlist across the remaining seeds. This keeps the agent responsive
+ * without changing the deterministic tie-break rules for finalists.
+ */
+export function optimizeCounter(
+  defender,
+  options = {},
+) {
+  const { locked, candidates, seedList, firstSeeds, shouldScreen, shortlist } =
+    prepareCounterSearch(defender, options);
+  let rows;
+  let evaluatedMatches;
+  if (!shouldScreen) {
+    rows = candidates.map((candidate) => scoreCandidate(candidate, locked, seedList));
+    evaluatedMatches = candidates.length * seedList.length;
+  } else {
+    const screened = candidates.map((candidate) =>
+      scoreCandidate(candidate, locked, firstSeeds),
+    );
+    const finalistIndexes = new Set(
+      [...screened].sort(compareCandidates).slice(0, shortlist).map((row) => row.index),
+    );
+    const remainingSeeds = seedList.slice(firstSeeds.length);
+    rows = screened.map((row) =>
+      finalistIndexes.has(row.index)
+        ? scoreCandidate(row, locked, remainingSeeds, row.results)
+        : row,
+    );
+    evaluatedMatches =
+      candidates.length * firstSeeds.length + finalistIndexes.size * remainingSeeds.length;
+  }
+  rows.sort(compareCandidates);
+  return {
+    locked,
+    selected: rows[0],
+    candidates: rows,
+    evaluatedMatches,
+    screening: {
+      initialSeeds: firstSeeds.length,
+      shortlist: shouldScreen ? Math.min(shortlist, candidates.length) : candidates.length,
+      totalSeeds: seedList.length,
+    },
+  };
+}
+
+/**
+ * Node-only version of the deterministic sweep. Matchups are independent, so
+ * the agent runner evaluates them in a small worker pool while retaining the
+ * same screening and tie-break policy as optimizeCounter.
+ */
+export async function optimizeCounterParallel(defender, options = {}) {
+  const {
+    locked,
+    candidates,
+    seedList,
+    firstSeeds,
+    shouldScreen,
+    shortlist,
+  } = prepareCounterSearch(defender, options);
+  const workerCount = options.workerCount;
+  const count = Math.min(
+    candidates.length,
+    Math.max(1, Math.floor(workerCount || DEFAULT_BATTLE_WORKERS)),
+  );
+  const pool = count > 1 ? new BattleWorkerPool(count) : null;
+  let rows;
+  let evaluatedMatches;
+  try {
+    if (!shouldScreen) {
+      rows = await scoreCandidatesParallel(pool, candidates, locked, seedList);
+      evaluatedMatches = candidates.length * seedList.length;
+    } else {
+      const screened = await scoreCandidatesParallel(pool, candidates, locked, firstSeeds);
+      const finalistIndexes = new Set(
+        [...screened].sort(compareCandidates).slice(0, shortlist).map((row) => row.index),
+      );
+      const remainingSeeds = seedList.slice(firstSeeds.length);
+      const finalists = candidates.filter((candidate) => finalistIndexes.has(candidate.index));
+      const expanded = await scoreCandidatesParallel(
+        pool,
+        finalists,
+        locked,
+        remainingSeeds,
+      );
+      const expandedByIndex = new Map(expanded.map((row) => [row.index, row.results]));
+      rows = screened.map((row) =>
+        finalistIndexes.has(row.index)
+          ? summarizeCandidate(row, row.results.concat(expandedByIndex.get(row.index)))
+          : row,
+      );
+      evaluatedMatches =
+        candidates.length * firstSeeds.length + finalists.length * remainingSeeds.length;
+    }
+    rows.sort(compareCandidates);
+    return {
+      locked,
+      selected: rows[0],
+      candidates: rows,
+      evaluatedMatches,
+      screening: {
+        initialSeeds: firstSeeds.length,
+        shortlist: shouldScreen ? Math.min(shortlist, candidates.length) : candidates.length,
+        totalSeeds: seedList.length,
+      },
+    };
+  } finally {
+    await pool?.close();
+  }
 }
 
 export function createTempoWallet({ storagePath } = {}) {
@@ -235,7 +454,7 @@ export function createTempoWallet({ storagePath } = {}) {
 export function createMppClient(wallet) {
   return Mppx.create({
     methods: [
-      tempo({
+      tempo.charge({
         ...wallet.getMppxParameters(),
         expectedChainId: TEMPO_CHAIN_ID,
         mode: "pull",
@@ -305,10 +524,12 @@ async function sendExactPlan(wallet, from, plan, maxSpend, escrow) {
 }
 
 async function connectedAccount(wallet) {
-  const accounts = await wallet.request({ method: "eth_accounts" });
+  const [accounts, chain] = await Promise.all([
+    wallet.request({ method: "eth_accounts" }),
+    wallet.request({ method: "eth_chainId" }),
+  ]);
   if (!Array.isArray(accounts) || !accounts[0])
     throw new Error("No connected Tempo wallet account is available.");
-  const chain = await wallet.request({ method: "eth_chainId" });
   if (Number.parseInt(chain, 16) !== TEMPO_CHAIN_ID)
     throw new Error("The connected Tempo wallet is not on Tempo mainnet (4217).");
   return accounts[0];
@@ -342,7 +563,13 @@ export async function runOptimalBounty({
   if (!wallet) throw new Error("A connected local Tempo wallet is required.");
   const base = normalizedBaseUrl(baseUrl);
   pathUsdUnits(maxEntry);
-  const discovery = await jsonResponse(await fetch(`${base}/.well-known/war-machines.json`));
+  const [discoveryResponse, bountiesResponse] = await Promise.all([
+    fetch(`${base}/.well-known/war-machines.json`, {
+      headers: { accept: "application/json" },
+    }),
+    fetch(`${base}/api/bounties`, { headers: { accept: "application/json" } }),
+  ]);
+  const discovery = await jsonResponse(discoveryResponse);
   if (discovery.mode !== "tempo-mainnet" || discovery.payments?.enabled !== true)
     throw new Error("The selected War Machines origin is not an enabled Tempo mainnet deployment.");
   if (
@@ -353,8 +580,7 @@ export async function runOptimalBounty({
   )
     throw new Error("Discovery failed the pinned Tempo chain, token or escrow checks.");
 
-  const mppx = createMppClient(wallet);
-  const bounties = await apiJson(mppx, base, "/api/bounties");
+  const bounties = await jsonResponse(bountiesResponse);
   const ranked = rankBounties(bounties, { maxEntry, titleQuery });
   if (!ranked.length)
     return {
@@ -372,6 +598,7 @@ export async function runOptimalBounty({
       selected: safeSummary(ranked[0]),
     };
 
+  const mppx = createMppClient(wallet);
   const from = await connectedAccount(wallet);
   const skipped = [];
   let entry;
@@ -452,7 +679,7 @@ export async function runOptimalBounty({
   if (Number(entry.build?.remainingSeconds || 0) < 30)
     throw new Error("The confirmed bounty left less than 30 seconds to deploy a safe counter.");
 
-  const optimized = optimizeCounter(entry.defender, { seeds: screenSeeds });
+  const optimized = await optimizeCounterParallel(entry.defender, { seeds: screenSeeds });
   const deployKey = randomKey("wm_deploy");
   const deployBody = { blueprint: optimized.selected.packed };
   let attempt = await retryRequest(
@@ -466,11 +693,13 @@ export async function runOptimalBounty({
   );
 
   const deadline = Date.now() + Math.max(0, Math.min(Number(pollSeconds), 90)) * 1000;
+  let pollDelay = 250;
   while (
     !["settled", "refunded", "ready-to-settle", "awaiting-signatures"].includes(attempt.status) &&
     Date.now() < deadline
   ) {
-    await sleep(1000);
+    await sleep(pollDelay);
+    pollDelay = Math.min(1000, pollDelay * 2);
     attempt = await retryRequest(
       () =>
         apiJson(mppx, base, `/api/attempts/${entry.id}/deploy`, {

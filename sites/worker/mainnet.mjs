@@ -1251,12 +1251,9 @@ async function mppCharge(
   { amountUnits, recipient, operation, description, meta, expires },
 ) {
   // `requiresAuth` advertises Payment-Authorization so a normal Bearer
-  // session can coexist with an MPP credential. Some clients, including the
-  // Tempo request CLI, still send the standard Authorization: Payment header
-  // because they do not pass the challenge header override to their
-  // transport. Normalize that form before MPP verification, but only when the
-  // value is actually a Payment credential so ordinary Bearer auth is never
-  // shadowed.
+  // session can coexist with an MPP credential. Keep the fallback below for
+  // older clients that still send Authorization: Payment, but always issue
+  // the challenge with the canonical split header.
   const mppRequest = request.headers.get("Payment-Authorization")
     ? request
     : (() => {
@@ -1275,14 +1272,11 @@ async function mppCharge(
       waitForConfirmation: true,
       sponsorBudget: false,
     }),
-    // Advertise the standard Authorization header until a client has already
-    // supplied the split header. This keeps the challenge HMAC identical for
-    // Tempo CLI clients, which do not preserve a custom challenge header.
     mppx = Mppx.create({
       methods: [method],
       secretKey: config.mppSecret,
       realm: new URL(config.origin).hostname,
-      requiresAuth: !!request.headers.get("Payment-Authorization"),
+      requiresAuth: true,
     }),
     result = await mppx.charge({
       amount: display(amountUnits),

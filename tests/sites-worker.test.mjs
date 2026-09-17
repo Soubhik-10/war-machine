@@ -295,6 +295,10 @@ test("MPP practice advertises a bounded Tempo charge and returns a challenge bef
     mppEntryChallenge.headers.get("www-authenticate"),
     /Payment/i,
   );
+  assert.match(
+    mppEntryChallenge.headers.get("www-authenticate"),
+    /header="Payment-Authorization"/i,
+  );
 
   const challenge = await call(env, "/api/auth/challenge", "POST", {
     chainId: 4217,
