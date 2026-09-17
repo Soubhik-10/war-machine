@@ -93,8 +93,33 @@ export function createBountyUI(adapter) {
     feeFilter = "",
     runtime = { mode: "sandbox", paid: false, currency: "sandbox credits" },
     walletBalance = null,
-    tempoClient = null;
+    tempoClient = null,
+    accountUpdate = null;
   const getCache = new Map();
+  const publicCachePrefix = "wm-public-cache-v1:";
+  function readPublicCache(path, ttl) {
+    if (!ttl) return null;
+    try {
+      const raw = sessionStorage.getItem(publicCachePrefix + path);
+      if (!raw) return null;
+      const cached = JSON.parse(raw);
+      if (!cached || typeof cached.time !== "number") return null;
+      if (Date.now() - cached.time >= ttl) return null;
+      return cached.value;
+    } catch {
+      return null;
+    }
+  }
+  function writePublicCache(path, value) {
+    try {
+      sessionStorage.setItem(
+        publicCachePrefix + path,
+        JSON.stringify({ time: Date.now(), value }),
+      );
+    } catch {
+      // Private browsing and embedded webviews may deny sessionStorage.
+    }
+  }
   const cacheTtl = (path) =>
     path === "/rules"
       ? 5 * 60_000
@@ -143,6 +168,11 @@ export function createBountyUI(adapter) {
     if (ttl) {
       const cached = getCache.get(path);
       if (cached && Date.now() - cached.time < ttl) return cached.value;
+      const stored = readPublicCache(path, ttl);
+      if (stored !== null) {
+        getCache.set(path, { time: Date.now(), value: stored });
+        return stored;
+      }
     }
     let response;
     try {
@@ -156,8 +186,24 @@ export function createBountyUI(adapter) {
         },
         ...(body ? { body: JSON.stringify(body) } : {}),
       };
-      response = await fetch("/api" + path, request);
+      const controller = new AbortController(),
+        timeout = setTimeout(
+          () => controller.abort(),
+          method === "GET" ? 8_000 : 45_000,
+        );
+      try {
+        response = await fetch("/api" + path, {
+          ...request,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
     } catch (e) {
+      if (e?.name === "AbortError")
+        throw Error(
+          "The arena server took too long to respond. Try Refresh board; your saved build is safe.",
+        );
       throw Error(
         e?.message ||
           "Cannot reach the arena server. Your saved build is safe.",
@@ -176,7 +222,10 @@ export function createBountyUI(adapter) {
       e.status = response.status;
       throw e;
     }
-    if (ttl) getCache.set(path, { time: Date.now(), value: result });
+    if (ttl) {
+      getCache.set(path, { time: Date.now(), value: result });
+      writePublicCache(path, result);
+    }
     return result;
   }
   async function ensurePaidWalletSession() {
@@ -296,6 +345,7 @@ export function createBountyUI(adapter) {
   function begin() {
     adapter.show();
     current = null;
+    accountUpdate = null;
     return ++generation;
   }
   function schedule(fn, g, delay = 2500) {
@@ -374,7 +424,7 @@ export function createBountyUI(adapter) {
       if (button?.isConnected) button.disabled = false;
     }
   }
-  async function refreshMe() {
+  async function refreshMe({ skipWallet = false } = {}) {
     if (token || runtime.paid) {
       try {
         me = await api("/me");
@@ -384,12 +434,22 @@ export function createBountyUI(adapter) {
       }
     }
     walletBalance = null;
-    if (runtime.paid && me?.payoutAddress)
-      try {
-        walletBalance = await api("/me/wallet");
-      } catch {
-        // The address remains visible if a public RPC is briefly unavailable.
-      }
+    if (runtime.paid && me?.payoutAddress) {
+      const address = me.payoutAddress,
+        loadWallet = async () => {
+          try {
+            const balance = await api("/me/wallet");
+            if (me?.payoutAddress === address) {
+              walletBalance = balance;
+              accountUpdate?.();
+            }
+          } catch {
+            // The address remains visible if a public RPC is briefly unavailable.
+          }
+        };
+      if (skipWallet) void loadWallet();
+      else await loadWallet();
+    }
     return me;
   }
   async function disconnectWallet(returnId) {
@@ -442,6 +502,16 @@ export function createBountyUI(adapter) {
         : `${money(b.payout)} winner payout · legacy terms / no platform fee`;
     return `<article class="contract-card"><div class="contract-card-top">${status(b.status)}<small>${complete ? "REPLAY & RESULT · 10 MINUTES" : b.listed ? "OPEN BOUNTY" : "UNLISTED LINK"}</small></div><div class="contract-preview">${b.blueprint ? `<canvas data-contract-thumb="${b.id}" width="300" height="260" aria-label="Defender machine"></canvas>` : sealedPreview(b)}<span class="contract-reward"><b>${money(b.reward)}</b><small>GROSS REWARD</small></span></div><div class="contract-content"><h2>${esc(b.title)}</h2><p>${esc(a.name)} · ${s.cost} build credits · ${s.mass} t · ${s.parts} fitted parts + core</p>${terrain(a)}<div class="contract-class">${esc(rulesLabel(bountyRules(b)))}</div><p class="card-fee">${fee}</p><div class="contract-footer"><span><b>${b.entry}</b> entry · ${b.attempts} trials</span><button data-contract="${b.id}">${complete ? "Watch result" : b.blueprint ? "Inspect bounty" : "Scout bounty"} ↗</button></div></div></article>`;
   }
+  function refreshHeaderAccount() {
+    const node = $(".bounty-heading"),
+      title = node?.querySelector("h1")?.textContent,
+      subtitle = node?.querySelector("p")?.textContent;
+    if (!node || !title || !subtitle) return;
+    const shell = document.createElement("div");
+    shell.innerHTML = header(title, subtitle);
+    node.replaceWith(shell.firstElementChild);
+    wireHeader();
+  }
   async function open(id) {
     const g = begin();
     window.history.replaceState(
@@ -473,19 +543,26 @@ export function createBountyUI(adapter) {
         throw Error(
           "This tab has an older game release. Reload the page before entering or replaying bounties.",
         );
-      const meRequest = refreshMe();
+      // Account hydration is deliberately non-blocking. Wallet balance RPCs
+      // can take tens of seconds while the public board is ready in a moment.
+      const meRequest = refreshMe({ skipWallet: true }).catch(() => null);
       const data = await dataRequest;
       if (dataError) throw dataError;
-      await meRequest;
-      const saved = me ? await api("/me/bookmarks") : [];
-      savedIds = new Set(saved.map((b) => b.id));
-      if (!id)
-        for (const b of saved)
-          if (!data.some((n) => n.id === b.id)) data.push(b);
       if (g !== generation) return;
       if (id) {
         current = data;
         detail(data, g);
+        accountUpdate = () => {
+          if (g === generation) refreshHeaderAccount();
+        };
+        void meRequest.then(async () => {
+          const saved = me ? await api("/me/bookmarks").catch(() => []) : [];
+          savedIds = new Set(saved.map((b) => b.id));
+          if (g === generation) {
+            current = data;
+            detail(data, g);
+          }
+        });
         return;
       }
       app.innerHTML =
@@ -537,6 +614,20 @@ export function createBountyUI(adapter) {
       };
       draw();
       wireHeader();
+      accountUpdate = () => {
+        if (g === generation) refreshHeaderAccount();
+      };
+      // Add account-owned and saved state after the first board paint. This
+      // keeps the board usable while auth/bookmark storage catches up.
+      void meRequest.then(async () => {
+        const saved = me ? await api("/me/bookmarks").catch(() => []) : [];
+        savedIds = new Set(saved.map((b) => b.id));
+        for (const b of saved)
+          if (!data.some((n) => n.id === b.id)) data.push(b);
+        if (g !== generation) return;
+        refreshHeaderAccount();
+        draw();
+      });
       $("#contract-search").oninput = (e) => {
         searchText = e.target.value;
         draw();
