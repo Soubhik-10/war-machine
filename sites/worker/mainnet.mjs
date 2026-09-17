@@ -1273,11 +1273,14 @@ async function mppCharge(
       waitForConfirmation: true,
       sponsorBudget: false,
     }),
+    // Advertise the standard Authorization header until a client has already
+    // supplied the split header. This keeps the challenge HMAC identical for
+    // Tempo CLI clients, which do not preserve a custom challenge header.
     mppx = Mppx.create({
       methods: [method],
       secretKey: config.mppSecret,
       realm: new URL(config.origin).hostname,
-      requiresAuth: true,
+      requiresAuth: !!request.headers.get("Payment-Authorization"),
     }),
     result = await mppx.charge({
       amount: display(amountUnits),
