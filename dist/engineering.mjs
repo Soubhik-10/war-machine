@@ -1,4 +1,4 @@
-import {BY_ID,ARENAS,stats,partSpec,validate,connected,keyOf,terrainAt,environmentProfile,weaponReloadFactor,DUPLICATE_WEAPON_FREE,timeoutScore,integrityBreakdown,clone} from './data.mjs';
+import {BY_ID,ARENAS,stats,partSpec,validate,connected,keyOf,terrainAt,environmentProfile,weaponReloadFactor,DUPLICATE_WEAPON_FREE,timeoutScore,integrityBreakdown,clone,HEAT_CAUTION,HEAT_DANGER,HEAT_LIMIT,HEAT_RECOVERY,POWER_CAUTION} from './data.mjs';
 import {Battle} from './engine.mjs';
 
 export function engineeringReport(machine,rules,arenaId='foundry'){
@@ -9,7 +9,9 @@ export function engineeringReport(machine,rules,arenaId='foundry'){
  if(arena.terrain.some(t=>['snow','ice'].includes(t.type))&&!s.hovering)notes.push({level:s.winterWheels||s.gyros?'good':'warn',category:'Mobility',text:'Ice and snow reduce control. Stud tires scale with their share of your running gear; a powered gyro restores up to 70% grip.'});
  if(arena.terrain.some(t=>t.type==='brine'))notes.push({level:s.hovering||s.insulators?'good':'warn',category:'Systems',text:'Brine lanes drain 8 energy/s before insulation. Hovering avoids contact drain; paddle tires or treads reduce the slowdown.'});
  if(demand>1)notes.push({level:'warn',category:'Systems',text:`Energy reserve runs dry in about ${Math.max(1,Math.round(s.capacity/demand))}s of continuous fire. Add generation or reduce weapon demand.`});
- if(heat>1)notes.push({level:'warn',category:'Systems',text:`Continuous fire can overheat in about ${Math.max(1,Math.round(100/heat))}s in ${arena.name}. Add cooling or reduce continuous weapon heat; automatic purges consume power.`});
+ else if(s.energy>s.power*env.power*(1-POWER_CAUTION))notes.push({level:'warn',category:'Systems',text:`Power headroom is only ${(s.power*env.power-s.energy).toFixed(1)} energy/s. Extra weapons will push the machine into brownout and slow movement.`});
+ if(heat>1)notes.push({level:'warn',category:'Systems',text:`Continuous fire can overheat in about ${Math.max(1,Math.round(100/heat))}s in ${arena.name}. At ${HEAT_CAUTION} heat output starts falling; at ${HEAT_LIMIT}, weapons lock until ${HEAT_RECOVERY} heat. Add cooling or reduce continuous weapon heat.`});
+ else if(s.heat>0&&s.cooling*env.cooling-s.heat<8)notes.push({level:'warn',category:'Systems',text:`Cooling headroom is only ${(s.cooling*env.cooling-s.heat).toFixed(1)} heat/s. Sustained fire will reach the ${HEAT_DANGER} heat danger band and slow weapon cycles.`});
  const repeated=[...new Set(machine.modules.filter(m=>partSpec(m)?.rate).map(m=>m.id))].map(id=>({id,copies:machine.modules.filter(m=>m.id===id).length,factor:weaponReloadFactor(machine.modules,id)})).filter(row=>row.copies>DUPLICATE_WEAPON_FREE);
  for(const row of repeated)notes.push({level:'warn',category:'Weapons',text:`Fire-control saturation: ${row.copies} × ${BY_ID[row.id].name} reload at ${row.factor.toFixed(2)}×. Mix weapon types after two matching guns to restore normal cycles.`});
  const backwards=machine.modules.filter(m=>BY_ID[m.id].rate&&!BY_ID[m.id].arc&&!BY_ID[m.id].mine&&((m.r-(machine.front||0)+4)%4)===2);
@@ -30,7 +32,7 @@ export function combatSummary(battle,side=0){
  for(const m of v.modules)for(const [key,value] of Object.entries(m.failureCounts||{}))failures[key]=(failures[key]||0)+value;
  const destroyed=battle.timeline.filter(e=>e.kind==='module'||e.kind==='battery'||e.kind==='core').map(e=>({time:e.t,text:e.text,cause:e.cause||'unknown',side:e.side,moduleUid:e.moduleUid}));
  const timeline=battle.timeline.slice();if(v.firstHitAt!=null&&!timeline.some(e=>e.kind==='hit'))timeline.push({t:v.firstHitAt,kind:'hit',side, text:'First hit registered.'});timeline.sort((a,b)=>a.t-b.t);
- return {rows,failures,destroyed,timeline,score:timeoutScore(v),breakdown:integrityBreakdown(v),integrity:Math.round(battle.health(v)*100),enemyIntegrity:Math.round(battle.health(enemy)*100),heat:Math.round(v.heat),energy:Math.round(v.energy),sensor:Math.round((v.s.sensor||0)*100),sensors:v.s.sensors||0,batterySurges:v.batterySurges||0,objective:battle.objective,overheats:v.overheatCount,mobilityLossTime:Math.round((v.mobilityLossTime||0)*10)/10};
+ return {rows,failures,destroyed,timeline,score:timeoutScore(v),breakdown:integrityBreakdown(v),integrity:Math.round(battle.health(v)*100),enemyIntegrity:Math.round(battle.health(enemy)*100),heat:Math.round(v.heat),peakHeat:Math.round(v.peakHeat||v.heat),energy:Math.round(v.energy),sensor:Math.round((v.s.sensor||0)*100),sensors:v.s.sensors||0,batterySurges:v.batterySurges||0,objective:battle.objective,overheats:v.overheatCount,powerBrownouts:v.brownoutCount||0,powerLimitedTime:Math.round((v.powerLimitedTime||0)*10)/10,thermalStressTime:Math.round((v.thermalStressTime||0)*10)/10,mobilityLossTime:Math.round((v.mobilityLossTime||0)*10)/10};
 }
 
 export function stressTest(machine,opponent,arenaId='foundry',seed=42817,{seeds=[seed>>>0,(seed+1013904223)>>>0,(seed^0x9e3779b9)>>>0],objective='reactor'}={}){

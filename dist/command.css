@@ -28,3 +28,12 @@ button,input,select{font-size:14px}button{min-height:42px}button.active{color:va
 /* First-time builders can scan the part's job without opening every card. */
 .part-card .part-role{position:absolute;top:8px;left:7px;right:38px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#92d5cc;font:8px/1.1 monospace;letter-spacing:.45px;text-align:left}.part-card .part-new{top:23px;background:#183638cc;border:1px solid #5fb8aa66;border-radius:3px;padding:2px 3px}.selection-kicker{display:block;margin-bottom:6px;color:#8fd4ca;font:9px/1.35 monospace;letter-spacing:1px}.selection-details .part-quick{margin:8px 0 10px;padding:8px 10px;border-left:2px solid var(--gold);border-radius:0 5px 5px 0;background:#e9b45c10;color:#e7dfca;font-size:12px;line-height:1.5}.selection-details .part-quick+p{margin-top:0}
 @media(max-width:640px){.part-card .part-role{top:8px;left:6px;right:34px;font-size:8px}.part-card .part-new{top:23px}.selection-kicker{font-size:9px}.selection-details .part-quick{padding:8px 9px;font-size:13px}}
+/* Resource meters: visible headroom makes heat and power tradeoffs legible. */
+.resource-meters{display:grid;gap:4px;margin-top:8px;min-width:145px}
+.resource-meter{display:grid;grid-template-columns:39px minmax(48px,1fr) 30px;align-items:center;gap:5px;font:9px/1 monospace;color:#9fb7ae;letter-spacing:.35px}
+.resource-meter>div{height:5px;background:#142329;overflow:hidden;border-radius:3px;border:1px solid #38505a55}
+.resource-meter i{display:block;height:100%;width:0;transition:width .15s linear;background:#e49b62}
+.resource-meter.power-meter i{background:#73c6b2}
+.resource-meter b{font:10px/1 monospace;text-align:right;color:#cbdad1}
+.resource-meter.caution i{background:#e7b45f}.resource-meter.danger i,.resource-meter.critical i{background:#e17c6e}
+.resource-meter.caution b{color:#f0c879}.resource-meter.danger b,.resource-meter.critical b{color:#ff9d8b}

@@ -15,6 +15,11 @@ import {
   GRADES,
   clone,
   stats,
+  HEAT_CAUTION,
+  HEAT_DANGER,
+  HEAT_LIMIT,
+  POWER_CAUTION,
+  POWER_CRITICAL,
   partSpec,
   keyOf,
   connected,
@@ -61,6 +66,7 @@ const $ = (s) => document.querySelector(s),
   app = $("#app"),
   clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const partGuide = (p) =>
+  // Resource bands are shared with the simulation so the HUD and report agree.
   PART_GUIDANCE[p.id] || { role: p.cat.toUpperCase(), quick: p.desc };
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let graphicsProfile = getGraphicsProfile();
@@ -1618,12 +1624,29 @@ function updateHUD() {
   for (const [i, id] of ["your", "enemy"].entries()) {
     const v = battle.vehicles[i],
       core = v.modules.find((m) => m.id === "core");
+    const meterRoot = $("#" + id + "-heat")?.closest(".resource-meters");
+    if (meterRoot && !meterRoot.querySelector(".resource-meter")) {
+      meterRoot.innerHTML =
+        '<div class="resource-meter heat-meter"><span>HEAT</span><div><i id="' + id + '-heat"></i></div><b id="' + id + '-heat-value">0°</b></div>' +
+        '<div class="resource-meter power-meter"><span>POWER</span><div><i id="' + id + '-energy"></i></div><b id="' + id + '-energy-value">0</b></div>';
+    }
     $("#" + id + "-hp").style.width = Math.max(0, battle.health(v) * 100) + "%";
     $("#" + id + "-systems").textContent = v.dead
       ? "CORE LOST"
       : `${Math.round(core.hp)} CORE · ${Math.round(v.heat)}° · ${Math.round(v.energy)} PWR${v.disabled > 0 ? " · EMP" : v.overheated ? " · OVERHEAT" : v.chill > 0 ? " · FROZEN" : ""}`;
-    $("#" + id + "-heat").style.width = Math.min(100, v.heat) + "%";
-    $("#" + id + "-energy").style.width = (v.energy / v.maxEnergy) * 100 + "%";
+    const heatRatio = v.heat / HEAT_LIMIT,
+      powerRatio = v.energy / Math.max(1, v.maxEnergy),
+      heatMeter = $("#" + id + "-heat")?.closest(".resource-meter"),
+      powerMeter = $("#" + id + "-energy")?.closest(".resource-meter");
+    $("#" + id + "-heat").style.width = Math.min(100, heatRatio * 100) + "%";
+    $("#" + id + "-energy").style.width = Math.min(100, powerRatio * 100) + "%";
+    $("#" + id + "-heat-value") && ($( "#" + id + "-heat-value").textContent = Math.round(v.heat) + "°");
+    $("#" + id + "-energy-value") && ($( "#" + id + "-energy-value").textContent = Math.round(v.energy));
+    heatMeter?.classList.toggle("caution", v.heat >= HEAT_CAUTION && v.heat < HEAT_DANGER);
+    heatMeter?.classList.toggle("danger", v.heat >= HEAT_DANGER && v.heat < HEAT_LIMIT);
+    heatMeter?.classList.toggle("critical", v.heat >= HEAT_LIMIT);
+    powerMeter?.classList.toggle("caution", powerRatio <= POWER_CAUTION && powerRatio > POWER_CRITICAL);
+    powerMeter?.classList.toggle("critical", powerRatio <= POWER_CRITICAL);
   }
   const secs = Math.max(0, Math.ceil(100 - battle.time));
   $("#fight-time").textContent =
@@ -1645,10 +1668,25 @@ function updateHUD() {
   const warning = $("#machine-warning");
   if (warning) {
     const unstable = v.modules.some((m) => partSpec(m).explosive && m.hp > 0 && (m.instability || 0) >= .55);
-    const state = v.dead ? "CORE LOST" : v.disabled > 0 ? "EMP DISABLED" : v.overheated ? "WEAPONS OVERHEATED" : unstable ? "BATTERY INSTABILITY" : v.energy <= Math.max(5, v.maxEnergy * .12) ? "POWER RESERVE CRITICAL" : "";
+    const powerRatio = v.energy / Math.max(1, v.maxEnergy);
+    const state = v.dead
+      ? "CORE LOST"
+      : v.disabled > 0
+        ? "EMP DISABLED"
+        : v.overheated
+          ? "WEAPONS OVERHEATED · COOLING REQUIRED"
+          : v.heat >= HEAT_DANGER
+            ? "OVERHEAT IMMINENT · OUTPUT REDUCED"
+            : unstable
+              ? "BATTERY INSTABILITY"
+              : powerRatio <= POWER_CRITICAL
+                ? "BROWNOUT · WEAPONS WAITING"
+                : powerRatio <= POWER_CAUTION
+                  ? "POWER LIMITED · OUTPUT REDUCED"
+                  : "";
     warning.hidden = !state;
     warning.textContent = state;
-    warning.className = "machine-warning" + (v.disabled > 0 ? " emp" : v.energy <= Math.max(5, v.maxEnergy * .12) ? " power" : unstable ? " battery" : "");
+    warning.className = "machine-warning" + (v.disabled > 0 ? " emp" : v.overheated || v.heat >= HEAT_DANGER ? " heat" : powerRatio <= POWER_CAUTION ? " power" : unstable ? " battery" : "");
   }
   battle.uiTrace ||= [];
   if (!battle.uiTrace.length || battle.time - battle.uiTrace.at(-1).t >= .25) {
@@ -1666,7 +1704,14 @@ function updateHUD() {
     : battle.replaying
       ? "Same design, behavior, arena, and seed"
       : "Behavior locked · " + v.tactic + " · targets " + v.target;
-  $("#system-readout").innerHTML = Object.entries(ABILITIES)
+  const powerMargin = v.s.power - v.s.energy,
+    heatMargin = v.s.cooling - v.s.heat,
+    powerClass = powerMargin < 0 ? "critical" : powerMargin < 8 ? "caution" : "",
+    heatClass = heatMargin < 0 ? "critical" : heatMargin < 8 ? "caution" : "";
+  $("#system-readout").innerHTML =
+    '<span class="system-chip resource-chip ' + powerClass + '"><b>POWER HEADROOM</b><small>' + (powerMargin >= 0 ? "+" : "") + powerMargin.toFixed(1) + " /s</small></span>" +
+    '<span class="system-chip resource-chip ' + heatClass + '"><b>COOLING HEADROOM</b><small>' + (heatMargin >= 0 ? "+" : "") + heatMargin.toFixed(1) + " /s</small></span>" +
+    Object.entries(ABILITIES)
     .map(([id, a]) => {
       const active =
         id === "vent"
@@ -1988,6 +2033,13 @@ function renderWeaponMonitor() {
         `<span class="weapon-state ${["LOW POWER", "OVERHEAT", "OUT OF ARC", "DESTROYED"].includes(g.status) ? "warning" : ""}"><b>${esc(BY_ID[g.id].name)}${g.count > 1 ? " ×" + g.count : ""}</b><small>${g.status}</small></span>`,
     )
     .join("");
+  $$(".weapon-state").forEach((el) => {
+    const status = el.querySelector("small")?.textContent || "";
+    el.classList.toggle(
+      "warning",
+      ["LOW POWER", "POWER LIMITED", "OVERHEAT", "OVERHEAT RISK", "HEAT LIMITED", "OUT OF ARC", "DESTROYED"].includes(status),
+    );
+  });
 }
 function drawDamageLabels() {
   const node = $("#damage-labels"),
