@@ -18,7 +18,7 @@ const text=(s,max,label)=>{check(typeof s==='string'&&s.trim().length>0&&s.trim(
 const keyCheck=k=>{check(typeof k==='string'&&/^[A-Za-z0-9_-]{16,100}$/.test(k),'Supply a unique Idempotency-Key (16–100 letters, numbers, _ or -).');return k;};
 const bountyQuote=b=>({...rewardQuote(b.reward,b.fee,b.platform_fee_bps),feePolicyVersion:b.fee_policy_version});
 export function canonicalBlueprint(input,locked){
- fields(input,['v','n','p','t','g','d','s','a','e','b','q','fr','ac','gl','pt','no','f','m']);
+ fields(input,['v','n','p','t','g','d','s','a','e','b','q','o','fr','ac','gl','pt','no','f','m']);
  if(input.q)fields(input.q,['mode','combat','credits','parts','mass','weapons']);
  try{const p=locked?{...input,a:locked.a,e:0,q:locked.q,b:locked.b,o:locked.o}:input;const c=unpackChallenge(p);return packChallenge(c.machine,c.arena,0,c.rules,c.objective||'reactor');}catch(e){throw new ApiError(400,e.message);}
 }
