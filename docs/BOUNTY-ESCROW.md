@@ -4,7 +4,7 @@
 
 The retired v1 escrow remains immutable at [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494). Its historical record remains in [`contracts/deployments/tempo-mainnet.json`](../contracts/deployments/tempo-mainnet.json); do not send it new bounty funds.
 
-The public application prepares direct wallet calls to this escrow and verifies the emitted events. It does not custody player funds or contain settlement private keys. Live small-amount trials use the two local encrypted result signers; each completed attempt must receive both signatures before its escrow deadline.
+The public application prepares direct wallet calls to this escrow and verifies the emitted events. It does not custody player funds or contain settlement private keys. The current V4 small-amount trial uses one fixed settlement signer (`settlementQuorum = 1`) so the Worker can settle automatically; that is a limited-trial trust boundary, not independent multi-party protection. Do not increase bounty sizes until a reviewed multi-signer contract version is deployed.
 
 ## Live immutable configuration
 
@@ -14,10 +14,11 @@ The public application prepares direct wallet calls to this escrow and verifies 
 | Token          | pathUSD, `0x20C0000000000000000000000000000000000000` (6 decimals)       |
 | Platform fee   | 2.5% (`250` bps), recipient `0xc20131e9132888993de6519D486E5558A5DbCb7A` |
 | Attempt window | 600 seconds: 3–5 minutes to build plus signer/relay reserve              |
-| Pause guardian | `0xD95CBf3A061eB26d0BA641703c66a40f07C44Dc5`                             |
-| Settlement     | Both listed signers must provide an EIP-712 result signature             |
+| Pause guardian | `<configured V4 guardian>`                                             |
+| Agent relayer  | `<configured V4 relayer>`                                              |
+| Settlement     | V4: one configured EIP-712 result signer; V3/legacy records may differ   |
 
-The settings above were read from the deployed contract after verification. The contract is hardened and source-verified, but it has not had an independent third-party audit.
+The token, fee and attempt-window values are the V4 deployment policy. Replace the address fields with the values printed by the V4 deployment and verify the resulting bytecode. This is a code-level audit, not an independent third-party audit.
 
 ## What the contract protects
 
@@ -28,7 +29,7 @@ The settings above were read from the deployed contract after verification. The 
 - The creator receives the separately disclosed entry amount after a completed non-technical attempt. The platform receives no hidden entry fee.
 - A creator cannot cancel or expire while an attempt is active. If no signed result settles before the immutable deadline, anyone can finalize the timeout and the entry goes to the bounty creator. Expiry only returns an idle bounty's unused reward reserve.
 - The pause guardian can stop new bounties and entries, but cannot block settlement, cancellation, expiry, or player refunds. There is no owner withdrawal, upgrade function, proxy, rescue method, or arbitrary transfer function.
-- A battle outcome needs a fixed quorum of distinct EIP-712 signatures. The constructor permanently fixes the signer set and quorum. Use two independently controlled signers for a public release.
+- A battle outcome needs the constructor's fixed EIP-712 quorum. Current V4 uses one signer for a small trial; the constructor permanently fixes that set and quorum. Use an independently reviewed multi-signer contract for a public release.
 - Exact token balance checks reject fee-on-transfer or non-conforming token behavior. All value fields are integer token base units; pathUSD uses six decimals.
 
 ## What it does not prove
@@ -56,7 +57,7 @@ The UI must show the gross reward, 2.5% fee, winner payout, entry amount, entry 
 
 The defender blueprint is committed by the bounty's immutable `termsHash`, but it is not returned by public Worker routes. Before entry, a bounty exposes its arena, terrain, construction rules, construction cost, mass, fitted-part count, weapon count and economic terms. A confirmed `AttemptEntered` event grants the exact defender only to that challenger account.
 
-That paid challenger gets a server-recorded build deadline, then submits one valid counter with `POST /api/attempts/:id/deploy`. The Worker commits the defender, challenger, arena, seed, engine hash and simulation result to `resultHash` before the two signers attest it. Other users cannot obtain the defender from bounty, validation, attempt or replay routes.
+That paid challenger gets a server-recorded build deadline, then submits one valid counter with `POST /api/attempts/:id/deploy`. The Worker commits the defender, challenger, arena, seed, engine hash and simulation result to `resultHash` before the configured signer attests it. Other users cannot obtain the defender from bounty, validation, attempt or replay routes.
 
 This escrow's 600-second attempt window gives the Worker a cost-scaled three-to-five-minute construction phase and leaves at least five minutes for the signer quorum and wallet relay. Once the deadline passes, settlement is rejected and the public timeout finalizer sends the entry to the creator. Do not point the public Worker at this escrow until its address, immutable fee constants, signer set, source verification, and signer service have been reviewed and pinned in `runtimeConfig`.
 
@@ -77,15 +78,41 @@ The tests cover payout accounting, fixed fees, loss/draw reserve retention, acti
 Do not take a payment through the Site until all of these are true:
 
 1. Have an independent Solidity reviewer inspect the exact deployed bytecode and source.
-2. Rehearse with two independently controlled settlement keys, the pause guardian, expiry, cancellation, incorrect signatures, signer outage, wrong token, and wallet rejection.
-3. Replace the local manual signer process with a separately operated replay/attestation service. The retired custodial payout queue must remain disabled.
+2. Rehearse the configured V4 signer, pause guardian, expiry, cancellation, incorrect signatures, signer outage, wrong token, and wallet rejection. A future multi-signer release must rehearse each independent signer.
+3. Keep the V4 settlement signer key in a dedicated server secret store and replace the trial signer with a separately operated multi-signer replay/attestation service before public funds. The retired custodial payout queue must remain disabled.
 4. Rehearse direct wallet calls for `approve`, `createBounty`, `enterBounty`, settlement, timeout forfeiture, cancellation and expiry. For V4, also rehearse exact MPP challenge/retry, relayer allowance, relay recovery and refund behavior.
 5. Display this contract address, token, gross reward, 2.5% fee, winner payout, entry amount, expiry, attempt deadline, signer quorum, result hash, and relevant events before every signing request.
 6. Test first with a deliberately low real-money cap and no fee sponsorship. Paid-entry prize rules, tax, sanctions, consumer protection, and payment-provider requirements still need an operator review.
 
 Tempo documents Foundry deployment and verification at <https://docs.tempo.xyz/sdk/foundry> and <https://docs.tempo.xyz/quickstart/verify-contracts>. Tempo mainnet is chain ID 4217 and pathUSD uses six decimals: <https://docs.tempo.xyz/protocol/exchange/pathUSD>.
 
-## Interactive deployment only
+## V4 deployment with the desktop launcher
+
+The current V4 script deploys the pathUSD escrow with a separate pause guardian, agent relayer and settlement signer. It reads public constructor values from the ignored local file and never reads a relayer or settlement private key.
+
+```powershell
+cd C:\Users\soubh\Documents\Codex\2026-09-12\hey\work\github-war-machine
+.\scripts\deploy-tempo-escrow-v4.ps1 -Initialize
+```
+
+Edit `contracts\deployments\tempo-mainnet-v4.local.env` with three distinct public addresses and a `600` second window, preview, then broadcast with the existing encrypted deployer keystore:
+
+```powershell
+.\scripts\deploy-tempo-escrow-v4.ps1 `
+  -DeployerAddress 0xCA57cA8E21670fCaD76aD6485223fc231fd020D5 `
+  -KeystorePath "$env:LOCALAPPDATA\WarMachines\deployer\war-machines-tempo-deployer"
+
+.\scripts\deploy-tempo-escrow-v4.ps1 `
+  -DeployerAddress 0xCA57cA8E21670fCaD76aD6485223fc231fd020D5 `
+  -KeystorePath "$env:LOCALAPPDATA\WarMachines\deployer\war-machines-tempo-deployer" `
+  -Broadcast
+```
+
+Type `DEPLOY` exactly at the confirmation prompt. Record the new V4 address and verification result, then configure the Worker with the same escrow, signer and relayer addresses. Keep the private settlement, relayer and MPP secret values in the hosting provider's secret store only.
+
+## Legacy V3 and browser deployment (historical only)
+
+The commands below target older direct-wallet contracts and are retained only for reading historical deployments. Do not use them for the current V4 native-MPP release.
 
 Copy `contracts/deployments/tempo-mainnet.env.example`, enter public addresses only, and load it in the shell. The deployer must remain in a wallet or hardware-backed interactive signer; never paste a private key into this file, the shell history, the repository, ChatGPT Sites, or chat.
 
@@ -104,7 +131,7 @@ It deliberately asks for the deployer key interactively rather than accepting it
 operator can inspect the destination, bytecode, chain, token, signer quorum, pause guardian, and
 transaction before broadcast.
 
-## Deploying with a browser Tempo wallet
+## Legacy browser deployment (historical only)
 
 An EVM-compatible Tempo wallet can deploy this contract without revealing its key to this
 repository or to ChatGPT. Use this only after the mainnet deployment gate above has been met.
@@ -142,7 +169,7 @@ repository or to ChatGPT. Use this only after the mainnet deployment gate above 
 Do not send `pathUSD` directly to the deployed address. The contract only accepts funds through
 `createBounty` and `enterBounty`, after a wallet approves the exact token amount.
 
-## Desktop Foundry launcher
+## Legacy desktop Foundry launcher (historical only)
 
 `scripts/deploy-tempo-escrow.ps1` is prepared for a burner deployer. It only reads public
 configuration values and asks Foundry for the burner key in the desktop terminal when
