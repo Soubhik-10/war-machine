@@ -4169,10 +4169,15 @@ export function createBountyUI(adapter) {
       pending &&
       (pending.path !== path ||
         JSON.stringify(pending.body) !== JSON.stringify(body))
-    )
-      throw Error(
-        "An earlier request needs recovery. Open the bounty board and choose Recover request.",
-      );
+    ) {
+      if (pending.transactionHash)
+        throw Error(
+          "A wallet transaction is already saved for a different request. Recover that payment before starting another one.",
+        );
+      // No transaction hash means the wallet has not been charged. A new
+      // amount or bounty action can safely replace the abandoned intent.
+      clearOutbox();
+    }
     const request = pending || {
       version: OUTBOX_VERSION,
       path,
@@ -4428,6 +4433,10 @@ export function createBountyUI(adapter) {
           .join(
             "",
           )}</div><button id="refresh-contracts">\u27F3 Refresh board</button></div><div class="contract-search"><input id="contract-search" type="search" aria-label="Search bounties" placeholder="Search machines or bounties" value="\${esc(searchText)}"><select id="arena-filter" aria-label="Filter bounties by arena"><option value="">All arenas</option>\${ARENAS.map((a) => \`<option value="\${a.id}" \${a.id === arenaFilter ? "selected" : ""}>\${esc(a.name)}</option>\`).join("")}</select><input id="fee-filter" type="number" min="0" step="\${runtime.paid ? ".01" : "1"}" aria-label="Maximum entry fee" placeholder="Max entry \xB7 any" value="\${esc(feeFilter)}"></div><div class="contract-grid" id="contract-grid"></div><div class="notice bounty-footnote">Construction limits are separate from bounty funds. An official attempt locks both builds, the arena, terrain, and rules. A fresh server seed decides the trial. Practice is free and never pays rewards.</div>\`;
+      if (runtime.paid) {
+        const feeInput = $("#fee-filter");
+        if (feeInput) feeInput.step = "0.01";
+      }
       const draw = () => {
         const shown = data.filter(
           (b) =>
@@ -4681,6 +4690,19 @@ export function createBountyUI(adapter) {
         .join(
           "",
         )}</div><p class="hint">Custom cap 0 = no limit. Unlimited removes all four caps; supports and the 9\xD79\xD73 grid still apply.</p><div class="form-two"><label class="field"><span>Duration \xB7 hours (0 = no deadline)</span><input id="contract-hours" type="number" min="0" max="8760" step="1" value="24" required></label><label class="field"><span>Sharing</span><select id="contract-listed"><option value="false">Unlisted \xB7 share by link</option><option value="true">Listed on bounty board</option></select></label></div><p class="hint">Anyone with an unlisted link can scout this bounty. Any Tempo Wallet can pay its posted entry and attempt it. Terms lock after funding; close an idle bounty to return its unused reward.</p><p id="bounty-error" class="error-message" role="status"></p><button class="primary contract-enter" id="fund-contract" type="submit">Fund & create bounty</button></section></form>\`;
+    if (runtime.paid) {
+      const entryInput = $("#contract-entry"),
+        rewardInput = $("#contract-reward");
+      if (entryInput) {
+        entryInput.min = "0.01";
+        entryInput.step = "0.01";
+        entryInput.value = "0.01";
+      }
+      if (rewardInput) {
+        rewardInput.min = "0.01";
+        rewardInput.step = "0.01";
+      }
+    }
     wireHeader();
     adapter.thumbnail($("#create-preview"), build);
     $("#contract-class").value = ["standard", "unlimited"].includes(

@@ -800,6 +800,9 @@ test("paid bounty actions establish a Tempo session only when payment starts", a
   assert.match(source, /request\.intentId && request\.transactionHash/);
   assert.match(source, /prepared\.transactionHash/);
   assert.match(source, /Discard request/);
+  assert.match(source, /A wallet transaction is already saved for a different request/);
+  assert.match(source, /No transaction hash means the wallet has not been charged/);
+  assert.match(source, /entryInput\.value = "0\.01"/);
   assert.match(source, /Tempo RPC/i);
 });
 
