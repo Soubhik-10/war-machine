@@ -66,8 +66,10 @@ The 2.5% fee is deducted only from a win: `1.00` gross reward pays `0.975` to th
 An entry request contains only the accepted price limits:
 
 ```json
-{ "maxEntry": "0.10", "maxPlatformFeeBps": 250 }
+{ "maxEntry": "0.10", "maxPlatformFeeBps": 250, "participantName": "Copper Fox", "showAddress": false }
 ```
+
+`participantName` is optional (up to 28 characters); an empty value appears as **Anonymous engineer**. `showAddress` is opt in and defaults to false. When enabled, completed attempt cards show only a shortened participant wallet address. These fields are presentation metadata; the wallet remains the authority for payment and verification.
 
 After its `enterBounty` event is confirmed, the response has status `engineering`, an account-private `defender` blueprint, and the exact `build.deadline`. The current escrow provides about three minutes because two minutes remain reserved for result signatures. Practice and validation may now use `bountyId` with that same authenticated account. Submit exactly one final build before the deadline:
 
