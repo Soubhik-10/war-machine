@@ -107,7 +107,6 @@ let arenaId = "foundry",
 let arenaIdleRAF = 0,
   modalCleanup = null,
   replaceFitted = false,
-  focusBattle = true,
   scoutRenderer = null,
   bountyClock = 0;
 let portal = null,
@@ -1324,7 +1323,7 @@ function arenaView() {
  <section class="combat-stage" id="combat-stage"><div class="arena-screen"><canvas id="arena-canvas" width="1200" height="800" tabindex="0" aria-label="Autonomous battle arena. Drag to orbit, pinch to zoom. Tap a part to inspect its condition."></canvas>
  <div id="damage-labels" class="damage-labels" aria-hidden="true"></div><div class="fight-hud"><div class="fighter-hud"><strong>${esc(machine.name)}</strong><div class="meter"><i id="your-hp" style="width:100%"></i></div><small id="your-systems">YOUR MACHINE · ${stats(machine).cost} ¢</small><div class="resource-meters"><span title="Heat"><i id="your-heat"></i></span><span title="Energy"><i id="your-energy"></i></span></div></div><div class="timer"><span id="fight-time">1:40</span><small id="fight-state">STANDBY</small></div><div class="fighter-hud"><strong>${esc(enemy.name)}</strong><div class="meter"><i id="enemy-hp" style="width:100%"></i></div><small id="enemy-systems">RIVAL MACHINE · ${stats(enemy).cost} ¢</small><div class="resource-meters"><span title="Heat"><i id="enemy-heat"></i></span><span title="Energy"><i id="enemy-energy"></i></span></div></div></div>
  <div class="arena-corner"><span id="terrain-label">ROAD</span><span id="reactor-label">REACTOR NEUTRAL</span></div><div class="minimap-wrap"><canvas id="minimap" width="240" height="160" aria-label="Arena overview. Machine positions and objectives."></canvas><small>TACTICAL MAP</small></div>
- <div class="fight-overlay" id="fight-overlay"><div class="match-card"><small>${challenge ? "FRIEND CHALLENGE" : meta.rank + " SHAKEDOWN"}</small><h2>${esc(enemy.name)}</h2><p>${esc(challenge ? "Break your friend’s machine with a counter built to the locked rules." : meta.hint)}</p><div class="engineering-contract"><span class="auto-indicator"></span><div><strong>ENGINEERING ONLY</strong><small>Both machines follow their saved doctrine. Systems activate automatically.</small></div></div><label class="toggle focus-battle-option"><input id="auto-focus-battle" type="checkbox" ${focusBattle ? "checked" : ""}> Focus battle when deployed</label><button class="primary" id="start-battle">Deploy machine ↗</button><p class="mode-note">100 SECOND TRIAL · SAME SEED, SAME RESULT</p></div></div>
+ <div class="fight-overlay" id="fight-overlay"><div class="match-card"><small>${challenge ? "FRIEND CHALLENGE" : meta.rank + " SHAKEDOWN"}</small><h2>${esc(enemy.name)}</h2><p>${esc(challenge ? "Break your friend’s machine with a counter built to the locked rules." : meta.hint)}</p><div class="engineering-contract"><span class="auto-indicator"></span><div><strong>ENGINEERING ONLY</strong><small>Both machines follow their saved doctrine. Systems activate automatically.</small></div></div><button class="primary" id="start-battle">Deploy machine ↗</button><p class="mode-note">100 SECOND TRIAL · SAME SEED, SAME RESULT</p></div></div>
  </div><div class="arena-camera-bar"><div class="camera-follow"><span>CAMERA</span><select id="camera-follow" aria-label="Camera follow"><option value="both">Frame both</option><option value="you">Follow you</option><option value="rival">Follow rival</option><option value="free">Free camera</option></select></div><div class="group"><button data-fight-camera="left" aria-label="Orbit left">↶</button><button data-fight-camera="right" aria-label="Orbit right">↷</button><button data-fight-camera="fit">⌖ Fit</button><button data-fight-camera="in" aria-label="Zoom in">+</button><button data-fight-camera="out" aria-label="Zoom out">−</button><button id="focus-battle-btn">Focus battle</button><button id="theater-btn" title="Fullscreen arena">⛶</button></div></div>
  <div class="observation-deck"><div class="observation-heading"><span class="auto-indicator"></span><strong id="observation-status">AUTONOMOUS SYSTEMS</strong><span id="observation-hint">Doctrine locked at deployment</span></div><div class="weapons-monitor" id="weapons-monitor"></div><div class="system-readout" id="system-readout"></div></div>
  <div class="panel battle-toolbar"><div class="group"><button id="pause-btn" disabled>Ⅱ Pause</button><button id="replay-btn" disabled>↻ Replay</button><button id="inspect-btn">◎ Damage</button></div><div class="group"><span class="mode-note">SPEED</span>${[0.5, 1, 2, 4].map((s) => `<button data-speed="${s}" class="${speed === s ? "active" : ""}">${s}×</button>`).join("")}</div></div></section>
@@ -1345,7 +1344,6 @@ function arenaView() {
 }
 function bindArena() {
   $("#scout-rival").onclick = scoutRival;
-  $("#auto-focus-battle").onchange = (e) => (focusBattle = e.target.checked);
   $("#focus-battle-btn").onclick = toggleBattleFocus;
   $("#mirror-rival").onclick = () => {
     mirrorOpponent = true;
@@ -1517,10 +1515,6 @@ function startBattle(replay = false) {
   $("#seed-btn").disabled = true;
   $$("[data-enemy]").forEach((b) => (b.disabled = true));
   $("#mirror-rival").disabled = true;
-  if (focusBattle) {
-    $("#combat-stage").classList.add("theater");
-    $("#focus-battle-btn").textContent = "Back to page";
-  }
   if (sound) initAudio();
   $("#arena-canvas").focus({ preventScroll: true });
   raf = requestAnimationFrame(frame);
@@ -2095,9 +2089,34 @@ function manual() {
  <section><h3>Height changes the fight</h3><p>Shots travel through three-dimensional space. Elevated guns can shoot over low obstacles and ground armor. Towers are exposed and reduce steering stability. Mortars arc over cover and explode on impact. Damage to a support can bring every part above it down.</p></section>
  <section><h3>Use the ground</h3><p>Sand and mud slow wheels; treads retain most of their traction. Ice cools systems but reduces grip. Oil also reduces grip. Furnace vents erupt for four seconds in every twelve, starting at eight seconds. Lava and active vents damage parts and add heat. Redline Ridge has raised firing positions. Coolant channels increase cooling by 70% but slow wheels; rubble cuts wheel speed by 35%. Treads preserve most speed on both. Raised terrain also blocks low shots crossing the ridge. Most cover can be destroyed.</p></section>
  <section><h3>Fight for resources</h3><p>Occupy the central ring alone for three seconds to gain eight energy per second. Leave it and you lose control. Green caches restore up to 100 HP across surviving parts and 30 energy, then respawn after 25 seconds. At 55 seconds the containment field starts closing. At 100 seconds the higher percentage of surviving integrity wins; within 2.5 points is a draw.</p></section>
- <section><h3>Test and replay</h3><p>Every match runs automatically from the saved doctrine and seed. Exact replay repeats that same experiment. Playback speed and camera movement only change how you watch. Focus battle gives the machines room on small screens. Tap a part to inspect it. Weapon status explains reloads, firing arcs, and shortages; Battle report shows damage contribution and refit advice. Scout rival before building your counter. Older live-command challenges import as autonomous trials.</p></section>
+ <section><h3>Test and replay</h3><p>Every match runs automatically from the saved doctrine and seed. Exact replay repeats that same experiment. Playback speed and camera movement only change how you watch. Tap a part to inspect it. Weapon status explains reloads, firing arcs, and shortages; Battle report shows damage contribution and refit advice. Scout rival before building your counter. Older live-command challenges import as autonomous trials.</p></section>
  <section><h3>Keep and share your machines</h3><p>Your build autosaves on this device. Save up to eight named blueprints or export JSON files. Old Foundry blueprints still import. Challenge links contain all parts, layers, upgrades, colors, front direction, arena, seed, and match rules. Host the static game anywhere you choose. Your friend needs access to your host; for large builds or another host, exchange JSON challenge files. Sandbox battles stay on each player’s device. Bounty links use your game server and keep authoritative results there.</p></section><section><h3>Tempo bounties</h3><p>Connect the Tempo wallet that will fund, enter or receive a reward. Creating and entering a bounty each send one transaction that batches the pathUSD approval and direct escrow call. Use local simulations to iterate before paying an official entry. The Worker commits the locked builds, terrain and engine release, then two result signers attest the deterministic outcome before the escrow settles the exact payout. One challenger is accepted at a time. A loss, draw, or missed counter-build deadline sends the entry to the bounty creator; creators can cancel an idle bounty.</p></section></div><div class="modal-footer"><button class="primary" data-close>Back to the foundry</button></div>`,
   );
+}
+function rulesView() {
+  restoreReplay();
+  cleanupView();
+  view = "rules";
+  window.history.replaceState(null, "", "#rules");
+  setNav();
+  app.innerHTML = `<div class="page-heading rules-heading"><div><span class="eyebrow">FIELD MANUAL / COMBAT RULES</span><h1>HOW THE FIGHT WORKS.</h1><p>Build a machine, program its doctrine, and let the simulation decide what survives.</p></div><div class="heading-actions"><button id="rules-workshop">Open workshop</button><button id="rules-arena" class="primary">Watch a test battle</button></div></div>
+  <div class="rules-page">
+    <section class="panel rules-hero"><div><span class="eyebrow">THE OBJECTIVE</span><h2>Break the command core.</h2><p>Every official match is a deterministic engineering trial. Both machines use their saved parts, front direction, doctrine, terrain and the same seed. No hidden player input changes the result.</p></div><div class="rules-hero-stats"><div><strong>100 s</strong><span>match clock</span></div><div><strong>60 Hz</strong><span>simulation</span></div><div><strong>2.5%</strong><span>draw margin</span></div></div></section>
+    <div class="rules-jump" aria-label="Rules sections"><span>JUMP TO</span><a href="#rules-result">Result</a><a href="#rules-combat">Combat</a><a href="#rules-systems">Systems</a><a href="#rules-terrain">Terrain</a><a href="#rules-bounties">Bounties</a></div>
+    <section class="rules-section panel" id="rules-result"><div class="rules-section-head"><span class="rules-index">01</span><div><span class="eyebrow">RESULT</span><h2>How a winner is decided</h2></div></div><div class="rules-section-body rules-result-grid"><div class="rule-step"><b>01</b><h3>Destroy a core</h3><p>Destroying the rival command core immediately wins the match. If both cores are destroyed in the same exchange, the result is a draw.</p></div><div class="rule-step"><b>02</b><h3>Survive the clock</h3><p>If both cores are still alive at 100 seconds, the engine compares the percentage of starting module health each machine has left.</p></div><div class="rule-step"><b>03</b><h3>Resolve close calls</h3><p>The higher integrity wins. A difference under 2.5 percentage points is a draw. Integrity is about surviving structure, not just the core.</p></div></div></section>
+    <section class="rules-section panel" id="rules-combat"><div class="rules-section-head"><span class="rules-index">02</span><div><span class="eyebrow">AUTONOMOUS COMBAT</span><h2>How machines choose their fight</h2></div></div><div class="rules-section-body rules-two-col"><div><h3>Movement doctrine</h3><ul class="rules-list"><li><b>Balanced</b><span>Hold the configured engagement range.</span></li><li><b>Kite</b><span>Back away while keeping weapons on target.</span></li><li><b>Flank</b><span>Circle to expose weaker sides and change firing angles.</span></li><li><b>Ram</b><span>Close distance and collide at short range.</span></li></ul></div><div><h3>Target priority</h3><ul class="rules-list"><li><b>Weapons</b><span>Strip the rival's damage output first.</span></li><li><b>Power</b><span>Attack generators, batteries, cooling and shields.</span></li><li><b>Mobility</b><span>Break wheels, treads and hover systems.</span></li><li><b>Core or nearest</b><span>Focus the command core or the closest valid part.</span></li></ul></div><div class="rules-callout"><h3>Facing and firing arcs</h3><p>The marked front is the machine's fighting nose. Each mount has its own facing and firing arc. A weapon can be in range and still miss its opportunity if it is mounted backwards or the target is outside its arc. The engine leads moving targets and respects smoke, cover, height and projectile travel time.</p></div></div></section>
+    <section class="rules-section panel" id="rules-systems"><div class="rules-section-head"><span class="rules-index">03</span><div><span class="eyebrow">POWER, HEAT AND DAMAGE</span><h2>What keeps a machine alive</h2></div></div><div class="rules-section-body rules-card-grid"><article class="rules-card"><span class="rules-card-label">HEAT</span><h3>Firepower has a limit</h3><p>Every shot adds heat. Radiators and cooling systems remove it, while hot terrain and heaters add more. At 100 heat, weapons shut down. They return below 35 heat. Automatic coolant purge removes 45 heat, costs 20 energy, and pauses guns for 1.2 seconds.</p></article><article class="rules-card"><span class="rules-card-label">ENERGY</span><h3>Power the machine</h3><p>Energy starts at the machine's capacity and changes every simulation tick from generators, environment drain and reactor control. Weapons, shields, repairs, interceptors and abilities spend it. Boost costs 25 energy and 12 heat; brace costs 30 energy for 45% damage reduction for 3 seconds; interceptors cost 8 energy per shot. At low power, weapons wait and support systems lose their powered benefits.</p></article><article class="rules-card"><span class="rules-card-label">DAMAGE</span><h3>Protect the right layer</h3><p>Armor, shields, thermal and blast resistance, brace systems and reactive armor reduce incoming damage. Repair systems restore damaged parts while spending energy. Destroyed batteries can explode into nearby parts. Destroyed weapons, mobility, cooling and generators stop contributing immediately.</p></article><article class="rules-card"><span class="rules-card-label">STRUCTURE</span><h3>Connections matter</h3><p>Upper parts need support below them. If a frame or deck is destroyed, unsupported parts collapse. Towers improve firing positions but are exposed and make the machine harder to turn.</p></article></div></section>
+    <section class="rules-section panel" id="rules-terrain"><div class="rules-section-head"><span class="rules-index">04</span><div><span class="eyebrow">ARENA CONDITIONS</span><h2>Build for the ground you choose</h2></div></div><div class="rules-section-body"><p class="rules-intro">Terrain is sampled at each machine's position, so moving a few metres can change the tradeoff. Hovering avoids most contact hazards but still suffers ambient heat and cold.</p><div class="terrain-rule-grid"><div><b>Road</b><span>Normal traction and speed.</span></div><div><b>Sand and mud</b><span>Slow wheels; treads retain more speed.</span></div><div><b>Oil and ice</b><span>Reduce grip. Ice also improves cooling.</span></div><div><b>Snow</b><span>Slows wheels; winter tires help.</span></div><div><b>Brine</b><span>Drains energy over time.</span></div><div><b>Lava and vents</b><span>Add heat and damage grounded machines.</span></div><div><b>Rubble and coolant</b><span>Slow wheels; coolant increases cooling.</span></div><div><b>Ridges</b><span>Raise firing positions and block low shots.</span></div></div><div class="rules-arena-strip"><div><b>Central reactor</b><span>Hold it alone for 3 seconds to gain 8 energy per second. Leave the ring and control is lost.</span></div><div><b>Repair caches</b><span>Restore up to 100 health and 30 energy. They return after 25 seconds.</span></div><div><b>Containment field</b><span>Starts closing at 55 seconds. Machines outside take core damage as the ring contracts.</span></div></div></div></section>
+    <section class="rules-section panel" id="rules-build"><div class="rules-section-head"><span class="rules-index">05</span><div><span class="eyebrow">ENGINEERING LIMITS</span><h2>Build within the class</h2></div></div><div class="rules-section-body rules-build-grid"><div><h3>Know the standard class</h3><p>The default class allows 1,200 credits, 32 fitted parts, 360 tonnes and 8 weapons. The command core is required but does not count toward the fitted-part limit. Custom and unlimited classes can change the caps.</p></div><div><h3>Choose a tradeoff</h3><p>Every fitted part has a credit cost, mass, health and system contribution. More armor adds mass. More weapons add damage but also reload pressure, energy demand and heat. Elevated mounts cost more and still need support.</p></div><div><h3>Make stacking meaningful</h3><p>The grid has three levels. Additional copies of one weapon share fire-control bandwidth and reload more slowly after the first two. A compact, supported design can outperform a taller pile of identical guns.</p></div></div></section>
+    <section class="rules-section panel" id="rules-bounties"><div class="rules-section-head"><span class="rules-index">06</span><div><span class="eyebrow">PAID CHALLENGES</span><h2>How a bounty uses the result</h2></div></div><div class="rules-section-body rules-bounty-flow"><div class="bounty-flow-step"><b>01</b><span>Creator funds a reward and locks the machine, arena, seed and limits.</span></div><div class="bounty-flow-step"><b>02</b><span>Challenger pays the entry and receives the exact defender plus a timed build window.</span></div><div class="bounty-flow-step"><b>03</b><span>The deterministic battle runs once. The result is recorded and independently attested before settlement.</span></div><div class="bounty-flow-step"><b>04</b><span>A challenger win pays 97.5% of the gross reward after the 2.5% platform fee. Loss, draw or missed deadline sends the entry to the creator.</span></div></div><p class="rules-footnote">The payment layer settles the engine result; it does not change the combat rules. Watch the full simulation in Proving grounds before the result is finalized.</p></section>
+    <div class="rules-actions"><button id="rules-workshop-bottom" class="primary">Build a machine</button><button id="rules-arena-bottom">Run a proving-ground test</button><button id="rules-bounties-bottom">Browse bounties</button></div>
+  </div>`;
+  $("#rules-workshop").onclick = workshop;
+  $("#rules-arena").onclick = arenaView;
+  $("#rules-workshop-bottom").onclick = workshop;
+  $("#rules-arena-bottom").onclick = arenaView;
+  $("#rules-bounties-bottom").onclick = () => bountyUI.open();
+  window.scrollTo(0, 0);
 }
 $("#modal").addEventListener("close", () => {
   modalCleanup?.();
@@ -2385,6 +2404,8 @@ $$("[data-view]").forEach(
         ? workshop()
         : b.dataset.view === "bounties"
           ? bountyUI.open()
+          : b.dataset.view === "rules"
+            ? rulesView()
           : b.dataset.view === "agents"
             ? portal.agents()
             : arenaView();
@@ -2449,6 +2470,10 @@ window.addEventListener("hashchange", () => {
     arenaView();
     return;
   }
+  if (location.hash === "#rules") {
+    rulesView();
+    return;
+  }
   if (location.hash === "#bounties" || location.hash.startsWith("#bounty=")) {
     void bountyUI.open(
       location.hash.startsWith("#bounty=") ? location.hash.slice(8) : undefined,
@@ -2491,6 +2516,7 @@ if (initialRoute.startsWith("#build=")) {
   );
 else if (initialRoute === "#workshop") workshop();
 else if (initialRoute === "#arena") arenaView();
+else if (initialRoute === "#rules") rulesView();
 else if (initialRoute === "#agents") portal.agents();
 else portal.home();
 if (document.modelContext?.registerTool) {
