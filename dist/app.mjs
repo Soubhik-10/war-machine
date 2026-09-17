@@ -20,6 +20,7 @@ import {
   connected,
   validate,
   ARENAS,
+  OBJECTIVES,
   ENEMIES,
   packChallenge,
   unpackChallenge,
@@ -91,6 +92,7 @@ let builderRenderer = null,
   benchRAF = 0,
   benchDirty = true;
 let arenaId = "foundry",
+  objective = "reactor",
   enemyIndex = 0,
   seed = 42817,
   challenge = null,
@@ -167,6 +169,7 @@ try {
     machine = saved.machine;
     rules = saved.rules;
     arenaId = saved.arena;
+    objective = saved.objective || "reactor";
     seed = saved.seed;
     battleMode = rules.combat;
     rotation = machine.front || 0;
@@ -196,7 +199,7 @@ function save() {
   try {
     localStorage.setItem(
       "wm-machine-v3",
-      JSON.stringify(packChallenge(machine, arenaId, seed, rules)),
+      JSON.stringify(packChallenge(machine, arenaId, seed, rules, objective)),
     );
   } catch {
     $(".local-tag").textContent = "EXPORT TO SAVE";
@@ -659,7 +662,7 @@ function updateReadout() {
   $("#class-label").textContent = rules.mode.toUpperCase();
   $("#rules-footer").textContent = rulesLabel(rules);
   $("#stats").innerHTML =
-    `<div class="budget-row"><strong>${s.cost.toLocaleString()} <span>¢</span></strong><span>${rules.credits === null ? "NO CREDIT CAP" : (rules.credits - s.cost).toLocaleString() + " left"}</span></div><div class="meter"><i style="width:${rules.credits === null ? 0 : Math.min(100, (s.cost / rules.credits) * 100)}%"></i></div><div class="limit-chips"><span class="${over("parts", s.parts) ? "warn" : ""}">${s.parts}/${cap("parts")} fitted</span><span class="${over("mass", s.mass) ? "warn" : ""}">${s.mass}/${cap("mass")} t</span><span class="${over("weapons", s.weapons) ? "warn" : ""}">${s.weapons}/${cap("weapons")} weapons</span></div><div class="stat-grid"><div><small>INTEGRITY</small><strong>${s.hp.toLocaleString()} <small>HP</small></strong></div><div><small>FIREPOWER</small><strong>${Math.round(s.dps)} <small>DPS</small></strong></div><div><small>TOP SPEED</small><strong>${Math.round(s.speed)} <small>m/s</small></strong></div><div><small>STABILITY</small><strong>${Math.round(s.stability * 100)}<small>%</small></strong></div></div><div class="system-row"><span>Power / demand</span><b class="${s.power < s.energy ? "warn" : ""}">${Math.round(s.power)} / ${Math.ceil(s.energy)}</b></div><div class="system-row"><span>Cooling / heat</span><b class="${s.cooling < s.heat ? "warn" : ""}">${Math.round(s.cooling)} / ${Math.ceil(s.heat)}</b></div><div class="system-row"><span>Shield / energy reserve</span><b>${Math.round(s.shield)} / ${s.capacity}</b></div>`;
+    `<div class="budget-row"><strong>${s.cost.toLocaleString()} <span>¢</span></strong><span>${rules.credits === null ? "NO CREDIT CAP" : (rules.credits - s.cost).toLocaleString() + " left"}</span></div><div class="meter"><i style="width:${rules.credits === null ? 0 : Math.min(100, (s.cost / rules.credits) * 100)}%"></i></div><div class="limit-chips"><span class="${over("parts", s.parts) ? "warn" : ""}">${s.parts}/${cap("parts")} fitted</span><span class="${over("mass", s.mass) ? "warn" : ""}">${s.mass}/${cap("mass")} t</span><span class="${over("weapons", s.weapons) ? "warn" : ""}">${s.weapons}/${cap("weapons")} weapons</span></div><div class="stat-grid"><div><small>INTEGRITY</small><strong>${s.hp.toLocaleString()} <small>HP</small></strong></div><div><small>FIREPOWER</small><strong>${Math.round(s.dps)} <small>DPS</small></strong></div><div><small>TOP SPEED</small><strong>${Math.round(s.speed)} <small>m/s</small></strong></div><div><small>STABILITY</small><strong>${Math.round(s.stability * 100)}<small>%</small></strong></div></div><div class="system-row"><span>Power / demand</span><b class="${s.power < s.energy ? "warn" : ""}">${Math.round(s.power)} / ${Math.ceil(s.energy)}</b></div><div class="system-row"><span>Cooling / heat</span><b class="${s.cooling < s.heat ? "warn" : ""}">${Math.round(s.cooling)} / ${Math.ceil(s.heat)}</b></div><div class="system-row"><span>Shield / energy reserve</span><b>${Math.round(s.shield)} / ${s.capacity}</b></div><div class="system-row"><span>Targeting / sensors</span><b class="${s.sensor < .8 ? "warn" : ""}">${Math.round((s.sensor || 0) * 100)}% / ${s.sensors || 0}</b></div>`;
   $("#bench-status").classList.toggle("invalid", !!issues.length);
   $("#bench-status").innerHTML =
     `<span class="status-dot"></span>${esc(issues[0] || "Structure sound. Cleared for deployment.")}`;
@@ -1128,7 +1131,10 @@ function blueprints() {
                 : saved[+b.dataset.blueprint],
             );
             if (!challenge && b.dataset.source === "saved") {
-              rules = savedEntries()[+b.dataset.blueprint].rules;
+              const savedEntry = savedEntries()[+b.dataset.blueprint];
+              rules = savedEntry.rules;
+              arenaId = savedEntry.arena;
+              objective = savedEntry.objective || "reactor";
               battleMode = rules.combat;
             }
             rotation = machine.front || 0;
@@ -1154,6 +1160,7 @@ function blueprints() {
           if (!challenge) {
             rules = data.rules;
             arenaId = data.arena;
+            objective = data.objective || "reactor";
             seed = data.seed;
             battleMode = rules.combat;
           }
@@ -1180,6 +1187,7 @@ function saveBlueprint() {
   list.unshift({
     machine: clone(machine),
     arena: arenaId,
+    objective,
     seed,
     rules: clone(rules),
   });
@@ -1189,7 +1197,7 @@ function saveBlueprint() {
       JSON.stringify(
         list
           .slice(0, 8)
-          .map((e) => packChallenge(e.machine, e.arena, e.seed, e.rules)),
+          .map((e) => packChallenge(e.machine, e.arena, e.seed, e.rules, e.objective || "reactor")),
       ),
     );
     save();
@@ -1211,14 +1219,14 @@ function downloadFile(name, text) {
 function exportBlueprint() {
   downloadFile(
     machine.name.replace(/[^a-z0-9_-]/gi, "-") + ".war-machine.json",
-    JSON.stringify(packChallenge(machine, arenaId, seed, rules), null, 2),
+  JSON.stringify(packChallenge(machine, arenaId, seed, rules, objective), null, 2),
   );
 }
 function shareDialog() {
   const issues = validate(machine, rules);
   const code = issues.length
     ? ""
-    : encodeChallenge(packChallenge(machine, arenaId, seed, rules));
+    : encodeChallenge(packChallenge(machine, arenaId, seed, rules, objective));
   const link = location.origin + location.pathname + "#challenge=" + code;
   showModal(
     "Throw down the gauntlet",
@@ -1297,11 +1305,12 @@ function loadChallenge(c) {
     location.pathname +
       location.search +
       "#challenge=" +
-      encodeChallenge(packChallenge(c.machine, c.arena, c.seed, c.rules)),
+      encodeChallenge(packChallenge(c.machine, c.arena, c.seed, c.rules, c.objective || "reactor")),
   );
   rules = clone(c.rules);
   battleMode = rules.combat;
   arenaId = c.arena;
+  objective = c.objective || "reactor";
   seed = c.seed;
   mirrorOpponent = false;
   closeModal();
@@ -1335,9 +1344,16 @@ function arenaView() {
  <div class="observation-deck"><div class="observation-heading"><span class="auto-indicator"></span><strong id="observation-status">AUTONOMOUS SYSTEMS</strong><span id="observation-hint">Doctrine locked at deployment</span></div><div class="weapons-monitor" id="weapons-monitor"></div><div class="system-readout" id="system-readout"></div></div>
  <div class="panel battle-toolbar"><div class="group"><button id="pause-btn" disabled>Ⅱ Pause</button><button id="replay-btn" disabled>↻ Replay</button><button id="inspect-btn">◎ Damage</button></div><div class="group"><span class="mode-note">SPEED</span>${[0.5, 1, 2, 4].map((s) => `<button data-speed="${s}" class="${speed === s ? "active" : ""}">${s}×</button>`).join("")}</div></div></section>
  <div class="combat-log"><section class="panel"><h3>Combat telemetry <small id="seed-label">SEED ${seed}</small></h3><div class="log-lines" id="combat-log">Ready for deployment.</div></section><section class="panel arena-legend"><h3>Control the arena</h3><p><b>Central ring:</b> hold for 3s to gain +8 energy/sec while present. <b>Green caches:</b> restore 100 HP and 30 energy; respawn after 25s.</p><p>Destroy cover to open a firing lane. At 55s the containment field closes.</p></section></div></div></div><div class="battle-bottom"><button id="tune-btn">← Tune your machine</button><button id="import-btn">Accept a friend’s challenge</button></div><div class="footer-note"><span>SPACE PAUSE · TAP PART TO INSPECT</span><span>DRAG ORBIT · RIGHT DRAG PAN · SCROLL / PINCH ZOOM</span></div>`;
+  $("#arena-select")?.insertAdjacentHTML("afterend", `<select id="objective-select" aria-label="Match objective" ${challenge ? "disabled" : ""}>${OBJECTIVES.map((o) => `<option value="${o.id}" ${o.id === objective ? "selected" : ""}>${o.name}</option>`).join("")}</select>`);
+  if (objective === "escort") {
+    const legend = $(".arena-legend");
+    if (legend) legend.querySelector("h3").textContent = "Escort the convoy";
+    if (legend) legend.querySelector("p").innerHTML = "<b>Convoy:</b> keep your cargo close, deny the rival access, and escort it to the far extraction gate. Progress decides ties at the time limit.";
+  }
   battle = new Battle(machine, enemy, arenaId, seed, {
     mode: battleMode,
     swapSpawns: !!bountyContext && !!(seed & 1),
+    objective,
   });
   $(".arena-screen")?.insertAdjacentHTML("afterbegin", '<div id="machine-warning" class="machine-warning" hidden></div>');
   lastArenaRender = 0;
@@ -1372,6 +1388,11 @@ function bindArena() {
   if ($("#leave-challenge")) $("#leave-challenge").onclick = leaveChallenge;
   $("#arena-select").onchange = (e) => {
     arenaId = e.target.value;
+    save();
+    arenaView();
+  };
+  $("#objective-select").onchange = (e) => {
+    objective = e.target.value === "escort" ? "escort" : "reactor";
     save();
     arenaView();
   };
@@ -1488,6 +1509,7 @@ function startBattle(replay = false) {
       a: clone(machine),
       b: clone(opponent()),
       arena: arenaId,
+      objective,
       seed,
       enemy: challenge || mirrorOpponent ? null : enemyIndex,
       mode: battleMode,
@@ -1506,6 +1528,7 @@ function startBattle(replay = false) {
     {
       mode: matchSource.mode,
       swapSpawns: !!matchSource.swapSpawns,
+      objective: matchSource.objective || "reactor",
       ...(replay ? { commands: matchSource.commands || [] } : {}),
     },
   );
@@ -1622,10 +1645,11 @@ function updateHUD() {
   const v = battle.vehicles[0];
   const warning = $("#machine-warning");
   if (warning) {
-    const state = v.dead ? "CORE LOST" : v.disabled > 0 ? "EMP DISABLED" : v.overheated ? "WEAPONS OVERHEATED" : v.energy <= Math.max(5, v.maxEnergy * .12) ? "POWER RESERVE CRITICAL" : "";
+    const unstable = v.modules.some((m) => partSpec(m).explosive && m.hp > 0 && (m.instability || 0) >= .55);
+    const state = v.dead ? "CORE LOST" : v.disabled > 0 ? "EMP DISABLED" : v.overheated ? "WEAPONS OVERHEATED" : unstable ? "BATTERY INSTABILITY" : v.energy <= Math.max(5, v.maxEnergy * .12) ? "POWER RESERVE CRITICAL" : "";
     warning.hidden = !state;
     warning.textContent = state;
-    warning.className = "machine-warning" + (v.disabled > 0 ? " emp" : v.energy <= Math.max(5, v.maxEnergy * .12) ? " power" : "");
+    warning.className = "machine-warning" + (v.disabled > 0 ? " emp" : v.energy <= Math.max(5, v.maxEnergy * .12) ? " power" : unstable ? " battery" : "");
   }
   battle.uiTrace ||= [];
   if (!battle.uiTrace.length || battle.time - battle.uiTrace.at(-1).t >= .25) {
@@ -1670,11 +1694,13 @@ function updateHUD() {
   $("#terrain-label").textContent = v.terrain.toUpperCase();
   $("#terrain-label").title = TERRAIN_INFO[v.terrain]?.effect || "";
   $("#reactor-label").textContent =
-    battle.node.owner < 0
-      ? "REACTOR NEUTRAL"
-      : battle.node.owner === 0
-        ? "REACTOR +8 PWR"
-        : "RIVAL CONTROLS REACTOR";
+    battle.objective === "escort"
+      ? `ESCORT YOU ${Math.round((battle.escort?.[0]?.progress || 0) * 100)}% · RIVAL ${Math.round((battle.escort?.[1]?.progress || 0) * 100)}%`
+      : battle.node.owner < 0
+        ? "REACTOR NEUTRAL"
+        : battle.node.owner === 0
+          ? "REACTOR +8 PWR"
+          : "RIVAL CONTROLS REACTOR";
   if (lastLogCount !== battle.events.length || battle.tick % 60 < 6) {
     $("#combat-log").innerHTML = battle.events
       .slice(-6)
@@ -1797,6 +1823,16 @@ function drawMinimap() {
   c.beginPath();
   c.arc(120, 80, 18, 0, Math.PI * 2);
   c.stroke();
+  if (battle.objective === "escort") {
+    for (const cargo of battle.escort || []) {
+      c.fillStyle = cargo.side ? "#df9b80" : "#76dfc6";
+      c.fillRect(cargo.x * sx - 4, cargo.y * sy - 4, 8, 8);
+      c.strokeStyle = c.fillStyle;
+      c.strokeRect((cargo.side ? 150 : 150) * sx, cargo.y * sy - 2, 900 * sx, 4);
+      c.fillStyle = "#f5d27b";
+      c.fillRect((cargo.side ? 1050 - cargo.progress * 900 : 150 + cargo.progress * 900) * sx - 2, cargo.y * sy - 2, 4, 4);
+    }
+  }
   for (const p of battle.pickups) {
     if (battle.time < p.ready) continue;
     c.fillStyle = "#a6e7b2";
@@ -1840,6 +1876,7 @@ function finishBattle() {
   $("#pause-btn").disabled = true;
   $("#replay-btn").disabled = false;
   $("#arena-select").disabled = !!challenge;
+  $("#objective-select").disabled = !!challenge;
   $("#seed-btn").disabled = !!challenge;
   $$("[data-enemy]").forEach((b) => (b.disabled = !!challenge));
   $("#mirror-rival").disabled = !!challenge;
@@ -2068,7 +2105,7 @@ function showBattleReport() {
   );
 }
 function showStressTest() {
-  const result = stressTest(machine, opponent(), "all", seed), s = result.summary;
+  const result = stressTest(machine, opponent(), "all", seed, { objective }), s = result.summary;
   const bar = (value, max = 1) => `<span class="metric-bar"><i style="width:${Math.max(0, Math.min(100, (value / max) * 100)).toFixed(1)}%"></i></span>`;
   showModal("Build stress test", `<p>Three deterministic seeds across every arena. These runs are local and never touch a bounty or wallet.</p><div class="report-score"><div><strong>${Math.round(s.averageSurvival)}s</strong><span>AVERAGE SURVIVAL</span></div><div><strong>${Math.round(s.winRate * 100)}%</strong><span>WIN RATE</span></div><div><strong>${s.averageOverheats.toFixed(1)}</strong><span>OVERHEATS / RUN</span></div></div><div class="stress-grid"><section><h3>Terrain spread</h3>${result.terrainScores.map(t => `<div class="stress-row"><b>${esc(t.name)}</b><span>${Math.round(t.winRate * 100)}% wins · ${Math.round(t.time)}s</span>${bar(t.winRate)}</div>`).join("")}</section><section><h3>Failure pressure</h3><p><b>Most dangerous weapon:</b> ${result.dangerousWeapon ? `${esc(result.dangerousWeapon.name)} · ${Math.round(result.dangerousWeapon.damage / Math.max(1, result.dangerousWeapon.runs))} damage/run` : "none recorded"}</p><p><b>Average mobility loss:</b> ${s.averageMobilityLoss.toFixed(1)}s</p><p><b>Best terrain:</b> ${result.bestTerrain ? esc(result.bestTerrain.name) : "—"}</p><p><b>Worst terrain:</b> ${result.worstTerrain ? esc(result.worstTerrain.name) : "—"}</p></section></div><h3>Average damage by weapon</h3><div class="report-bars">${result.damagePerWeapon.slice(0, 8).map(r => `<div class="stress-row"><b>${esc(r.name)}</b><span>${Math.round(r.damage)}</span>${bar(r.damage, Math.max(1, result.damagePerWeapon[0]?.damage || 1))}</div>`).join("") || '<p class="hint">No weapon impacts recorded.</p>'}</div><div class="modal-footer"><button data-close>Back to the foundry</button><button class="primary" id="stress-deploy">Open proving grounds</button></div>`, () => { $("#stress-deploy").onclick = () => { closeModal(); arenaView(); }; });
 }
@@ -2161,13 +2198,14 @@ function rulesView() {
     <div class="rules-jump" aria-label="Rules sections"><span>JUMP TO</span><a href="#rules-result">Result</a><a href="#rules-combat">Combat</a><a href="#rules-systems">Systems</a><a href="#rules-terrain">Terrain</a><a href="#rules-bounties">Bounties</a></div>
     <section class="rules-section panel" id="rules-result"><div class="rules-section-head"><span class="rules-index">01</span><div><span class="eyebrow">RESULT</span><h2>How a winner is decided</h2></div></div><div class="rules-section-body rules-result-grid"><div class="rule-step"><b>01</b><h3>Destroy a core</h3><p>Destroying the rival command core immediately wins the match. If both cores are destroyed in the same exchange, the result is a draw.</p></div><div class="rule-step"><b>02</b><h3>Survive the clock</h3><p>If both cores are still alive at 100 seconds, the engine compares the percentage of starting module health each machine has left.</p></div><div class="rule-step"><b>03</b><h3>Resolve close calls</h3><p>The higher integrity wins. A difference under 2.5 percentage points is a draw. Integrity is about surviving structure, not just the core.</p></div></div></section>
     <section class="rules-section panel" id="rules-combat"><div class="rules-section-head"><span class="rules-index">02</span><div><span class="eyebrow">AUTONOMOUS COMBAT</span><h2>How machines choose their fight</h2></div></div><div class="rules-section-body rules-two-col"><div><h3>Movement doctrine</h3><ul class="rules-list"><li><b>Balanced</b><span>Hold the configured engagement range.</span></li><li><b>Kite</b><span>Back away while keeping weapons on target.</span></li><li><b>Flank</b><span>Circle to expose weaker sides and change firing angles.</span></li><li><b>Ram</b><span>Close distance and collide at short range.</span></li></ul></div><div><h3>Target priority</h3><ul class="rules-list"><li><b>Weapons</b><span>Strip the rival's damage output first.</span></li><li><b>Power</b><span>Attack generators, batteries, cooling and shields.</span></li><li><b>Mobility</b><span>Break wheels, treads and hover systems.</span></li><li><b>Core or nearest</b><span>Focus the command core or the closest valid part.</span></li></ul></div><div class="rules-callout"><h3>Facing and firing arcs</h3><p>The marked front is the machine's fighting nose. Each mount has its own facing and firing arc. A weapon can be in range and still miss its opportunity if it is mounted backwards or the target is outside its arc. The engine leads moving targets and respects smoke, cover, height and projectile travel time.</p></div></div></section>
-    <section class="rules-section panel" id="rules-systems"><div class="rules-section-head"><span class="rules-index">03</span><div><span class="eyebrow">POWER, HEAT AND DAMAGE</span><h2>What keeps a machine alive</h2></div></div><div class="rules-section-body rules-card-grid"><article class="rules-card"><span class="rules-card-label">HEAT</span><h3>Firepower has a limit</h3><p>Every shot adds heat. Radiators and cooling systems remove it, while hot terrain and heaters add more. At 100 heat, weapons shut down. They return below 35 heat. Automatic coolant purge removes 45 heat, costs 20 energy, and pauses guns for 1.2 seconds.</p></article><article class="rules-card"><span class="rules-card-label">ENERGY</span><h3>Power the machine</h3><p>Energy starts at the machine's capacity and changes every simulation tick from generators, environment drain and reactor control. Weapons, shields, repairs, interceptors and abilities spend it. Boost costs 25 energy and 12 heat; brace costs 30 energy for 45% damage reduction for 3 seconds; interceptors cost 8 energy per shot. At low power, weapons wait and support systems lose their powered benefits.</p></article><article class="rules-card"><span class="rules-card-label">DAMAGE</span><h3>Protect the right layer</h3><p>Armor, shields, thermal and blast resistance, brace systems and reactive armor reduce incoming damage. Repair systems restore damaged parts while spending energy. Destroyed batteries can explode into nearby parts. Destroyed weapons, mobility, cooling and generators stop contributing immediately.</p></article><article class="rules-card"><span class="rules-card-label">STRUCTURE</span><h3>Connections matter</h3><p>Upper parts need support below them. If a frame or deck is destroyed, unsupported parts collapse. Towers improve firing positions but are exposed and make the machine harder to turn.</p></article></div></section>
+    <section class="rules-section panel" id="rules-systems"><div class="rules-section-head"><span class="rules-index">03</span><div><span class="eyebrow">POWER, HEAT AND DAMAGE</span><h2>What keeps a machine alive</h2></div></div><div class="rules-section-body rules-card-grid"><article class="rules-card"><span class="rules-card-label">HEAT</span><h3>Firepower has a limit</h3><p>Every shot adds heat. Radiators and cooling systems remove it, while hot terrain and heaters add more. At 100 heat, weapons shut down. They return below 35 heat. Automatic coolant purge removes 45 heat, costs 20 energy, and pauses guns for 1.2 seconds.</p></article><article class="rules-card"><span class="rules-card-label">ENERGY</span><h3>Power the machine</h3><p>Energy starts at the machine's capacity and changes every simulation tick from generators, environment drain and reactor control. Weapons, shields, repairs, interceptors and abilities spend it. Boost costs 25 energy and 12 heat; brace costs 30 energy for 45% damage reduction for 3 seconds; interceptors cost 8 energy per shot. At low power, weapons wait and support systems lose their powered benefits.</p></article><article class="rules-card"><span class="rules-card-label">DAMAGE</span><h3>Protect the right layer</h3><p>Armor, shields, thermal and blast resistance, brace systems and reactive armor reduce incoming damage. Damaged weapons reload more slowly, damaged coolers remove less heat, damaged mobility reduces speed and steering, and damaged sensors shorten range and spread aim. Batteries can surge before failure, briefly draining energy and adding heat; destroyed batteries can still explode into nearby parts.</p></article><article class="rules-card"><span class="rules-card-label">STRUCTURE</span><h3>Connections matter</h3><p>Upper parts need support below them. If a frame or deck is destroyed, unsupported parts collapse. Towers improve firing positions but are exposed and make the machine harder to turn.</p></article></div></section>
     <section class="rules-section panel" id="rules-terrain"><div class="rules-section-head"><span class="rules-index">04</span><div><span class="eyebrow">ARENA CONDITIONS</span><h2>Build for the ground you choose</h2></div></div><div class="rules-section-body"><p class="rules-intro">Terrain is sampled at each machine's position, so moving a few metres can change the tradeoff. Hovering avoids most contact hazards but still suffers ambient heat and cold.</p><div class="terrain-rule-grid"><div><b>Road</b><span>Normal traction and speed.</span></div><div><b>Sand and mud</b><span>Slow wheels; treads retain more speed.</span></div><div><b>Oil and ice</b><span>Reduce grip. Ice also improves cooling.</span></div><div><b>Snow</b><span>Slows wheels; winter tires help.</span></div><div><b>Brine</b><span>Drains energy over time.</span></div><div><b>Lava and vents</b><span>Add heat and damage grounded machines.</span></div><div><b>Rubble and coolant</b><span>Slow wheels; coolant increases cooling.</span></div><div><b>Ridges</b><span>Raise firing positions and block low shots.</span></div></div><div class="rules-arena-strip"><div><b>Central reactor</b><span>Hold it alone for 3 seconds to gain 8 energy per second. Leave the ring and control is lost.</span></div><div><b>Repair caches</b><span>Restore up to 100 health and 30 energy. They return after 25 seconds.</span></div><div><b>Containment field</b><span>Starts closing at 55 seconds. Machines outside take core damage as the ring contracts.</span></div></div></div></section>
     <section class="rules-section panel" id="rules-build"><div class="rules-section-head"><span class="rules-index">05</span><div><span class="eyebrow">ENGINEERING LIMITS</span><h2>Build within the class</h2></div></div><div class="rules-section-body rules-build-grid"><div><h3>Know the standard class</h3><p>The default class allows 1,200 credits, 32 fitted parts, 360 tonnes and 8 weapons. The command core is required but does not count toward the fitted-part limit. Custom and unlimited classes can change the caps.</p></div><div><h3>Choose a tradeoff</h3><p>Every fitted part has a credit cost, mass, health and system contribution. More armor adds mass. More weapons add damage but also reload pressure, energy demand and heat. Elevated mounts cost more and still need support.</p></div><div><h3>Make stacking meaningful</h3><p>The grid has three levels. Additional copies of one weapon share fire-control bandwidth and reload more slowly after the first two. A compact, supported design can outperform a taller pile of identical guns.</p></div></div></section>
     <section class="rules-section panel" id="rules-bounties"><div class="rules-section-head"><span class="rules-index">06</span><div><span class="eyebrow">PAID CHALLENGES</span><h2>How a bounty uses the result</h2></div></div><div class="rules-section-body rules-bounty-flow"><div class="bounty-flow-step"><b>01</b><span>Creator funds a reward and locks the machine, arena, seed and limits.</span></div><div class="bounty-flow-step"><b>02</b><span>Challenger pays the entry and receives the exact defender plus a timed build window.</span></div><div class="bounty-flow-step"><b>03</b><span>The deterministic battle runs once. The result is recorded and independently attested before settlement.</span></div><div class="bounty-flow-step"><b>04</b><span>A challenger win pays 97.5% of the gross reward after the 2.5% platform fee. Loss, draw or missed deadline sends the entry to the creator.</span></div></div><p class="rules-footnote">The payment layer settles the engine result; it does not change the combat rules. Watch the full simulation in Proving grounds before the result is finalized.</p></section>
     <div class="rules-actions"><button id="rules-workshop-bottom" class="primary">Build a machine</button><button id="rules-arena-bottom">Run a proving-ground test</button><button id="rules-bounties-bottom">Browse bounties</button></div>
   </div>`;
   $("#rules-result .rules-section-body")?.insertAdjacentHTML("beforeend", '<div class="rules-callout"><h3>Published timeout formula</h3><p>When both cores survive, the deterministic score is <b>35% core survival + 25% structure + 15% weapons + 15% mobility + 10% power and cooling</b>. The higher score wins; a gap under 2.5 points is a draw. This prevents cheap armor walls from winning by raw hit points alone.</p></div>');
+  $("#rules-terrain .rules-arena-strip")?.insertAdjacentHTML("beforeend", '<div><b>Escort convoy</b><span>Choose this objective in Proving grounds. Keep your cargo near your machine, stop the rival from contesting it, and reach the far gate. Cargo progress breaks time-limit ties.</span></div>');
   const timeoutStep = $("#rules-result .rule-step:nth-child(2) p");
   if (timeoutStep) timeoutStep.textContent = "If both cores are still alive at 100 seconds, the engine compares the published weighted timeout score: core, structure, weapons, mobility, and power/cooling.";
   const closeStep = $("#rules-result .rule-step:nth-child(3) p");
@@ -2192,6 +2230,7 @@ function restoreReplay() {
     challenge,
     rules,
     arenaId,
+    objective,
     seed,
     bountyContext,
     officialAttemptId,
@@ -2208,6 +2247,7 @@ function prepareContract(b) {
   challenge = unpackChallenge(b.blueprint);
   rules = clone(challenge.rules);
   arenaId = challenge.arena;
+  objective = challenge.objective || "reactor";
   seed = crypto.getRandomValues(new Uint32Array(1))[0];
   challenge.seed = seed;
   battleMode = "auto";
@@ -2350,6 +2390,7 @@ bountyUI = createBountyUI({
     machine: clone(machine),
     rules: clone(rules),
     arena: arenaId,
+    objective,
   }),
   thumbnail: renderThumbnail,
   toast,
@@ -2376,6 +2417,7 @@ bountyUI = createBountyUI({
       challenge,
       rules: clone(rules),
       arenaId,
+      objective,
       seed,
       bountyContext,
       officialAttemptId,
@@ -2386,6 +2428,7 @@ bountyUI = createBountyUI({
     challenge = unpackChallenge(a.replay.defender);
     bountyContext = b;
     arenaId = a.replay.arena;
+    objective = challenge.objective || c.objective || "reactor";
     seed = a.replay.seed;
     battleMode = "auto";
     officialReceipt = a;
@@ -2395,6 +2438,7 @@ bountyUI = createBountyUI({
       a: clone(machine),
       b: clone(challenge.machine),
       arena: arenaId,
+      objective,
       seed,
       enemy: null,
       mode: "auto",
@@ -2423,6 +2467,7 @@ portal = createPortal({
     machine: clone(machine),
     rules: clone(rules),
     arena: arenaId,
+    objective,
   }),
   workshop,
   arena: arenaView,

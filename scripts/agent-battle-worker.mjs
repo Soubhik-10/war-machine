@@ -9,7 +9,7 @@ parentPort.on("message", ({ index, candidate, locked, seeds }) => {
         locked.machine,
         locked.arena,
         seed,
-        { mode: "auto", swapSpawns: !!(seed & 1) },
+        { mode: "auto", swapSpawns: !!(seed & 1), objective: locked.objective || "reactor" },
       ).run();
       return { seed, winner: result.winner, time: result.time, integrity: result.integrity };
     });

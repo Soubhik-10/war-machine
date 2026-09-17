@@ -4,7 +4,7 @@ import {engineeringReport} from '../dist/engineering.mjs';
 
 // Agents may use readable part IDs; compact numeric tuples are only the share format.
 export function inspectBlueprint(body,store){
- fields(body,['blueprint','machine','arena','rules','bountyId']);
+ fields(body,['blueprint','machine','arena','rules','bountyId','objective']);
  check(!!body.blueprint!==!!body.machine,'Supply either blueprint or machine.');
  let locked=null;
  if(body.bountyId){locked=store.bounty(body.bountyId);check(locked.compatible,'This contract uses an archived engine.',409);}
@@ -15,9 +15,9 @@ export function inspectBlueprint(body,store){
    check(Array.isArray(body.machine.modules)&&body.machine.modules.length<=MAX_MODULES,'Supply at most 243 modules.');
    for(const m of body.machine.modules){fields(m,['id','x','y','z','r','u','c']);check(PARTS.some(p=>p.id===m.id),'Unknown part ID.');for(const [key,max] of [['x',8],['y',8],['z',2],['r',3]])if(m[key]!==undefined||key==='x'||key==='y')check(Number.isInteger(m[key])&&m[key]>=0&&m[key]<=max,'Invalid module '+key+'.');}
    const machine={...clone(PRESETS[0]),...body.machine};
-   packed=packChallenge(machine,locked?.blueprint.a||body.arena||'foundry',0,locked?.blueprint.q||normalizeRules(body.rules||DEFAULT_RULES));
+   packed=packChallenge(machine,locked?.blueprint.a||body.arena||'foundry',0,locked?.blueprint.q||normalizeRules(body.rules||DEFAULT_RULES),locked?.blueprint.objective||body.objective||'reactor');
   }else{
-   fields(body.blueprint,['v','n','p','t','g','d','s','a','e','b','q','fr','ac','gl','pt','no','f','m']);
+   fields(body.blueprint,['v','n','p','t','g','d','s','a','e','b','q','o','fr','ac','gl','pt','no','f','m']);
    if(body.blueprint.q)fields(body.blueprint.q,['mode','combat','credits','parts','mass','weapons']);
    packed=locked?{...body.blueprint,a:locked.blueprint.a,q:locked.blueprint.q,b:locked.blueprint.b}:body.blueprint;
   }
@@ -26,7 +26,7 @@ export function inspectBlueprint(body,store){
    const t=p.type==='road'?{type:'road',friction:1,grip:1,cooling:1,heat:0,damage:0}:terrainAt(arena,p.x+p.w/2,p.y+p.h/2,9),env=environmentProfile(s,arena,t);
    return {type:p.type,speed:s.speed*arena.friction*env.traction,grip:env.grip,generation:s.power*env.power,cooling:s.cooling*env.cooling,ambientHeat:env.heat,environmentDrain:env.drain};
   });
-  return {valid:!issues.length,issues,stats:s,rules:c.rules,arena:c.arena,blueprint:packChallenge(c.machine,c.arena,0,c.rules),machine:c.machine,environment:surfaces,advice:engineeringReport(c.machine,c.rules,c.arena),versions};
+  return {valid:!issues.length,issues,stats:s,rules:c.rules,arena:c.arena,objective:c.objective||'reactor',blueprint:packChallenge(c.machine,c.arena,0,c.rules,c.objective||'reactor'),machine:c.machine,environment:surfaces,advice:engineeringReport(c.machine,c.rules,c.arena),versions};
  }catch(e){if(e.status===409)throw e;return {valid:false,issues:[e.message],versions};}
 }
 

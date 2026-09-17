@@ -790,6 +790,7 @@ export function createBountyUI(adapter) {
                   b.blueprint.a,
                   0,
                   b.blueprint.q,
+                  adapter.getBuild().objective || "reactor",
                 ),
                 maxEntry: b.entry,
                 maxPlatformFeeBps: b.platformFeeBps,
@@ -970,6 +971,7 @@ export function createBountyUI(adapter) {
               $("#contract-arena").value,
               0,
               rules(),
+              draft.objective || "reactor",
             ),
             entry: runtime.paid
               ? $("#contract-entry").value
@@ -998,7 +1000,7 @@ export function createBountyUI(adapter) {
     const source = savedBlueprint
         ? unpackChallenge(savedBlueprint, true)
         : adapter.getBuild(),
-      blueprint = packChallenge(source.machine, a.defender.a, 0, a.defender.q);
+      blueprint = packChallenge(source.machine, a.defender.a, 0, a.defender.q, source.objective || a.defender.objective || "reactor");
     let deployed;
     try {
       deployed = await api(
@@ -1418,6 +1420,7 @@ export function createBountyUI(adapter) {
               draft.arena,
               0,
               draft.rules,
+              draft.objective || "reactor",
             );
           await api(
             "/me/builds",

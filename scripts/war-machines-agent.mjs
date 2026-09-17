@@ -153,7 +153,7 @@ function candidateBlueprints(defender, locked = unpackChallenge(defender)) {
     return {
       index,
       machine,
-      packed: packChallenge(machine, locked.arena, 0, locked.rules),
+      packed: packChallenge(machine, locked.arena, 0, locked.rules, locked.objective || "reactor"),
       stats: stats(machine),
       issues,
     };
@@ -200,7 +200,7 @@ function scoreCandidate(candidate, locked, seedList, existingResults = []) {
           locked.machine,
           locked.arena,
           seed,
-          { mode: "auto", swapSpawns: !!(seed & 1) },
+          { mode: "auto", swapSpawns: !!(seed & 1), objective: locked.objective || "reactor" },
         ).run();
         return { seed, winner: result.winner, time: result.time, integrity: result.integrity };
       }),
