@@ -7,6 +7,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import worker from "../sites/worker/index.mjs";
 import {
   reopenDefendedBounties,
+  automaticTimeoutState,
   runtimeConfig,
   validateEscrowAttestation,
 } from "../sites/worker/mainnet.mjs";
@@ -560,6 +561,29 @@ test("a settled defense reopens the bounty and keeps its reward funded", async (
     .get("reopened-bounty");
   assert.equal(reopened.status, "open");
   assert.equal(reopened.reserve_units, "1000000");
+});
+
+test("expired engineering attempts move to the public onchain finalizer path", () => {
+  const stamp = Date.now(),
+    attempt = { status: "engineering", build_deadline: stamp - 10_000 },
+    bounty = { escrow_attempt_deadline: stamp - 5_000 };
+  assert.equal(automaticTimeoutState(attempt, bounty, stamp), "onchain-finalizer");
+  assert.equal(
+    automaticTimeoutState(
+      { ...attempt, build_deadline: stamp + 10_000 },
+      bounty,
+      stamp,
+    ),
+    "build-window-open",
+  );
+  assert.equal(
+    automaticTimeoutState(
+      attempt,
+      { escrow_attempt_deadline: stamp + 5_000 },
+      stamp,
+    ),
+    "signable-loss",
+  );
 });
 
 test("a withdrawn, claimed or depleted bounty is never reopened by recovery", async (t) => {
