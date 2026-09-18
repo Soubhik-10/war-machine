@@ -15,6 +15,7 @@ import {
   parseAbi,
   recoverMessageAddress,
   recoverTypedDataAddress,
+  stringToHex,
 } from "viem";
 import { tempo } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
@@ -173,6 +174,7 @@ const cookie = (request, name) =>
 const MIN_BUILD_SECONDS = 180;
 const MAX_BUILD_SECONDS = 300;
 const SETTLEMENT_RESERVE_SECONDS = 120;
+const ESCROW_SETTLEMENT_GRACE_SECONDS = 120;
 
 function scoutBlueprint(blueprint) {
   const challenge = unpackChallenge(blueprint, true);
@@ -264,13 +266,13 @@ export function runtimeConfig(env, origin) {
         reason:
           "Set WM_BOUNTY_ESCROW_ADDRESS to the verified War Machines V3 escrow before enabling direct bounty transactions.",
       };
-  } else if (escrowVersion === "4") {
+  } else if (escrowVersion === "4" || escrowVersion === "5") {
     if (!/^0x[0-9a-fA-F]{40}$/.test(configuredEscrow))
       return {
         mode: "tempo-mainnet",
         enabled: false,
         reason:
-          "Set WM_BOUNTY_ESCROW_ADDRESS to the verified War Machines V4 escrow before enabling agent-paid bounty transactions.",
+          `Set WM_BOUNTY_ESCROW_ADDRESS to the verified War Machines V${escrowVersion} escrow before enabling paid bounty transactions.`,
       };
     escrow = getAddress(configuredEscrow);
   } else
@@ -278,7 +280,7 @@ export function runtimeConfig(env, origin) {
       mode: "tempo-mainnet",
       enabled: false,
       reason:
-        "WM_BOUNTY_ESCROW_VERSION must be 3 or 4.",
+        "WM_BOUNTY_ESCROW_VERSION must be 3, 4, or 5.",
     };
   let supportedInputTokens;
   try {
@@ -315,8 +317,8 @@ export function runtimeConfig(env, origin) {
   let settlementSigner = null;
   if (!/^0x[0-9a-fA-F]{40}$/.test(configuredSettlementSigner)) {
     settlementReason =
-      escrowVersion === "4"
-        ? "WM_ESCROW_SETTLEMENT_SIGNER must be the public settlement signer configured in the deployed V4 escrow."
+      escrowVersion === "4" || escrowVersion === "5"
+        ? `WM_ESCROW_SETTLEMENT_SIGNER must be the public settlement signer configured in the deployed V${escrowVersion} escrow.`
         : "The deployed V3 settlement signer is not configured.";
   } else {
     settlementSigner = getAddress(configuredSettlementSigner);
@@ -366,11 +368,13 @@ export function runtimeConfig(env, origin) {
     typeof env.MPP_SECRET_KEY === "string" &&
     new TextEncoder().encode(env.MPP_SECRET_KEY).length >= 32;
   const agentBountyMppEnabled =
-    escrowVersion === "4" &&
+    (escrowVersion === "4" || escrowVersion === "5") &&
     env.WM_AGENT_BOUNTY_MPP_ENABLED === "true" &&
     relayerMatches &&
     validMppSecret &&
     bountyMppMaxUnits !== null;
+  const technicalRetryEnabled =
+    escrowVersion === "5" && relayerMatches;
   const activeMppSecret = validMppSecret && agentBountyMppEnabled
     ? env.MPP_SECRET_KEY
     : null;
@@ -393,9 +397,15 @@ export function runtimeConfig(env, origin) {
     agentBountyMppEnabled,
     agentBountyMppRecipient: agentBountyMppEnabled ? relayerAddress : null,
     agentBountyMppMaxUnits: bountyMppMaxUnits,
-    relayerAddress: agentBountyMppEnabled ? relayerAddress : null,
-    relayerKey: agentBountyMppEnabled ? relayerKey : null,
-    acceptingNewBounties: automaticSettlementReady,
+    relayerAddress:
+      agentBountyMppEnabled || technicalRetryEnabled ? relayerAddress : null,
+    relayerKey:
+      agentBountyMppEnabled || technicalRetryEnabled ? relayerKey : null,
+    technicalRetryEnabled,
+    settlementGraceSeconds: escrowVersion === "5" ? ESCROW_SETTLEMENT_GRACE_SECONDS : 0,
+    // V3/V4 remain readable for reconciliation, but new funds must use V5 so
+    // a short relay outage cannot turn a valid result into a user loss.
+    acceptingNewBounties: automaticSettlementReady && escrowVersion === "5",
     automaticSettlementReady,
     settlementReason,
     reason: null,
@@ -407,8 +417,10 @@ function catalog(config) {
     acceptingNewBounties = paid && config.acceptingNewBounties;
   return {
     mode: "tempo-mainnet",
-    apiVersion: config.agentBountyMppEnabled
-      ? "4.0-mpp-relayed-escrow"
+    apiVersion: config.escrowVersion === "5"
+      ? "5.0-mpp-relayed-escrow"
+      : config.agentBountyMppEnabled
+        ? "4.0-mpp-relayed-escrow"
       : "3.2-direct-escrow",
     discovery: "/.well-known/war-machines.json",
     openapi: "/api/openapi.json",
@@ -464,7 +476,7 @@ function catalog(config) {
           verify: "/api/auth/verify",
         }
       : "locked",
-    mpp: config.agentBountyMppEnabled
+    mpp: config.agentBountyMppEnabled && acceptingNewBounties
       ? {
           enabled: true,
           method: "tempo",
@@ -529,6 +541,7 @@ function catalog(config) {
             "enterBounty",
             "cancelBounty",
             "forfeitTimedOutAttempt",
+            "reopenTimedOutAttempt",
             "expireBounty",
             "settleAttempt",
           ],
@@ -539,6 +552,7 @@ function catalog(config) {
               minimum: MIN_BUILD_SECONDS,
               maximum: MAX_BUILD_SECONDS,
               settlementReserveSeconds: SETTLEMENT_RESERVE_SECONDS,
+              settlementGraceSeconds: config.settlementGraceSeconds,
             },
           },
         }
@@ -560,17 +574,17 @@ function catalog(config) {
       timeLimitSeconds: 100,
       drawIntegrityThreshold: 0.025,
       entryRefund:
-        "Technical simulation failure only. Losses, draws and missed counter deadlines pay the entry to the bounty creator.",
+        "Only an infrastructure settlement timeout receives a free retry. Losses, draws and missed counter deadlines pay the entry to the bounty creator.",
       spending:
         "No application spending cap. Each bounty reward and entry amount is separately confirmed in Tempo Wallet.",
       paidReveal:
         "Public scouts expose only cost, mass, part count, weapon count, arena and limits. A confirmed entry reveals the exact defender to that challenger only.",
       timeout:
-        "Missing the counter-build deadline is a loss. The entry was paid to the bounty creator when you entered; this one-trial bounty completes and its unused reward remains returnable only by its creator.",
+        "Missing the counter-build deadline is a loss. The entry was paid to the bounty creator when you entered and the bounty reopens after timeout. An unresolved settlement infrastructure timeout is technical and unlocks one sponsored retry instead.",
       payments: paid
         ? acceptingNewBounties
           ? config.agentBountyMppEnabled
-            ? "Direct Tempo mainnet pathUSD escrow. MPP clients may atomically swap an allowlisted Tempo stablecoin into pathUSD before the bounded V4 relayer forwards the payment."
+            ? `Direct Tempo mainnet pathUSD escrow. MPP clients may atomically swap an allowlisted Tempo stablecoin into pathUSD before the bounded V${config.escrowVersion} relayer forwards the payment.`
             : "Direct Tempo mainnet pathUSD escrow. MPP clients may use the same allowlisted stablecoin swap for separately priced API work; the escrow still receives pathUSD."
           : config.settlementReason
         : "Payments are unavailable until escrow configuration is complete. No synthetic credits are issued.",
@@ -580,7 +594,7 @@ function catalog(config) {
 
 const discovery = (config) => ({
   name: "War Machines",
-  version: config.agentBountyMppEnabled ? "4.0" : "3.2",
+  version: config.escrowVersion === "5" ? "5.0" : config.agentBountyMppEnabled ? "4.0" : "3.2",
   mode: "tempo-mainnet",
   description:
     "Engineer autonomous machines with your own code or model. Same deterministic game engine as browser players.",
@@ -605,6 +619,14 @@ const discovery = (config) => ({
         enabled: true,
         directEscrow: true,
         acceptingNewBounties: !!config.acceptingNewBounties,
+        escrowVersion: config.escrowVersion,
+        settlementGraceSeconds: config.settlementGraceSeconds,
+        technicalRetry: {
+          available: !!config.technicalRetryEnabled,
+          route: "/api/attempts/{id}/retry",
+          description:
+            "A one-time infrastructure recovery retry is sponsored by the bounded relayer and does not charge the challenger again.",
+        },
         settlement: config.acceptingNewBounties
           ? { ready: true, quorum: 1, signers: config.settlementSigners }
           : {
@@ -613,11 +635,13 @@ const discovery = (config) => ({
               quorum: 1,
               signers: config.settlementSigners,
             },
-        mpp: !!config.agentBountyMppEnabled,
-        mppScope: config.agentBountyMppEnabled
+        mpp: !!(config.agentBountyMppEnabled && config.acceptingNewBounties),
+        mppScope: config.agentBountyMppEnabled && config.acceptingNewBounties
           ? "Paid MPP payments fund and enter bounties through the configured bounded relayer."
-          : "Native MPP bounty payments are not configured.",
-        ...(config.agentBountyMppEnabled
+          : config.agentBountyMppEnabled
+            ? "Native MPP is configured but the deployed escrow is recovery-only; no new paid bounty actions are accepted."
+            : "Native MPP bounty payments are not configured.",
+        ...(config.agentBountyMppEnabled && config.acceptingNewBounties
           ? {
               mppRoutes: [
                 {
@@ -708,7 +732,7 @@ const openapi = {
       post: {
         summary: "Stateless MCP Streamable HTTP endpoint",
         description:
-          "Connect an MCP client to this endpoint. Read and validation tools are public. On a V4 deployment, create and enter tools advertise native MPP charges and the MPP client retries the exact request to complete the relayed escrow action; otherwise the returned direct escrow plan must be signed by the caller's own Tempo wallet/access key.",
+          "Connect an MCP client to this endpoint. Read and validation tools are public. On a V5 deployment, create and enter tools advertise native MPP charges and the MPP client retries the exact request to complete the relayed escrow action; otherwise the returned direct escrow plan must be signed by the caller's own Tempo wallet/access key.",
       },
     },
     "/rules": { get: {} },
@@ -718,7 +742,7 @@ const openapi = {
       get: {},
       post: {
         description:
-          "On V4 deployments with native MPP enabled, this route returns a 402 challenge for the exact reward and then creates the bounty through the bounded relayer after the MPP client retries. Other deployments prepare a direct createBounty funding plan for the caller's Tempo wallet.",
+          "On V5 deployments with native MPP enabled, this route returns a 402 challenge for the exact reward and then creates the bounty through the bounded relayer after the MPP client retries. Other deployments prepare a direct createBounty funding plan for the caller's Tempo wallet.",
         security: [{ bearerAuth: [] }, { mppProof: [] }],
       },
     },
@@ -731,7 +755,7 @@ const openapi = {
     "/bounties/{id}/attempts": {
       post: {
         description:
-          "On V4 deployments with native MPP enabled, this route returns a 402 challenge for the exact entry and then enters through the bounded relayer after the MPP client retries. Other deployments prepare a direct enterBounty plan for the caller's Tempo wallet. Body: maxEntry, maxPlatformFeeBps, participantName and showAddress.",
+          "On V5 deployments with native MPP enabled, this route returns a 402 challenge for the exact entry and then enters through the bounded relayer after the MPP client retries. Other deployments prepare a direct enterBounty plan for the caller's Tempo wallet. Body: maxEntry, maxPlatformFeeBps, participantName and showAddress.",
         security: [{ bearerAuth: [] }, { mppProof: [] }],
       },
     },
@@ -739,6 +763,13 @@ const openapi = {
       get: {
         description:
           "Creator and paid challenger only. Engineering status includes the private defender and build deadline for the challenger.",
+      },
+    },
+    "/attempts/{id}/retry": {
+      post: {
+        description:
+          "Use the one-time sponsored retry issued for an infrastructure settlement timeout. It never charges a second entry. It is unavailable for a missed build deadline or a verified loss/draw.",
+        security: [{ bearerAuth: [] }, { mppProof: [] }],
       },
     },
     "/attempts/{id}/deploy": {
@@ -1999,20 +2030,34 @@ async function attemptView(db, attemptId, viewer) {
     .bind(attempt.id)
     .first();
   const record = attempt.match_record ? parse(attempt.match_record) : null;
+  const retry = await db
+    .prepare(
+      "SELECT id,status,expires,provider_ref,body FROM payment_holds WHERE account=? AND bounty=? AND request_key=? AND purpose='technical-retry' ORDER BY created DESC LIMIT 1",
+    )
+    .bind(attempt.account, attempt.bounty, "technical-retry:" + attempt.id)
+    .first();
+  let retryBody = null;
+  if (retry?.body) {
+    try {
+      retryBody = parse(retry.body);
+    } catch {}
+  }
   value.payment = {
     state: done
       ? "complete"
-      : job?.state ||
-        (attempt.status === "engineering" &&
-        now() >= Number(bounty.escrow_attempt_deadline)
-          ? "timeout"
-          : "pending"),
+      : job?.state || "pending",
     transactionHash: attempt.escrow_settlement_tx || job?.tx_hash || null,
     entryTransactionHash: attempt.escrow_entry_tx || null,
     deadline:
       record?.deadline ||
       Math.floor(Number(bounty.escrow_attempt_deadline || 0) / 1000),
     finalized: done && !!attempt.escrow_settlement_tx,
+    technicalFailure: attempt.result
+      ? parse(attempt.result)?.outcome === "technical-failure"
+      : false,
+    retryAvailable: retry?.status === "available",
+    retryExpires: retry?.expires || null,
+    retryAttemptId: retryBody?.attempt || null,
   };
   return value;
 }
@@ -2442,6 +2487,7 @@ const ESCROW_ABI = parseAbi([
   "function cancelBounty(uint256 bountyId)",
   "function cancelBountyFor(address creator,uint256 bountyId)",
   "function forfeitTimedOutAttempt(uint256 bountyId)",
+  "function reopenTimedOutAttempt(uint256 bountyId)",
   "function expireBounty(uint256 bountyId)",
   "function settleAttempt((uint256 bountyId,uint64 attemptNonce,uint8 outcome,bytes32 resultHash,uint64 validUntil) settlement,bytes[] signatures)",
 ]);
@@ -2453,6 +2499,11 @@ const ESCROW_EVENTS = {
   expired: "0x273c6c1aa010a64004ccb6c3b3b61101d59f480e439e06b20d471260dc6071dd",
   timedOut:
     "0xb92806ef23ff7f73544c7018ae5c0c865c4103b6c6a9a497430e6e8961763298",
+  reopened: keccak256(
+    stringToHex(
+      "TimedOutAttemptReopened(uint256,uint64,address,address,uint128)",
+    ),
+  ),
   settled: "0xf1bd0b9955d3af8c0f3ef37ea58ba05a0df5b81798cb73c84f62c093fa013e66",
 };
 // V3's deployed signer remains the compatibility default. V4 publishes its
@@ -2530,7 +2581,12 @@ const settlementMessage = (payload) => ({
 const settlementTypedData = (config, payload) => ({
   domain: {
     name: "War Machines Bounty Escrow",
-    version: config.escrowVersion === "4" ? "4" : "3",
+    version:
+      config.escrowVersion === "5"
+        ? "5"
+        : config.escrowVersion === "4"
+          ? "4"
+          : "3",
     chainId: config.chainId,
     verifyingContract: config.escrowAddress,
   },
@@ -2648,7 +2704,7 @@ function eventLog(receiptValue, config, topic) {
 // never accepted from a request.
 function agentRelayerAccount(config) {
   check(
-    config.agentBountyMppEnabled &&
+    (config.agentBountyMppEnabled || config.technicalRetryEnabled) &&
       config.relayerKey &&
       config.relayerAddress,
     "Native MPP bounty payments are not configured.",
@@ -3474,6 +3530,176 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
   await writeAgentBountyState(db, operation, { ...state, phase: "accepted", attempt, escrowHash });
   return { value: await attemptView(db, attempt, account), status: 202, receipt: payment.receipt, escrowHash };
 }
+async function freeTechnicalRetry(db, auth, attemptId, body, key, config) {
+  requireScope(auth, "enter");
+  check(config.technicalRetryEnabled, "Free technical retries are temporarily unavailable.", 503);
+  fields(body, ["participantName", "showAddress"]);
+  validKey(key);
+  const requestBody = {
+      participantName: body.participantName ?? null,
+      showAddress: body.showAddress === true,
+    },
+    previous = await prior(
+      db,
+      auth.account,
+      key,
+      "technical-retry:" + attemptId,
+      requestBody,
+    );
+  if (previous) return attemptView(db, previous, auth.account);
+  const original = await db
+    .prepare("SELECT * FROM attempts WHERE id=?")
+    .bind(attemptId)
+    .first();
+  check(original, "Attempt not found.", 404);
+  check(
+    original.account === auth.account,
+    "Only the original challenger can use this free retry.",
+    403,
+  );
+  const row = await bountyRow(db, original.bounty),
+    hold = await db
+      .prepare(
+        "SELECT * FROM payment_holds WHERE account=? AND bounty=? AND request_key=? AND purpose='technical-retry' ORDER BY created DESC LIMIT 1",
+      )
+      .bind(auth.account, row.id, "technical-retry:" + original.id)
+      .first();
+  check(
+    hold,
+    "This attempt has no infrastructure retry credit. A missed build deadline is a real loss and does not receive a free retry.",
+    409,
+  );
+  if (hold.status === "accepted") {
+    const saved = parse(hold.body);
+    check(saved.attempt, "The free retry record is incomplete.", 503);
+    await remember(
+      db,
+      auth.account,
+      key,
+      "technical-retry:" + attemptId,
+      requestBody,
+      saved.attempt,
+    );
+    return attemptView(db, saved.attempt, auth.account);
+  }
+  check(hold.status === "available" || hold.status === "relay-prepared", "This free retry is already being recovered.", 409);
+  check(row.status === "open", "The bounty is not open for the technical retry yet.", 409);
+  check(!row.expires || row.expires > now(), "This bounty has expired.", 409);
+  const source = await payoutAddress(db, auth.account),
+    entry = BigInt(row.entry_units);
+  let saved = parse(hold.body),
+    raw = typeof saved.rawTransaction === "string" ? saved.rawTransaction : null,
+    escrowHash = validHash(hold.provider_ref) ? hold.provider_ref : null,
+    validBefore = Number(saved.validBefore || 0);
+  if (!raw || !escrowHash || !Array.isArray(saved.relayerCalls)) {
+    const data = encodeFunctionData({
+        abi: ESCROW_ABI,
+        functionName: "enterBountyFor",
+        args: [getAddress(source), BigInt(row.escrow_bounty_id)],
+      }),
+      relayerCalls = [
+        relayerApprovalCall(config, entry),
+        { to: config.escrowAddress, data },
+      ],
+      prepared = await prepareAgentRelayerTransaction(config, {
+        calls: relayerCalls,
+        lane: "technical-retry:" + original.id,
+      });
+    raw = prepared.raw;
+    escrowHash = prepared.hash;
+    validBefore = prepared.validBefore;
+    saved = {
+      ...saved,
+      ...requestBody,
+      source,
+      relayerCalls,
+      rawTransaction: raw,
+      validBefore,
+    };
+    const stored = await db
+      .prepare(
+        "UPDATE payment_holds SET body=?,provider_ref=?,status='relay-prepared',updated=? WHERE id=? AND status='available'",
+      )
+      .bind(json(saved), escrowHash, now(), hold.id)
+      .run();
+    check(stored.meta.changes === 1, "This free retry is being recovered by another request.", 409);
+  }
+  await broadcastAgentRelayerTransaction(config, raw);
+  const receiptValue = await receipt(config, escrowHash),
+    log = eventLog(receiptValue, config, ESCROW_EVENTS.entered);
+  check(log.topics?.length === 4, "Escrow retry entry event is malformed.", 409);
+  check(BigInt(log.topics[1]).toString() === row.escrow_bounty_id, "Retry entry targets a different bounty.", 409);
+  check(topicAddress(log.topics[3]) === getAddress(source), "Retry entry challenger does not match the original wallet.", 409);
+  const nonce = word(log.topics[2]).toString(),
+    deadline = word(log.data, 0),
+    seedBytes = new Uint32Array(1);
+  crypto.getRandomValues(seedBytes);
+  const attempt = id(),
+    updated = now(),
+    requestedSeconds = requestedBuildSeconds(parse(row.blueprint)),
+    escrowDeadline = Number(deadline) * 1000,
+    buildDeadline = Math.min(
+      updated + requestedSeconds * 1000,
+      escrowDeadline - SETTLEMENT_RESERVE_SECONDS * 1000,
+    );
+  check(
+    buildDeadline >= updated + 150 * 1000,
+    "The sponsored retry received too little build time. It remains available for recovery.",
+    409,
+  );
+  await db.batch([
+    db
+      .prepare(
+        "INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,error,created,updated,escrow_entry_tx,settlement_payload,build_deadline,build_requested_seconds,participant_name,show_address) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(
+        attempt,
+        row.id,
+        auth.account,
+        json(null),
+        seedBytes[0],
+        "engineering",
+        null,
+        null,
+        updated,
+        updated,
+        escrowHash,
+        null,
+        buildDeadline,
+        requestedSeconds,
+        requestBody.participantName,
+        requestBody.showAddress ? 1 : 0,
+      ),
+    db
+      .prepare(
+        "UPDATE bounties SET status='busy',active_attempt=?,escrow_attempt_nonce=?,escrow_attempt_deadline=?,updated=? WHERE id=? AND status='open'",
+      )
+      .bind(attempt, Number(nonce), Number(deadline), updated, row.id),
+    db
+      .prepare(
+        "UPDATE payment_holds SET status='accepted',provider_ref=?,body=?,updated=? WHERE id=? AND status='relay-prepared'",
+      )
+      .bind(
+        escrowHash,
+        json({ ...saved, attempt, relayTransactionHash: escrowHash }),
+        updated,
+        hold.id,
+      ),
+    db
+      .prepare(
+        "INSERT INTO idempotency (account,key,kind,digest,ref,created) VALUES (?,?,?,?,?,?)",
+      )
+      .bind(
+        auth.account,
+        key,
+        "technical-retry:" + attemptId,
+        await hex(json(requestBody)),
+        attempt,
+        updated,
+      ),
+  ]);
+  return attemptView(db, attempt, auth.account);
+}
 const MAX_ESCROW_TOKEN_UNITS = 2n ** 256n - 1n;
 function boundedUnits(value, allowZero = false) {
   try {
@@ -3945,6 +4171,7 @@ async function confirmDirectIntent(db, auth, intentId, hash, config) {
 
 async function immutableRecord(
   db,
+  config,
   attempt,
   bounty,
   challenger,
@@ -3955,7 +4182,7 @@ async function immutableRecord(
     version: 1,
     engineHash: CLIENT_ENGINE_HASH,
     chainId: TEMPO_MAINNET_CHAIN_ID,
-    escrow: "0xb14a3aA99C9349094612143089F55aE5372DeB24",
+    escrow: config.escrowAddress,
     attemptId: attempt.id,
     bountyId: String(bounty.escrow_bounty_id),
     attemptNonce: String(bounty.escrow_attempt_nonce),
@@ -3978,7 +4205,7 @@ async function immutableRecord(
   };
 }
 
-async function deployCounter(db, auth, attemptId, body, key) {
+async function deployCounter(db, auth, attemptId, body, key, config) {
   requireScope(auth, "deploy");
   fields(body, ["blueprint"]);
   validKey(key);
@@ -4034,6 +4261,7 @@ async function deployCounter(db, auth, attemptId, body, key) {
     updated = now();
   const record = await immutableRecord(
     db,
+    config,
     attempt,
     bounty,
     challenger,
@@ -4053,7 +4281,7 @@ async function deployCounter(db, auth, attemptId, body, key) {
   );
   // Compute only from the committed database record. A crash here is recovered by the polling worker.
   try {
-    await materializeV3Result(db, attempt.id);
+    await materializeV3Result(db, attempt.id, now(), config);
   } catch {
     /* worker retries; no synthetic refund */
   }
@@ -4068,7 +4296,7 @@ async function deployCounter(db, auth, attemptId, body, key) {
   return attemptView(db, attempt.id, auth.account);
 }
 
-async function forfeitExpiredEngineeringAttempt(db, auth, attemptId, key) {
+async function forfeitExpiredEngineeringAttempt(db, auth, attemptId, key, config) {
   requireScope(auth, "deploy");
   const old = await prior(db, auth.account, key, "forfeit:" + attemptId, {});
   if (old) return attemptView(db, old, auth.account);
@@ -4110,6 +4338,7 @@ async function forfeitExpiredEngineeringAttempt(db, auth, attemptId, key) {
   );
   const record = await immutableRecord(
     db,
+    config,
     attempt,
     bounty,
     null,
@@ -4128,7 +4357,7 @@ async function forfeitExpiredEngineeringAttempt(db, auth, attemptId, key) {
     409,
   );
   try {
-    await materializeV3Result(db, attempt.id);
+    await materializeV3Result(db, attempt.id, now(), config);
   } catch {
     /* recover through the durable job */
   }
@@ -4364,7 +4593,7 @@ async function confirmDirectControl(db, auth, intentId, hash, config) {
     await db.batch([
       db
         .prepare(
-          "UPDATE attempts SET status='settled',result=?,escrow_settlement_tx=?,updated=? WHERE id=? AND status IN ('engineering','awaiting-signatures','ready-to-settle')",
+          "UPDATE attempts SET status='settled',result=?,escrow_settlement_tx=?,updated=? WHERE id=? AND status IN ('engineering','queued','awaiting-signatures','ready-to-settle')",
         )
         .bind(json(result), hash, updated, attempt.id),
       db
@@ -4377,6 +4606,11 @@ async function confirmDirectControl(db, auth, intentId, hash, config) {
           "UPDATE payment_holds SET status='accepted',provider_ref=?,updated=? WHERE id=?",
         )
         .bind(hash, updated, hold.id),
+      db
+        .prepare(
+          "UPDATE settlement_jobs SET state='complete',tx_hash=?,error_code=NULL,next_run=0,lease=NULL,lease_until=0,updated=? WHERE attempt=?",
+        )
+        .bind(hash, updated, attempt.id),
     ]);
   } else {
     const log = eventLog(receiptValue, config, ESCROW_EVENTS.expired);
@@ -4474,6 +4708,29 @@ async function settlementInfo(db, attemptId, config) {
     signing: { quorum: 1, signers: settlementSigners(config) },
   };
 }
+function settlementCutoffSeconds(config, payload) {
+  return (
+    Number(payload.validUntil) +
+    1 +
+    (config.escrowVersion === "5" ? config.settlementGraceSeconds : 0)
+  );
+}
+function settlementWindowOpen(config, payload, at = now()) {
+  return Math.floor(at / 1000) < settlementCutoffSeconds(config, payload);
+}
+
+function technicalRetryEligible(config, attempt) {
+  if (config?.escrowVersion !== "5" || !attempt?.match_record) return false;
+  try {
+    // Only a committed battle is eligible. A counter-build timeout is a real
+    // player loss and must never be converted into a sponsored retry merely
+    // because its loss settlement also arrived late.
+    return parse(attempt.match_record)?.reason === "battle";
+  } catch {
+    return false;
+  }
+}
+
 export async function validateEscrowAttestation(
   config,
   payload,
@@ -4526,11 +4783,12 @@ export async function validateEscrowAttestation(
 async function attestSettlement(db, attemptId, body, config) {
   fields(body, ["signatures"]);
   const { attempt, payload } = await settlementRecord(db, attemptId);
-  check(
-    Number(payload.validUntil) >= Math.floor(now() / 1000),
-    "The attestation window has elapsed. This immutable escrow cannot settle the recorded result.",
-    409,
-  );
+  if (!settlementWindowOpen(config, payload))
+    check(
+      technicalRetryEligible(config, attempt),
+      "The settlement window elapsed after a missed counter-build deadline. This is a player loss; the timeout finalizer will reopen the bounty.",
+      409,
+    );
   const recovered = await validateEscrowAttestation(
     config,
     payload,
@@ -4660,7 +4918,7 @@ async function confirmSettlement(db, attemptId, hash, config) {
   return await attemptView(db, attempt.id, attempt.account);
 }
 
-async function adoptLegacySettlements(env) {
+async function adoptLegacySettlements(env, config) {
   const db = env.DB;
   const rows = (
     await db
@@ -4682,6 +4940,7 @@ async function adoptLegacySettlements(env) {
       const record = {
         ...(await immutableRecord(
           db,
+          config,
           attempt,
           bounty,
           reason === "battle" ? parse(attempt.blueprint) : null,
@@ -4693,6 +4952,7 @@ async function adoptLegacySettlements(env) {
       const verified = evaluate(
         record,
         Math.min(now(), record.deadline * 1000 - 1),
+        config.escrowAddress,
       );
       const { bountyId, attemptNonce, outcome, resultHash, validUntil } = old;
       check(
@@ -4730,14 +4990,19 @@ async function adoptLegacySettlements(env) {
   }
 }
 
-async function materializeV3Result(db, attemptId, time = now()) {
+async function materializeV3Result(db, attemptId, time = now(), config = null) {
   const attempt = await db
     .prepare("SELECT * FROM attempts WHERE id=?")
     .bind(attemptId)
     .first();
   check(attempt?.match_record, "Automatic settlement record is missing.", 409);
   if (attempt.settlement_payload) return;
-  const verified = evaluate(parse(attempt.match_record), time);
+  const record = parse(attempt.match_record);
+  const verified = evaluate(
+    record,
+    Math.min(time, record.deadline * 1000 - 1),
+    config?.escrowAddress || record.escrow,
+  );
   const payload = { ...verified.payload, signatures: [] };
   await db
     .prepare(
@@ -4763,7 +5028,7 @@ function v3SettlementAccount(env, config) {
   const expected = settlementSigners(config)[0];
   check(
     expected && getAddress(account.address) === getAddress(expected),
-    `The configured settlement key does not match the ${config?.escrowVersion === "4" ? "V4" : "V3"} escrow signer.`,
+    `The configured settlement key does not match the V${config?.escrowVersion || "3"} escrow signer.`,
     503,
   );
   return account;
@@ -4772,8 +5037,8 @@ function v3SettlementAccount(env, config) {
 async function sendV3Settlement(env, config, attempt, payload) {
   const account = v3SettlementAccount(env, config);
   check(
-    Number(payload.validUntil) > Math.floor(now() / 1000),
-    "The automatic settlement window elapsed before broadcast.",
+    settlementWindowOpen(config, payload),
+    "The settlement grace window elapsed before broadcast.",
     409,
   );
   const signature = await account.signTypedData(
@@ -4786,6 +5051,13 @@ async function sendV3Settlement(env, config, attempt, payload) {
   )
     .bind(json(payload), now(), attempt.id)
     .run();
+  const transactionValidBefore =
+    config.escrowVersion === "5"
+      ? Math.min(
+          settlementCutoffSeconds(config, payload),
+          Math.floor(now() / 1000) + 60,
+        )
+      : Number(payload.validUntil);
   const call = encodeFunctionData({
     abi: ESCROW_ABI,
     functionName: "settleAttempt",
@@ -4807,7 +5079,7 @@ async function sendV3Settlement(env, config, attempt, payload) {
     nonce: 0,
     nonceKey: lane,
     feeToken: config.token,
-    validBefore: Number(payload.validUntil),
+    validBefore: transactionValidBefore,
   });
   const raw = await wallet.signTransaction({
     chainId: config.chainId,
@@ -4818,7 +5090,7 @@ async function sendV3Settlement(env, config, attempt, payload) {
     nonce: 0,
     nonceKey: lane,
     feeToken: prepared.feeToken,
-    validBefore: Number(payload.validUntil),
+    validBefore: transactionValidBefore,
     gas: prepared.gas,
     maxFeePerGas: prepared.maxFeePerGas,
     maxPriorityFeePerGas: prepared.maxPriorityFeePerGas,
@@ -4830,24 +5102,37 @@ async function sendV3Settlement(env, config, attempt, payload) {
   }).sendRawTransaction({ serializedTransaction: raw });
 }
 
-export function automaticTimeoutState(attempt, bounty, at = now()) {
-  if (attempt?.status !== "engineering") return "not-engineering";
+export function automaticTimeoutState(attempt, bounty, at = now(), config = null) {
+  if (
+    !["engineering", "queued", "awaiting-signatures", "ready-to-settle"].includes(
+      attempt?.status,
+    )
+  )
+    return "not-engineering";
   const buildDeadline = Number(attempt.build_deadline || 0);
   if (!buildDeadline || at < buildDeadline) return "build-window-open";
   const escrowDeadline = Number(bounty?.escrow_attempt_deadline || 0);
   if (!escrowDeadline || at < escrowDeadline) return "signable-loss";
+  const grace = Number(config?.settlementGraceSeconds || 0) * 1000;
+  if (at < escrowDeadline + grace) return "settlement-grace";
   return "onchain-finalizer";
 }
 
-async function prepareV3Timeout(env, config, bountyId, attemptId) {
+async function prepareV3Timeout(
+  env,
+  config,
+  bountyId,
+  attemptId,
+  functionName = "forfeitTimedOutAttempt",
+) {
   const account = v3SettlementAccount(env, config),
     call = encodeFunctionData({
       abi: ESCROW_ABI,
-      functionName: "forfeitTimedOutAttempt",
+      functionName,
       args: [BigInt(bountyId)],
     }),
     lane = BigInt(
-      "0x" + (await hex("v3-timeout:" + attemptId)).slice(0, 48),
+      "0x" + (await hex("v3-" + functionName + ":" + attemptId)).slice(0, 48),
     ),
     validBefore = Math.floor(now() / 1000) + 24 * 60 * 60,
     wallet = createWalletClient({
@@ -4886,6 +5171,216 @@ const timeoutReceiptPending = (error) =>
   /not confirmed yet|awaiting finality|awaiting canonical finality/i.test(
     String(error?.message || error),
   );
+
+async function confirmTechnicalReopen(db, holdId, hash, config) {
+  const hold = await db
+    .prepare(
+      "SELECT * FROM payment_holds WHERE id=? AND purpose='direct-technical-reopen'",
+    )
+    .bind(holdId)
+    .first();
+  check(hold, "Technical settlement recovery intent not found.", 404);
+  if (hold.status === "accepted") return;
+  const row = await bountyRow(db, hold.bounty),
+    attempt = row.active_attempt
+      ? await db
+          .prepare("SELECT * FROM attempts WHERE id=?")
+          .bind(row.active_attempt)
+          .first()
+      : null;
+  check(attempt, "The active technical attempt is missing.", 409);
+  const receiptValue = await receipt(config, hash),
+    log = eventLog(receiptValue, config, ESCROW_EVENTS.reopened);
+  check(
+    log.topics?.length === 4 &&
+      BigInt(log.topics[1]).toString() === row.escrow_bounty_id &&
+      BigInt(log.topics[2]).toString() === String(row.escrow_attempt_nonce) &&
+      topicAddress(log.topics[3]) === (await payoutAddress(db, attempt.account)) &&
+      topicAddress(bytesWord(log.data, 0)) === (await payoutAddress(db, row.owner)) &&
+      word(log.data, 1) === BigInt(row.entry_units),
+    "Escrow technical reopen does not match this active bounty attempt.",
+    409,
+  );
+  const updated = now(),
+    retryKey = "technical-retry:" + attempt.id,
+    retryBody = {
+      originalAttempt: attempt.id,
+      source: await payoutAddress(db, attempt.account),
+      participantName: attempt.participant_name || null,
+      showAddress: attempt.show_address === 1,
+    },
+    result = {
+      ...(attempt.result ? parse(attempt.result) : {}),
+      outcome: "technical-failure",
+      reason: "settlement-timeout",
+      entry: display(row.entry_units),
+      grossReward: "0",
+      payout: "0",
+      platformFee: "0",
+      platformFeeBps: row.platform_fee_bps ?? PLATFORM_FEE_BPS,
+      net: "0",
+      payoutStatus: "technical-retry",
+      technicalRetryAvailable: true,
+      verifiedAt: updated,
+      recoveryTransactionHash: hash,
+    };
+  const existingRetry = await db
+    .prepare(
+      "SELECT id FROM payment_holds WHERE account=? AND bounty=? AND request_key=? AND purpose='technical-retry' ORDER BY created DESC LIMIT 1",
+    )
+    .bind(attempt.account, row.id, retryKey)
+    .first();
+  await db.batch([
+    db
+      .prepare(
+        "UPDATE attempts SET status='refunded',result=?,escrow_settlement_tx=?,updated=? WHERE id=? AND status IN ('engineering','queued','awaiting-signatures','ready-to-settle')",
+      )
+      .bind(json(result), hash, updated, attempt.id),
+    db
+      .prepare(
+        "UPDATE bounties SET status='open',active_attempt=NULL,escrow_attempt_deadline=NULL,updated=? WHERE id=? AND active_attempt=?",
+      )
+      .bind(updated, row.id, attempt.id),
+    db
+      .prepare(
+        "UPDATE payment_holds SET status='accepted',provider_ref=?,updated=? WHERE id=? AND status='awaiting-onchain'",
+      )
+      .bind(hash, updated, hold.id),
+    db
+      .prepare(
+        "UPDATE settlement_jobs SET state='complete',tx_hash=?,error_code=NULL,next_run=0,lease=NULL,lease_until=0,updated=? WHERE attempt=?",
+      )
+      .bind(hash, updated, attempt.id),
+    ...(existingRetry
+      ? []
+      : [
+          db
+            .prepare(
+              "INSERT INTO payment_holds (id,account,bounty,request_key,digest,body,amount_units,purpose,expires,status,provider_ref,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            )
+            .bind(
+              id(),
+              attempt.account,
+              row.id,
+              retryKey,
+              await hex(json(retryBody)),
+              json(retryBody),
+              "0",
+              "technical-retry",
+              updated + 7 * 24 * 60 * 60 * 1000,
+              "available",
+              null,
+              updated,
+              updated,
+            ),
+        ]),
+  ]);
+}
+
+async function finalizeTechnicalSettlementTimeout(db, env, config, attempt, bounty) {
+  check(config.technicalRetryEnabled, "Technical retry relayer is not configured.", 503);
+  check(
+    technicalRetryEligible(config, attempt),
+    "Only an on-time committed battle can receive a sponsored technical retry.",
+    409,
+  );
+  const requestKey = "automatic-technical-reopen-" + attempt.id,
+    bodyValue = {
+      automatic: true,
+      action: "technical-reopen",
+      escrowBountyId: String(bounty.escrow_bounty_id),
+      attemptId: attempt.id,
+    },
+    digest = await hex(json(bodyValue));
+  let hold = await db
+    .prepare(
+      "SELECT * FROM payment_holds WHERE account=? AND bounty=? AND request_key=? AND purpose='direct-technical-reopen' ORDER BY created DESC LIMIT 1",
+    )
+    .bind(attempt.account, bounty.id, requestKey)
+    .first();
+  if (!hold) {
+    const created = now();
+    await db
+      .prepare(
+        "INSERT INTO payment_holds (id,account,bounty,request_key,digest,body,amount_units,purpose,expires,status,provider_ref,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(
+        id(),
+        attempt.account,
+        bounty.id,
+        requestKey,
+        digest,
+        json(bodyValue),
+        "0",
+        "direct-technical-reopen",
+        created + 7 * 24 * 60 * 60 * 1000,
+        "awaiting-onchain",
+        null,
+        created,
+        created,
+      )
+      .run();
+    hold = await db
+      .prepare(
+        "SELECT * FROM payment_holds WHERE account=? AND bounty=? AND request_key=? AND purpose='direct-technical-reopen' ORDER BY created DESC LIMIT 1",
+      )
+      .bind(attempt.account, bounty.id, requestKey)
+      .first();
+  }
+  if (!hold || hold.status === "accepted") return;
+  let stored = {};
+  try {
+    stored = parse(hold.body);
+  } catch {
+    stored = { ...bodyValue };
+  }
+  let raw = typeof stored.rawTransaction === "string" ? stored.rawTransaction : null,
+    hash = validHash(hold.provider_ref) ? hold.provider_ref : null,
+    validBefore = Number(stored.validBefore || 0);
+  if (hash && validBefore > 0 && validBefore <= Math.floor(now() / 1000)) {
+    raw = null;
+    hash = null;
+  }
+  if (!hash || !raw) {
+    const prepared = await prepareV3Timeout(
+      env,
+      config,
+      bounty.escrow_bounty_id,
+      attempt.id,
+      "reopenTimedOutAttempt",
+    );
+    raw = prepared.raw;
+    hash = prepared.hash;
+    validBefore = prepared.validBefore;
+    const saved = await db
+      .prepare(
+        "UPDATE payment_holds SET body=?,provider_ref=?,updated=? WHERE id=? AND status='awaiting-onchain'",
+      )
+      .bind(json({ ...bodyValue, rawTransaction: raw, validBefore }), hash, now(), hold.id)
+      .run();
+    if (saved.meta.changes !== 1) return;
+  }
+  try {
+    await createClient({
+      account: v3SettlementAccount(env, config),
+      feeToken: config.token,
+      transport: http(config.rpcUrl, { timeout: 15_000, retryCount: 0 }),
+    }).sendRawTransaction({ serializedTransaction: raw });
+  } catch (error) {
+    if (!timeoutReceiptPending(error)) {
+      const message = String(error?.message || error);
+      if (!/already known|already imported|nonce/i.test(message)) throw error;
+    }
+  }
+  try {
+    await confirmTechnicalReopen(db, hold.id, hash, config);
+  } catch (error) {
+    // Keep the settlement job retryable until the reopen receipt is final.
+    // Marking the job complete here would strand the challenger without the
+    // sponsored retry when the RPC response is merely still pending.
+    throw error;
+  }
+}
 
 async function finalizeOnchainV3Timeout(db, env, config, attempt, bounty) {
   const requestKey = "automatic-timeout-" + attempt.id,
@@ -5002,7 +5497,7 @@ export async function finalizeExpiredV3Builds(db, env, config) {
   const expired = (
     await db
       .prepare(
-        "SELECT id FROM attempts WHERE status='engineering' AND build_deadline<=? ORDER BY build_deadline LIMIT 10",
+        "SELECT id FROM attempts WHERE status IN ('engineering','queued','awaiting-signatures','ready-to-settle') AND build_deadline<=? ORDER BY build_deadline LIMIT 10",
       )
       .bind(now())
       .all()
@@ -5012,20 +5507,29 @@ export async function finalizeExpiredV3Builds(db, env, config) {
       .prepare("SELECT * FROM attempts WHERE id=?")
       .bind(row.id)
       .first();
-    if (!attempt || attempt.status !== "engineering") continue;
+    if (
+      !attempt ||
+      !["engineering", "queued", "awaiting-signatures", "ready-to-settle"].includes(
+        attempt.status,
+      )
+    )
+      continue;
     const bounty = await bountyRow(db, attempt.bounty);
-    const state = automaticTimeoutState(attempt, bounty);
+    const state = automaticTimeoutState(attempt, bounty, now(), config);
     if (state === "onchain-finalizer") {
       try {
-        await finalizeOnchainV3Timeout(db, env, config, attempt, bounty);
+        if (technicalRetryEligible(config, attempt))
+          await finalizeTechnicalSettlementTimeout(db, env, config, attempt, bounty);
+        else await finalizeOnchainV3Timeout(db, env, config, attempt, bounty);
       } catch (error) {
         console.error("War Machines V3 timeout finalizer:", error);
       }
       continue;
     }
-    if (state !== "signable-loss") continue;
+    if (state !== "signable-loss" || attempt.status !== "engineering") continue;
     const record = await immutableRecord(
       db,
+      config,
       attempt,
       bounty,
       null,
@@ -5038,7 +5542,8 @@ export async function finalizeExpiredV3Builds(db, env, config) {
       )
       .bind(json(record), now(), attempt.id)
       .run();
-    if (updated.meta.changes === 1) await materializeV3Result(db, attempt.id);
+    if (updated.meta.changes === 1)
+      await materializeV3Result(db, attempt.id, now(), config);
   }
 }
 
@@ -5104,7 +5609,7 @@ export async function runAutomaticSettlement(env) {
           .bind(state, hash, error, now() + delay, now(), job.attempt, lease)
           .run();
       try {
-        await materializeV3Result(env.DB, job.attempt);
+        await materializeV3Result(env.DB, job.attempt, now(), config);
         const record = await settlementRecord(env.DB, job.attempt);
         let hash = job.tx_hash;
         if (hash) {
@@ -5113,13 +5618,19 @@ export async function runAutomaticSettlement(env) {
             await finish("complete", hash, null);
             continue;
           } catch (error) {
-            if (Number(record.payload.validUntil) <= Math.floor(now() / 1000)) {
-              await finish(
-                "expired",
-                hash,
-                "SETTLEMENT_WINDOW_ELAPSED",
-                60_000,
+            if (
+              config.escrowVersion === "5" &&
+              technicalRetryEligible(config, record.attempt) &&
+              !settlementWindowOpen(config, record.payload)
+            ) {
+              await finalizeTechnicalSettlementTimeout(
+                env.DB,
+                env,
+                config,
+                record.attempt,
+                record.bounty,
               );
+              await finish("complete", hash, "TECHNICAL_RETRY_AVAILABLE");
               continue;
             }
           }
@@ -5132,6 +5643,35 @@ export async function runAutomaticSettlement(env) {
         );
         await finish("confirming", hash, null, 3_000);
       } catch (error) {
+        let recoveredAsTechnical = false;
+        try {
+          const current = await env.DB
+            .prepare("SELECT * FROM attempts WHERE id=?")
+            .bind(job.attempt)
+            .first();
+          if (current?.settlement_payload) {
+            const payload = parse(current.settlement_payload);
+            if (
+              config.escrowVersion === "5" &&
+              technicalRetryEligible(config, current) &&
+              !settlementWindowOpen(config, payload)
+            ) {
+              const bounty = await bountyRow(env.DB, current.bounty);
+              await finalizeTechnicalSettlementTimeout(
+                env.DB,
+                env,
+                config,
+                current,
+                bounty,
+              );
+              await finish("complete", job.tx_hash, "TECHNICAL_RETRY_AVAILABLE");
+              recoveredAsTechnical = true;
+            }
+          }
+        } catch (recoveryError) {
+          error = recoveryError;
+        }
+        if (recoveredAsTechnical) continue;
         const message = String(
           error?.message || "AUTOMATIC_SETTLEMENT_FAILED",
         ).slice(0, 160);
@@ -5194,7 +5734,9 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         mode: "tempo-mainnet",
         paymentsEnabled: config.enabled,
         directEscrow: !!config.directEscrow,
-        mppAgentApi: !!config.agentBountyMppEnabled,
+        mppAgentApi: !!(
+          config.agentBountyMppEnabled && config.acceptingNewBounties
+        ),
         activation: config.enabled
           ? config.acceptingNewBounties
             ? "ready"
@@ -5668,7 +6210,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       }
     }
     match = path.match(
-      /^\/api\/attempts\/([a-f0-9-]{36})\/(settlement|attestations|settlement-plan|settlement-confirm|forfeit)$/,
+      /^\/api\/attempts\/([a-f0-9-]{36})\/(settlement|attestations|settlement-plan|settlement-confirm|forfeit|retry)$/,
     );
     if (match) {
       const [, attemptId, action] = match;
@@ -5697,6 +6239,23 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
           gate.receipt ? { "payment-receipt": gate.receipt } : {},
         );
       }
+      if (action === "retry" && method === "POST") {
+        const key = request.headers.get("idempotency-key"),
+          gate = await ownerOrMppAgent(
+            db,
+            config,
+            request,
+            auth,
+            "enter",
+            "agent-technical-retry:" + attemptId + ":" + (key || "missing"),
+          );
+        if (gate.response) return gate.response;
+        return response(
+          await freeTechnicalRetry(db, gate.auth, attemptId, body, key, config),
+          202,
+          gate.receipt ? { "payment-receipt": gate.receipt } : {},
+        );
+      }
       if (action === "forfeit" && method === "POST")
         {
           const key = request.headers.get("idempotency-key"),
@@ -5710,7 +6269,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
             );
           if (gate.response) return gate.response;
           return response(
-            await forfeitExpiredEngineeringAttempt(db, gate.auth, attemptId, key),
+            await forfeitExpiredEngineeringAttempt(db, gate.auth, attemptId, key, config),
             200,
             gate.receipt ? { "payment-receipt": gate.receipt } : {},
           );
@@ -5729,7 +6288,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         );
       if (gate.response) return gate.response;
       return response(
-        await deployCounter(db, gate.auth, match[1], body, key),
+        await deployCounter(db, gate.auth, match[1], body, key, config),
         200,
         gate.receipt ? { "payment-receipt": gate.receipt } : {},
       );

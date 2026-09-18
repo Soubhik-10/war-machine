@@ -33,6 +33,7 @@ const SELECTORS = {
   cancel: selector("cancelBounty(uint256)"),
   expire: selector("expireBounty(uint256)"),
   timeout: selector("forfeitTimedOutAttempt(uint256)"),
+  reopen: selector("reopenTimedOutAttempt(uint256)"),
   settle: selector(
     "settleAttempt((uint256,uint64,uint8,bytes32,uint64),bytes[])",
   ),
@@ -43,6 +44,7 @@ const ESCROW_SELECTORS = new Set([
   SELECTORS.cancel,
   SELECTORS.expire,
   SELECTORS.timeout,
+  SELECTORS.reopen,
   SELECTORS.settle,
 ]);
 

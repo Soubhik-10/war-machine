@@ -29,9 +29,9 @@ export function typedData(payload) {
       {name:'resultHash',type:'bytes32'}, {name:'validUntil',type:'uint64'},
     ] }, message: { bountyId: BigInt(payload.bountyId), attemptNonce: BigInt(payload.attemptNonce), outcome: payload.outcome, resultHash: payload.resultHash, validUntil: BigInt(payload.validUntil) } };
 }
-export function evaluate(record, time = Date.now()) {
+export function evaluate(record, time = Date.now(), expectedEscrow = ESCROW) {
   ensure(record.version === 1 && record.engineHash === CLIENT_ENGINE_HASH, 'ENGINE_MISMATCH');
-  ensure(record.chainId === CHAIN_ID && record.escrow.toLowerCase() === ESCROW.toLowerCase());
+  ensure(record.chainId === CHAIN_ID && typeof record.escrow === 'string' && record.escrow.toLowerCase() === expectedEscrow.toLowerCase());
   ensure(Number.isSafeInteger(record.seed) && record.seed >= 0);
   ensure(Number.isSafeInteger(record.deadline) && record.deadline > 0);
   for (const amount of [record.reward, record.entry]) ensure(typeof amount === 'string' && /^(0|[1-9][0-9]*)$/.test(amount) && BigInt(amount) < 2n ** 128n);
@@ -65,8 +65,8 @@ export function evaluate(record, time = Date.now()) {
   }
   return { payload, amounts, result: {...result, outcome: result.winner === 0 ? 'win' : result.winner === 1 ? 'loss' : 'draw'} };
 }
-export function verifyPayload(record, payload, time) {
-  const verified = evaluate(record, time);
+export function verifyPayload(record, payload, time, expectedEscrow = ESCROW) {
+  const verified = evaluate(record, time, expectedEscrow);
   ensure(canonical(payload) === canonical(verified.payload), 'PAYLOAD_MISMATCH');
   return verified;
 }

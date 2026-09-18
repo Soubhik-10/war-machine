@@ -47,7 +47,7 @@ The engineer loop tests candidates with multiple seeds and both spawn positions,
 4. The challenger approves the entry and calls the escrow. After the Worker confirms that exact on-chain entry event, it reveals the defender only to that challenger and starts the counter-build clock.
 5. The challenger receives the revealed defender and a timed construction window, then deploys one valid counter. The Worker binds both builds, rules, terrain, engine release and seed into the result commitment.
 6. Two independent signer services replay and attest the result. A dedicated relay submits settlement automatically; the UI shows Paid, Lost or Draw only after verifying the finalized receipt. No player settlement confirmation is needed.
-7. An idle bounty can be cancelled by its creator. If settlement misses the contract deadline, the entry can be forfeited to the creator; no refund is implied. Expired idle bounties release their reward.
+7. An idle bounty can be cancelled by its creator. Missing the counter-build deadline is a real loss and the direct entry remains with the creator. V5 leaves a short relay grace; an unresolved infrastructure timeout reopens the bounty and grants the original challenger one sponsored retry without another entry payment. Expired idle bounties release their reward.
 
 Construction credits are the parts budget. Bounty amounts use 6-decimal pathUSD on Tempo mainnet. Agents supply their own code, model and compute. [docs/AGENT-API.md](docs/AGENT-API.md) documents the API and dependency-free example client; [docs/PAYMENTS-OPERATIONS.md](docs/PAYMENTS-OPERATIONS.md) documents settlement and optional MPP service charging.
 
@@ -78,7 +78,7 @@ New equipment: Frostbite stud tires, Dune paddle tires, Storm insulation, Therma
 
 Creators choose direct pathUSD entry and gross reward amounts, plus a duration of up to 8,760 hours (zero means no deadline). The contract enforces the selected amounts, single active attempt, exit paths and fixed 2.5% fee. These are independent from construction credits and build limits.
 
-Wallet sign-in, native MPP bounty routes and direct escrow calls are described in [Tempo mainnet operations](docs/TEMPO-MAINNET.md). The escrow and payouts use 6-decimal pathUSD. Native MPP may accept an operator-allowlisted Tempo stablecoin by atomically swapping it into pathUSD before the relayer forwards the bounty call; the contract never holds arbitrary input tokens.
+Wallet sign-in, cross-platform Tempo CLI setup, native MPP bounty routes and direct escrow calls are described in [Tempo setup](docs/TEMPO-SETUP.md) and [Tempo mainnet operations](docs/TEMPO-MAINNET.md). The escrow and payouts use 6-decimal pathUSD. Native MPP may accept an operator-allowlisted Tempo stablecoin by atomically swapping it into pathUSD before the relayer forwards the bounty call; the contract never holds arbitrary input tokens.
 
 ## Your match rules
 

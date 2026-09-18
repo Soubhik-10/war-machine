@@ -8,15 +8,15 @@ It runs the bundled Worker with D1 binding `DB` and the following live runtime c
 
 ```text
 WM_MODE=tempo-mainnet
-WM_BOUNTY_ESCROW_VERSION=4
-WM_BOUNTY_ESCROW_ADDRESS=<deployed V4 escrow>
-WM_ESCROW_SETTLEMENT_SIGNER=<public V4 settlement signer>
-WM_BOUNTY_RELAYER_ADDRESS=<public V4 relayer>
+WM_BOUNTY_ESCROW_VERSION=5
+WM_BOUNTY_ESCROW_ADDRESS=<deployed V5 escrow>
+WM_ESCROW_SETTLEMENT_SIGNER=<public V5 settlement signer>
+WM_BOUNTY_RELAYER_ADDRESS=<public V5 relayer>
 WM_TEMPO_SUPPORTED_TOKENS=0x20C0000000000000000000000000000000000000,0x20C000000000000000000000b9537d11c60E8b50
 WM_TEMPO_SWAP_SLIPPAGE_BPS=100
 ```
 
-The Worker serves the game, account build vault, bounty metadata, wallet identity flow, direct escrow transaction plans, native MPP bounty relaying when V4 is enabled, receipt verification, deterministic simulations, and result-attestation state. Only the optional V4 relayer key is stored as a secret runtime variable; it is never sent to the browser or persisted in D1.
+The Worker serves the game, account build vault, bounty metadata, wallet identity flow, direct escrow transaction plans, native MPP bounty relaying when V5 is enabled, receipt verification, deterministic simulations, and result-attestation state. Only the optional V5 relayer key is stored as a secret runtime variable; it is never sent to the browser or persisted in D1.
 
 ## Deploying a change
 
@@ -49,9 +49,9 @@ Static hosting supports local saves, exports, ordinary challenge links, and loca
 
 - Keep `WM_BOUNTY_ESCROW_ADDRESS` pinned to the verified deployed escrow.
 - Never add a backend custody key, signer private key, or wallet seed phrase to Site runtime variables, D1, Git, or browser storage.
-- V4's current small-trial contract uses one fixed settlement signer; keep its key separate from the relayer and guardian. Use an independently reviewed multi-signer contract before accepting larger public funds; see [ESCROW-V4-AUDIT.md](ESCROW-V4-AUDIT.md).
-- Native MPP bounty charging is off until V4, the relayer address/key, `WM_AGENT_BOUNTY_MPP_*` values and `MPP_SECRET_KEY` have been intentionally configured. The relayer key must stay in the Worker secret store and the relayer must be funded/approved for the deployed V4 escrow.
-- Use controlled small amounts while the V4 single-signer settlement trust boundary is in place.
+- V5's current small-trial contract uses one fixed settlement signer; keep its key separate from the relayer and guardian. Use an independently reviewed multi-signer contract before accepting larger public funds; see [ESCROW-V4-AUDIT.md](ESCROW-V4-AUDIT.md) for the inherited trust-boundary review.
+- Native MPP bounty charging is off until V5, the relayer address/key, `WM_AGENT_BOUNTY_MPP_*` values and `MPP_SECRET_KEY` have been intentionally configured. The relayer key must stay in the Worker secret store and the relayer must be funded/approved for the deployed V5 escrow.
+- Use controlled small amounts while the V5 single-signer settlement trust boundary is in place. V3/V4 deployments remain readable for recovery but do not accept new paid bounty actions.
 
 ## Release compatibility
 
