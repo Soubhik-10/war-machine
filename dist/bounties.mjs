@@ -97,7 +97,7 @@ export function createBountyUI(adapter) {
     walletBalance = null,
     tempoClient = null,
     accountUpdate = null;
-  let guideDismissed = read(GUIDE_DISMISSED_KEY, false) === true;
+  let guideDismissed = read(GUIDE_DISMISSED_KEY, true) === true;
   const getCache = new Map();
   const publicCachePrefix = "wm-public-cache-v1:";
   function readPublicCache(path, ttl) {
@@ -598,6 +598,11 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         const feeInput = $("#fee-filter");
         if (feeInput) feeInput.step = "0.01";
       }
+      // Board actions remain available when the optional guide is collapsed.
+      const boardActions = document.createElement("div");
+      boardActions.className = "bounty-board-actions";
+      boardActions.append($("#new-contract"), $("#my-history"), $("#show-challenge-guide"));
+      $(".bounty-board-layout").before(boardActions);
       const guidePanel = $("#challenge-guide"),
         closeGuide = $("#close-challenge-guide"),
         showGuide = $("#show-challenge-guide");

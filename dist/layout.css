@@ -1,0 +1,387 @@
+/* Shared layout layer. Game canvases, controls and payment states keep their
+   existing behavior; this file owns page rhythm and responsive proportions. */
+:root {
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --space-4: 32px;
+  --page-gutter: clamp(16px, 2.5vw, 40px);
+  --surface-radius: 12px;
+  --workbench-height: clamp(640px, calc(100dvh - 230px), 860px);
+}
+
+[hidden] { display: none !important; }
+main { max-width: 1440px; padding: var(--space-3) var(--page-gutter) var(--space-4); }
+body[data-page="workshop"] main,
+body[data-page="arena"] main { max-width: 1720px; }
+.topbar { height: 64px; min-height: 64px; padding: 0 var(--page-gutter); gap: 16px; }
+.brand-mark { width: 36px; height: 36px; }
+.topbar nav { gap: 4px; }
+.topbar .nav { padding: 8px 12px; }
+.page-heading { align-items: center; gap: 16px; margin-bottom: 20px; }
+.page-heading h1 { font-size: clamp(28px, 2.5vw, 36px); line-height: 1.12; }
+.page-heading p { font-size: 14px; margin-top: 6px; max-width: 65ch; }
+.page-heading .eyebrow { font-size: 11px; letter-spacing: 1.2px; margin-bottom: 6px; }
+.heading-actions { flex-direction: row; gap: 8px; }
+.panel { border-radius: var(--surface-radius); box-shadow: none; }
+.panel-head { padding: 12px 16px; gap: 8px; }
+.panel-head h3 { font-size: 15px; }
+.panel-head small { font-size: 11px; letter-spacing: .4px; }
+.footer-note { margin-top: 16px; font-size: 11px; letter-spacing: .3px; }
+button, input, select, textarea { border-radius: 8px; }
+summary { cursor: pointer; }
+summary:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--gold); outline-offset: 3px;
+}
+.panel, .workspace > *, .right-column > *, .contract-grid > *,
+.agent-lab-grid > *, .workshop-settings > * { min-width: 0; }
+.bench, .parts-panel, .rules-section { scroll-margin-top: 80px; }
+
+/* Home: one introduction, a live machine and three direct destinations. */
+body[data-page="home"] main { max-width: 1320px; }
+.portal-hero { grid-template-columns: 1fr 1fr; gap: 32px; padding: 16px 0 24px; }
+.hero-copy h1 { font-size: clamp(42px, 4.4vw, 64px); margin: 16px 0; line-height: 1.02; }
+.hero-copy > p { font-size: 16px; line-height: 1.6; max-width: 40ch; }
+.portal-actions { gap: 8px; margin: 24px 0 12px; }
+.hero-copy .guest-note { font-size: 13px !important; }
+.home-facts { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 24px; color: var(--muted); font-size: 13px; }
+.home-facts span + span { border-left: 1px solid var(--line); padding-left: 16px; }
+.hero-display { border-radius: var(--surface-radius); }
+.hero-display-top { padding: 16px; font-size: 11px; letter-spacing: .5px; }
+.hero-display-top i { font-size: 11px; }
+#hero-machine { height: clamp(240px, 32vh, 340px); }
+.hero-machine-label { left: 16px; top: 52px; font-size: 20px; }
+.hero-machine-label small { font-size: 11px; letter-spacing: .5px; }
+.hero-callout { margin: 0 16px 16px; }
+.hero-callout span { font-size: 12px; line-height: 1.5; margin-top: 4px; }
+.home-paths { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--line); }
+.home-paths button { display: flex; align-items: center; gap: 12px; padding: 20px 16px; text-align: left; background: transparent; border: 0; border-radius: 0; }
+.home-paths button + button { border-left: 1px solid var(--line); }
+.home-paths button:hover { background: var(--panel); }
+.home-paths button > span:nth-child(2) { flex: 1; min-width: 0; }
+.home-paths strong { display: block; font-size: 15px; }
+.home-paths small { display: block; margin-top: 6px; font-size: 13px; line-height: 1.5; font-family: inherit; letter-spacing: 0; }
+.home-path-number, .home-paths button > span:last-child { color: var(--gold); }
+.home-path-number { font: 12px monospace; }
+.portal-footer { margin-top: 24px; padding: 16px 0 0; gap: 16px; }
+body[data-page="home"] .portal-footer { border-top: 0; margin-top: 0; }
+.theme-picker > span { font-size: 11px; }
+
+/* Workshop: aligned rails and a dominant canvas, with optional setup below. */
+.workspace { display: grid; grid-template-columns: 236px minmax(0, 1fr) 300px; gap: var(--space-2); align-items: start; }
+.workspace > .bench { height: var(--workbench-height); align-self: start; }
+.workspace > .bench > .bench-stage { flex: 1 1 auto; min-height: 260px; }
+.bench-stage .builder-wrap { position: absolute; inset: 0; width: 100%; max-width: none; height: 100%; padding: 0; aspect-ratio: auto; }
+.bench-top { padding: 12px 16px; }
+.machine-title { font-size: 23px; min-width: 0; }
+.bench-top small { font-size: 11px; white-space: normal; text-align: right; }
+.bench-tools { padding: 8px 12px; gap: 6px; }
+.bench-tools button { min-height: 38px; font-size: 13px; padding: 7px 9px; }
+.front-bar, .level-bar, .view-toggles { padding: 8px 12px; gap: 8px; background: var(--panel); border-color: var(--line); }
+.front-bar > div { min-width: 130px; }
+.front-bar strong { font-size: 11px; letter-spacing: .4px; }
+.front-bar small { font-size: 12px; line-height: 1.4; }
+.front-bar select { min-height: 38px; }
+.front-bar .toggle, .view-toggles .toggle, .level-bar .toggle { font-size: 12px; }
+.level-bar > span { font-size: 11px; letter-spacing: .5px; }
+.level-bar .segmented { flex-wrap: wrap; }
+.level-bar .segmented button { padding: 7px 8px; font-size: 12px; min-height: 36px; }
+.view-toggles button { min-height: 36px; }
+.camera-controls button { min-height: 36px; padding: 7px 9px; font-size: 12px; }
+.grid-caption, .grid-caption.bottom { font-size: 11px; letter-spacing: .3px; }
+.grid-caption { top: 12px; width: calc(100% - 24px); }
+.grid-caption.bottom { top: auto; bottom: 12px; }
+.bench-status { padding: 10px 12px; min-height: 44px; font-size: 13px; }
+.parts-panel { height: var(--workbench-height); display: flex; flex-direction: column; }
+.parts-panel > .panel-head, .parts-tabs, .selection-details { flex-shrink: 0; }
+.parts-tabs { padding: 8px; gap: 4px; }
+.parts-tabs button { font-size: 12px; min-height: 36px; padding: 6px 8px; }
+.parts-list { flex: 1 1 auto; min-height: 160px; max-height: none; align-content: start; padding: 4px 8px 8px; gap: 8px; scrollbar-width: thin; }
+.part-card { height: 128px; }
+.part-card .sprite { width: 76px; height: 76px; }
+.part-card strong { font-size: 13px; min-height: 32px; }
+.part-card .price { font-size: 12px; }
+.part-card .part-role { font-size: 10px; letter-spacing: 0; }
+.selection-kicker { font-size: 11px; letter-spacing: .4px; }
+.selection-details { min-height: 0; max-height: 190px; overflow: auto; padding: 12px; scrollbar-width: thin; }
+.selection-details h3 { font-size: 14px; margin-bottom: 6px; }
+.selection-details p { font-size: 13px; line-height: 1.5; }
+.selection-details .part-tags { margin-top: 8px; }
+.part-tags span { font-size: 11px; padding: 4px 6px; }
+.right-column { display: flex; grid-column: auto; flex-direction: column; gap: 12px; max-height: var(--workbench-height); overflow: auto; scrollbar-width: thin; padding: 0 4px 4px 0; }
+.right-column > .panel { flex-shrink: 0; }
+.right-column .stats-body, .inspector-body { padding: 12px 16px; }
+.budget-row strong { font-size: 26px; }
+.budget-row span { font-size: 12px; }
+.right-column .stat-grid { grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.stat-grid strong { font-size: 22px; margin-top: 4px; }
+.right-column .stat-grid small { font-size: 11px; }
+.system-row, .right-column .system-row { font-size: 12px; margin-top: 10px; }
+.system-row b { font-size: 12px; }
+.limit-chips { margin-top: 10px; }
+.limit-chips span { font-size: 11px; padding: 4px 6px; }
+.inspector-body p { font-size: 13px; line-height: 1.5; margin: 8px 0; }
+.stack-guide { margin-top: 12px; padding: 8px 12px; }
+.stack-guide strong, .stack-guide span { font-size: 13px; line-height: 1.5; }
+.engineering-head { flex-wrap: wrap; }
+.engineering-head .climate-control { min-width: 120px; flex: 1; }
+.engineering-copy > strong { font-size: 13px; }
+.deploy-bar { position: sticky; bottom: 12px; z-index: 8; margin-top: 16px; padding: 12px 16px; gap: 16px; border-radius: var(--surface-radius); background: var(--panel); border-color: var(--line); box-shadow: 0 8px 24px #0004; }
+.deploy-bar h3 { font-size: 15px; }
+.deploy-bar p { font-size: 13px; max-width: 65ch; }
+.deploy-actions { flex-wrap: wrap; flex-shrink: 0; gap: 8px; }
+.deploy-actions button { min-height: 42px; font-size: 13px; }
+.deploy-bar .primary { min-width: 150px; min-height: 44px; padding: 10px 16px; font-size: 14px; box-shadow: none; }
+.workshop-settings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; margin-top: 16px; }
+.settings-disclosure { border: 1px solid var(--line); border-radius: var(--surface-radius); background: var(--panel); overflow: hidden; }
+.settings-disclosure > summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 64px; padding: 12px 16px; list-style: none; }
+.settings-disclosure > summary::-webkit-details-marker { display: none; }
+.settings-disclosure > summary:focus-visible { outline-offset: -3px; }
+.settings-disclosure > summary::after { content: "+"; font-size: 20px; color: var(--gold); }
+.settings-disclosure[open] > summary::after { content: "−"; }
+.settings-disclosure > summary strong { display: block; font-size: 14px; }
+.settings-disclosure > summary small { display: block; margin-top: 4px; font: 12px/1.4 Arial, sans-serif; letter-spacing: 0; }
+.settings-disclosure > .panel { border: 0; border-top: 1px solid var(--line); border-radius: 0; margin: 0; }
+.settings-disclosure > .panel > .panel-head { display: none; }
+.settings-disclosure .tactics-body, .settings-disclosure .custom-body, .settings-disclosure .rules-body { padding: 16px; }
+.settings-disclosure .tactics-body { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.settings-disclosure .field { margin: 0; min-width: 0; }
+.settings-disclosure .field > span { font-size: 13px; }
+.settings-disclosure .field select { font-size: 13px; }
+.settings-disclosure .rules-fields { grid-template-columns: 1fr 1fr; gap: 12px; }
+.settings-disclosure .rules-fields > .field:last-child { grid-column: auto; }
+.settings-disclosure .rules-presets { gap: 6px; margin-bottom: 12px; }
+.settings-disclosure .rules-presets button { flex: 1; padding: 8px; min-height: 38px; font-size: 12px; margin: 0; }
+.settings-disclosure .custom-fields { grid-template-columns: 1fr 1fr; gap: 12px; }
+.settings-disclosure .custom-fields .field:nth-last-child(2) { grid-column: auto; }
+.settings-disclosure .color-field { font-size: 13px; }
+#toast { z-index: 60; bottom: 100px; }
+
+/* Arena: use space for the fight; playback stays adjacent to the canvas. */
+.arena-layout { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 16px; align-items: start; }
+.arena-main { gap: 12px; }
+.arena-top { padding: 12px 16px; gap: 12px; }
+.arena-top h2 { font-size: 23px; }
+.arena-top p { font-size: 13px; line-height: 1.5; }
+.arena-controls { flex-wrap: wrap; }
+.arena-controls select { min-width: 140px; width: 160px; }
+.arena-screen { height: clamp(390px, calc(100dvh - 330px), 620px); }
+.opponent-list { max-height: min(650px, 72dvh); }
+.opponent strong { font-size: 13px; }
+.opponent small { font-size: 11px; }
+.opponent-preview { width: 52px; height: 52px; }
+.match-rules-banner { padding: 10px 16px; margin-bottom: 16px; font-size: 13px; border-color: var(--line); background: var(--panel); }
+.combat-stage { display: flex; flex-direction: column; border-radius: var(--surface-radius); box-shadow: none; }
+.combat-stage > .arena-screen { flex-shrink: 0; }
+.combat-stage > .battle-toolbar { order: 1; }
+.combat-stage > .arena-camera-bar { order: 2; }
+.combat-stage > .observation-deck { order: 3; }
+.combat-log { gap: 16px; }
+.combat-log .panel { padding: 16px; }
+.observation-deck { padding: 12px 16px; }
+
+/* Bounties: full-width results, a compact optional guide, consistent cards. */
+.bounty-board-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.bounty-board-actions .guide-reopen { margin: 0 0 0 auto; }
+.bounty-board-layout { display: block; }
+.bounty-guide-side { position: static; }
+.bounty-guide-side .contract-hero { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr); gap: 24px; margin-bottom: 16px; padding: 20px; }
+.bounty-guide-side .contract-hero h2 { font-size: 25px; margin: 8px 0 12px; }
+.bounty-guide-side .challenge-steps { grid-template-columns: 1fr 1fr; }
+.bounty-guide-side .contract-hero-actions:empty { display: none; }
+.bounty-guide-side .credit-summary { margin: 0; padding: 0 0 0 24px; border-top: 0; border-left: 1px solid var(--line); }
+.bounty-guide-side .credit-summary b { font-size: 26px; }
+.contract-filter { margin: 0 0 12px; gap: 12px; flex-wrap: wrap; }
+.contract-search { margin: 0 0 16px; gap: 8px; }
+.contract-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: 16px; align-items: stretch; }
+.contract-card { display: flex; flex-direction: column; border-radius: var(--surface-radius); box-shadow: none; }
+.contract-card:hover { transform: none; box-shadow: none; }
+.contract-card-top { padding: 12px 16px; gap: 8px; flex-wrap: wrap; }
+.contract-preview { height: 150px; flex-shrink: 0; }
+.contract-preview .sealed-defender { min-height: 0; height: 100%; padding: 16px; place-content: center start; text-align: left; }
+.contract-preview .sealed-defender span { font-size: 30px; }
+.contract-reward { right: 16px; bottom: 12px; }
+.contract-reward b { font-size: 32px; }
+.contract-reward small { font-size: 11px; letter-spacing: .5px; }
+.contract-content { flex: 1; display: flex; flex-direction: column; padding: 16px; }
+.contract-content h2 { font-size: 20px; }
+.contract-content p { font-size: 13px; }
+.contract-content .contract-footer { margin-top: auto; padding-top: 12px; }
+.contract-content .card-fee { margin-bottom: 12px; }
+.contract-grid > .bounty-empty { grid-column: 1 / -1; }
+.contract-detail { gap: 16px; align-items: start; }
+.defender-card > canvas, .defender-card > .sealed-defender { height: clamp(280px, 26vw, 380px); min-height: 280px; }
+.defender-card { align-self: start; }
+.defender-caption, .contract-terms { padding: 24px; }
+.defender-caption h2, .contract-terms > h2 { font-size: 30px; }
+.defender-card .bounty-actions { padding: 0 24px 24px; }
+.contract-economy { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 16px 0; }
+.contract-economy b { font-size: 30px; }
+.contract-economy small { display: block; font-size: 11px; line-height: 1.4; letter-spacing: .4px; }
+.contract-rule { margin: 16px 0; }
+.contract-rule p, .contract-terms > .hint { font-size: 13px; }
+.bounty-loading { min-height: 280px; }
+
+/* Documentation and agent tools share the same rhythm without oversized heroes. */
+.portal-section { margin: 24px 0; }
+.section-title { margin-bottom: 16px; align-items: center; gap: 16px; }
+.section-title h2 { font-size: 26px; margin-top: 6px; }
+.agent-intro { max-width: none; margin: 0 0 24px; }
+.agent-intro h1 { font-size: clamp(30px, 3vw, 42px); margin: 12px 0; line-height: 1.1; }
+.agent-intro h1 br { display: none; }
+.agent-intro h1 em::before { content: " "; }
+.agent-intro > p { font-size: 14px; line-height: 1.6; max-width: 75ch; }
+.discovery-box { margin: 16px 0; padding: 12px 16px; }
+.agent-intro .portal-actions { margin: 12px 0; }
+.agent-steps { margin: 16px 0 24px; }
+.agent-steps article { padding: 16px; }
+.agent-steps h3 { font-size: 18px; margin: 8px 0; }
+.agent-steps p { font-size: 13px; line-height: 1.5; }
+.agent-lab-grid { grid-template-columns: 1fr 1fr; gap: 16px; }
+.lab-editor, .lab-results { padding: 16px; }
+#agent-json { height: 380px; }
+.agent-access { padding: 24px; gap: 24px; }
+.agent-access h2 { font-size: 26px; margin: 8px 0; }
+.agent-activity-list { max-height: 300px; }
+.rules-page { gap: 16px; }
+.rules-hero { padding: 24px; gap: 24px; }
+.rules-hero h2 { font-size: 28px; }
+.rules-hero-stats { margin-left: 0; gap: 8px; }
+.rules-section-head { padding: 16px 24px; gap: 12px; }
+.rules-section-body { padding: 20px 24px; }
+.rules-card, .rule-step { padding: 16px; min-height: 0; }
+.rules-jump { flex-wrap: wrap; gap: 8px 16px; line-height: 1.8; }
+.rules-jump a { padding: 4px 0; }
+
+@media (max-width: 1180px) {
+  .topbar { gap: 8px; }
+  .topbar .nav { font-size: 12px; padding: 8px; }
+  .header-tools .local-tag { display: none; }
+  .workspace { grid-template-columns: 220px minmax(0, 1fr); }
+  .right-column { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; max-height: none; overflow: visible; padding: 0; }
+  .right-column > .panel { max-height: 480px; overflow: auto; }
+  .engineering-head .climate-control { flex-basis: 100%; }
+  .deploy-actions { flex-shrink: 1; }
+  .settings-disclosure .tactics-body, .settings-disclosure .custom-fields { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .home-paths button { padding: 16px 12px; gap: 8px; }
+  .home-path-number { display: none; }
+  .hero-copy h1 { font-size: 44px; }
+  .right-column { grid-template-columns: 1fr 1fr; }
+  .right-column .engineering-panel { grid-column: 1 / -1; }
+  #engineering-report { max-height: 320px; overflow: auto; }
+  .workshop-settings { grid-template-columns: 1fr; gap: 8px; }
+  .settings-disclosure .tactics-body, .settings-disclosure .custom-fields { grid-template-columns: 1fr 1fr; }
+  .arena-layout { display: flex; flex-direction: column; }
+  .arena-layout > * { width: 100%; }
+  .opponents-panel { order: 1; }
+  .opponent-list { grid-template-columns: repeat(3, minmax(0, 1fr)); max-height: 220px; }
+  .bounty-guide-side .contract-hero { grid-template-columns: 1fr; }
+  .bounty-guide-side .credit-summary { border-left: 0; border-top: 1px solid var(--line); padding: 16px 0 0; }
+  .contract-detail { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  main { padding: 16px 16px 24px; }
+  .topbar { height: 60px; min-height: 60px; flex-wrap: nowrap; padding: 0 12px; }
+  .topbar nav { order: initial; width: auto; }
+  .topbar .nav { font-size: 13px; min-height: 44px; }
+  .page-heading { align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+  .page-heading h1 { font-size: 28px; }
+  .page-heading p { max-width: 60ch; font-size: 13px; }
+  .heading-actions { width: 100%; flex-wrap: wrap; }
+  .heading-actions button { min-height: 44px; font-size: 13px; }
+  .portal-hero { grid-template-columns: 1fr; gap: 20px; padding: 8px 0 20px; }
+  .hero-copy h1 { font-size: clamp(38px, 9vw, 52px); margin: 12px 0; }
+  .hero-copy > p { font-size: 15px; }
+  .hero-copy .portal-actions { margin-top: 16px; }
+  .home-facts { margin-top: 16px; }
+  #hero-machine { height: 220px; }
+  .hero-display { max-width: none; }
+  .hero-callout { margin-bottom: 12px; }
+  .home-paths { grid-template-columns: 1fr; }
+  .home-paths button { padding: 16px 8px; gap: 12px; }
+  .home-paths button + button { border-left: 0; border-top: 1px solid var(--line); }
+  .home-path-number { display: block; }
+  .home-paths small { font-size: 13px; }
+  .portal-footer { flex-wrap: wrap; gap: 12px; padding-top: 16px; }
+  .portal-footer > span { width: auto; }
+  .workspace { grid-template-columns: 180px minmax(0, 1fr); gap: 12px; }
+  .parts-tabs button { min-height: 40px; }
+  .parts-list { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .part-card .sprite { width: 64px; height: 64px; }
+  .part-card strong { font-size: 12px; }
+  .bench-tools button, .camera-controls button, .level-bar .segmented button { min-height: 40px; }
+  .deploy-bar { position: static; flex-wrap: wrap; padding: 12px; gap: 12px; box-shadow: none; }
+  .deploy-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+  .deploy-actions button { min-height: 44px; }
+  .deploy-actions .primary { grid-column: 1 / -1; }
+  .contract-search { grid-template-columns: 1fr 1fr; }
+  .contract-search input[type="search"] { grid-column: 1 / -1; }
+  .contract-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .contract-card-top { padding: 12px; }
+  .contract-content { padding: 12px; }
+  .contract-footer { gap: 8px; flex-wrap: wrap; }
+  .bounty-board-actions .guide-reopen { margin-left: 0; }
+  .contract-filter .segmented { gap: 4px; }
+  .contract-filter .segmented button { min-height: 44px; }
+  .arena-controls { width: 100%; }
+  .arena-controls select { min-width: 0; width: 100%; flex: 1 1 140px; }
+  .arena-screen { height: 430px; }
+  .arena-camera-bar, .battle-toolbar { gap: 8px; flex-wrap: wrap; padding: 8px; }
+  .arena-camera-bar button, .battle-toolbar button { min-height: 40px; }
+  .agent-steps { grid-template-columns: 1fr 1fr; }
+  .agent-lab-grid, .agent-access { grid-template-columns: 1fr; }
+  .agent-intro h1 { font-size: 32px; }
+  .agent-access { padding: 16px; }
+  .section-title { align-items: flex-start; gap: 8px; }
+  .section-title h2 { font-size: 24px; }
+  .section-title > p { max-width: 60ch; }
+  .rules-hero { padding: 16px; gap: 16px; }
+  .rules-section-head, .rules-section-body { padding: 16px; }
+  .rules-hero h2 { font-size: 25px; }
+  .rules-two-col, .rules-result-grid { grid-template-columns: 1fr; }
+  .rules-card-grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 600px) {
+  .workspace { display: flex; flex-direction: column; }
+  .workspace > * { width: 100%; }
+  .workspace > .bench { height: auto; order: 0; }
+  .workspace > .bench > .bench-stage { flex: none; min-height: 340px; height: 340px; }
+  .parts-panel { height: auto; order: 1; }
+  .parts-list { flex: none; grid-template-columns: repeat(3, minmax(0, 1fr)); max-height: 280px; min-height: 0; }
+  .parts-tabs { flex-wrap: nowrap; overflow-x: auto; }
+  .parts-tabs button { flex-shrink: 0; }
+  .selection-details { max-height: 160px; }
+  .right-column { display: flex; order: 2; gap: 12px; }
+  .right-column > .panel { max-height: none; }
+  .front-bar .toggle { width: auto; margin-left: 0; }
+  .front-bar > div { min-width: 0; }
+  .level-bar .toggle { margin-left: 0; }
+  .camera-controls { width: calc(100% - 24px); bottom: 38px; }
+  .camera-controls button { padding: 7px 8px; }
+  .contract-grid { grid-template-columns: 1fr; }
+  .contract-content { padding: 16px; }
+  .contract-preview { height: 140px; }
+  .bounty-guide-side .contract-hero { padding: 16px; gap: 16px; }
+  .bounty-guide-side .challenge-steps { grid-template-columns: 1fr; }
+  .defender-caption, .contract-terms { padding: 20px; }
+  .contract-economy { gap: 12px; }
+  .contract-economy b { font-size: 26px; }
+  .opponent-list { grid-template-columns: 1fr 1fr; }
+  .rules-card-grid { grid-template-columns: 1fr; }
+  .settings-disclosure .tactics-body { grid-template-columns: 1fr; }
+  .hero-display-top { font-size: 10px; }
+  .hero-display-top i { font-size: 10px; }
+}
+
+/* Keep immersive playback independent of page sizing and stacking. */
+.combat-stage:fullscreen > .arena-screen,
+.combat-stage.theater > .arena-screen { flex: 1 1 auto; height: auto; min-height: 200px; }
+.combat-stage.theater { z-index: 70; }
+@media (prefers-reduced-motion: reduce) {
+  .home-paths button, .contract-card { transition: none; }
+}
