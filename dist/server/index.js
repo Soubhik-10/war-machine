@@ -7217,7 +7217,12 @@ main{max-width:1500px;padding:34px clamp(18px,4vw,64px) 54px}
 @media(max-width:1050px){.bounty-board-layout{grid-template-columns:minmax(240px,290px) minmax(0,1fr);gap:18px}}
 @media(max-width:760px){.bounty-board-layout{grid-template-columns:1fr;gap:15px}.bounty-guide-side{position:static}.bounty-guide-side .contract-hero{padding:17px}.bounty-guide-side .contract-hero h2{font-size:28px}.bounty-guide-side .challenge-steps{grid-template-columns:1fr 1fr}.bounty-guide-side .credit-summary{margin-top:14px}.bounty-guide-side .credit-rules{grid-template-columns:1fr}}
 @media(max-width:480px){.bounty-guide-side .challenge-steps{grid-template-columns:1fr}}
-`,"text/css; charset=utf-8","46f55b9a12e70dbf"],"/portal.mjs":[`import {PARTS,ARENAS,PRESETS,clone,packChallenge,stats} from './data.mjs';
+
+/* Do not stretch the build canvas to the height of the side rail. */
+.workspace{align-items:start}
+.workspace>.bench{align-self:start;height:max-content}
+.workspace>.bench>.bench-stage{flex:0 0 auto}
+`,"text/css; charset=utf-8","aa3b7c6e9479d565"],"/portal.mjs":[`import {PARTS,ARENAS,PRESETS,clone,packChallenge,stats} from './data.mjs';
 import {Renderer,Geometry} from './renderer.mjs';
 import {fittedSpan} from './camera.mjs';
 import {installAgentActivity} from './activity.mjs';
