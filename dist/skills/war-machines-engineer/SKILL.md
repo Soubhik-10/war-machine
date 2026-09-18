@@ -25,6 +25,6 @@ A deterministic attempt waits for the configured EIP-712 result-signature quorum
 
 ## MCP and MPP scope
 
-MCP forwards the 402 challenge and payment authorization for the same stateless flow. For native MPP bounty routes, verify the exact reward/entry, recipient, chain and expiry, then retry the unchanged request. A zero-value Tempo proof authorizes later deploy, settle and control calls; it does not contain or replace a private key, and it does not replace the server relayer. For explicitly advertised paid agent API routes, verify every charge challenge's origin, recipient, exact pathUSD amount, chain and expiry before paying.
+MCP forwards the 402 challenge and payment authorization for the same stateless flow. For native MPP bounty routes, verify the exact reward/entry, recipient, chain and expiry, then retry the unchanged request. Follow-on counter deployment uses the same authenticated entrant identity; it does not contain or replace a private key, and it does not replace the server relayer.
 
-Scoped agent keys cannot approve wallet transactions. An autonomous agent that funds or enters a bounty must use and sign with its own Tempo wallet. Keep keys, sessions, MPP credentials, idempotency keys and payment artifacts out of URLs, blueprints, logs and source control.
+An autonomous agent that funds or enters a bounty must use its own Tempo MPP wallet. Keep sessions, MPP credentials, idempotency keys and payment artifacts out of URLs, blueprints, logs and source control.

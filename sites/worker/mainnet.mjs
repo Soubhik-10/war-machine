@@ -340,30 +340,6 @@ export function runtimeConfig(env, origin) {
       }
     }
   }
-  const mppRecipient = String(env.WM_AGENT_MPP_RECIPIENT || ""),
-    mppPrice = String(env.WM_AGENT_MPP_PRICE || "");
-  let normalizedMppRecipient = null;
-  try {
-    if (/^0x[0-9a-fA-F]{40}$/.test(mppRecipient))
-      normalizedMppRecipient = getAddress(mppRecipient);
-  } catch {}
-  let mppPriceUnits = null;
-  try {
-    mppPriceUnits = pathUsdToUnits(mppPrice, {
-      allowZero: false,
-      // Keep a misconfigured public service from charging an unexpectedly
-      // large amount in a single agent request.
-      maxUnits: 1_000_000n,
-    });
-  } catch {}
-  const agentMppEnabled =
-    env.WM_AGENT_MPP_ENABLED === "true" &&
-    normalizedMppRecipient !== null &&
-    normalizedMppRecipient !== getAddress(escrow) &&
-    normalizedMppRecipient !== getAddress(PLATFORM_FEE_RECIPIENT) &&
-    typeof env.MPP_SECRET_KEY === "string" &&
-    new TextEncoder().encode(env.MPP_SECRET_KEY).length >= 32 &&
-    mppPriceUnits !== null;
   const relayerKey = String(env.WM_BOUNTY_RELAYER_PRIVATE_KEY || "");
   let relayerAddress = null;
   try {
@@ -395,10 +371,9 @@ export function runtimeConfig(env, origin) {
     relayerMatches &&
     validMppSecret &&
     bountyMppMaxUnits !== null;
-  const activeMppSecret =
-    validMppSecret && (agentMppEnabled || agentBountyMppEnabled)
-      ? env.MPP_SECRET_KEY
-      : null;
+  const activeMppSecret = validMppSecret && agentBountyMppEnabled
+    ? env.MPP_SECRET_KEY
+    : null;
   return {
     mode: "tempo-mainnet",
     enabled: true,
@@ -414,9 +389,6 @@ export function runtimeConfig(env, origin) {
     decimals: PATH_USD_DECIMALS,
     rpcUrl: env.WM_TEMPO_RPC_URL || "https://rpc.tempo.xyz",
     origin,
-    agentMppEnabled,
-    agentMppRecipient: agentMppEnabled ? normalizedMppRecipient : null,
-    agentMppPriceUnits: mppPriceUnits,
     mppSecret: activeMppSecret,
     agentBountyMppEnabled,
     agentBountyMppRecipient: agentBountyMppEnabled ? relayerAddress : null,
@@ -492,67 +464,43 @@ function catalog(config) {
           verify: "/api/auth/verify",
         }
       : "locked",
-    mpp: {
-      enabled: !!(config.agentMppEnabled || config.agentBountyMppEnabled),
-      method: "tempo",
-      intent: "charge",
-      scope: config.agentBountyMppEnabled
-        ? "Native MPP payments can fund and enter bounties through a bounded relayer; other agent operations use a zero-value Tempo proof."
-        : "A zero-value Tempo proof authenticates the wallet for autonomous agent operations; MPP agent simulations remain separately priced.",
-      ...(config.agentMppEnabled || config.agentBountyMppEnabled
-        ? {
-            routes: [
-              ...(config.agentMppEnabled
-                ? [{
-                    path: "/api/agent/practice",
-                    price: unitsToPathUsd(config.agentMppPriceUnits),
-                    recipient: config.agentMppRecipient,
-                  }]
-                : []),
-              ...(config.agentBountyMppEnabled
-                ? [{
-                    path: "/api/bounties",
-                    method: "POST",
-                    price: "request.reward",
-                    recipient: config.agentBountyMppRecipient,
-                  }, {
-                    path: "/api/bounties/{id}/attempts",
-                    method: "POST",
-                    price: "request.entry",
-                    recipient: config.agentBountyMppRecipient,
-                  }]
-                : []),
-            ],
-            agentProof: {
-              intent: "charge",
-              amount: "0",
-              currency: PATH_USD_TOKEN,
-              chainId: TEMPO_MAINNET_CHAIN_ID,
-              header: "Payment-Authorization",
-              scopes: ["create", "enter", "deploy", "settle", "control"],
-              routes: [
-                { path: "/api/bounties", method: "POST", scope: "create" },
-                { path: "/api/bounties/{id}/attempts", method: "POST", scope: "enter" },
-                { path: "/api/escrow/intents/{id}/confirm", method: "POST", scope: "create|enter|control" },
-                { path: "/api/attempts/{id}/deploy", method: "POST", scope: "deploy" },
-                { path: "/api/attempts/{id}/forfeit", method: "POST", scope: "deploy" },
-                { path: "/api/bounties/{id}/cancel", method: "POST", scope: "control" },
-                { path: "/api/bounties/{id}/expire", method: "POST", scope: "control" },
-                { path: "/api/bounties/{id}/timeout-forfeit", method: "POST", scope: "control" },
-              ],
+    mpp: config.agentBountyMppEnabled
+      ? {
+          enabled: true,
+          method: "tempo",
+          intent: "charge",
+          scope:
+            "Paid MPP payments fund a new bounty or enter an existing bounty. Browser players use the Tempo Wallet session on the same routes.",
+          routes: [
+            {
+              path: "/api/bounties",
+              method: "POST",
+              price: "request.reward",
+              recipient: config.agentBountyMppRecipient,
             },
-            currency: PATH_USD_TOKEN,
-            supportedInputTokens: config.supportedInputTokens,
-            swap: {
-              targetToken: PATH_USD_TOKEN,
-              slippageBps: config.swapSlippageBps,
-              atomic: true,
-              description:
-                "MPP clients may atomically swap an allowlisted Tempo stablecoin into pathUSD before the exact transfer.",
+            {
+              path: "/api/bounties/{id}/attempts",
+              method: "POST",
+              price: "request.entry",
+              recipient: config.agentBountyMppRecipient,
             },
-          }
-        : {}),
-    },
+          ],
+          currency: PATH_USD_TOKEN,
+          supportedInputTokens: config.supportedInputTokens,
+          swap: {
+            targetToken: PATH_USD_TOKEN,
+            slippageBps: config.swapSlippageBps,
+            atomic: true,
+            description:
+              "MPP clients may atomically swap an allowlisted Tempo stablecoin into pathUSD before the exact transfer.",
+          },
+        }
+      : {
+          enabled: false,
+          method: "tempo",
+          intent: "charge",
+          scope: "Native MPP bounty payments are not configured.",
+        },
     directEscrow: paid
       ? {
           enabled: true,
@@ -665,35 +613,24 @@ const discovery = (config) => ({
               quorum: 1,
               signers: config.settlementSigners,
             },
-        mpp: !!(config.agentMppEnabled || config.agentBountyMppEnabled),
+        mpp: !!config.agentBountyMppEnabled,
         mppScope: config.agentBountyMppEnabled
-          ? "Native MPP payments fund and enter bounties through the configured bounded relayer; zero-value proof remains available for later agent operations."
-          : config.agentMppEnabled
-            ? "Zero-value Tempo proof authorizes the wallet for autonomous REST and MCP bounty operations; MPP agent simulations are separately priced."
-          : "MPP agent billing is not configured.",
-        ...(config.agentMppEnabled || config.agentBountyMppEnabled
+          ? "Paid MPP payments fund and enter bounties through the configured bounded relayer."
+          : "Native MPP bounty payments are not configured.",
+        ...(config.agentBountyMppEnabled
           ? {
               mppRoutes: [
-                ...(config.agentMppEnabled
-                  ? [{
-                      path: "/api/agent/practice",
-                      price: unitsToPathUsd(config.agentMppPriceUnits),
-                      recipient: config.agentMppRecipient,
-                    }]
-                  : []),
-                ...(config.agentBountyMppEnabled
-                  ? [{
-                      path: "/api/bounties",
-                      method: "POST",
-                      price: "request.reward",
-                      recipient: config.agentBountyMppRecipient,
-                    }, {
-                      path: "/api/bounties/{id}/attempts",
-                      method: "POST",
-                      price: "request.entry",
-                      recipient: config.agentBountyMppRecipient,
-                    }]
-                  : []),
+                {
+                  path: "/api/bounties",
+                  method: "POST",
+                  price: "request.reward",
+                  recipient: config.agentBountyMppRecipient,
+                }, {
+                  path: "/api/bounties/{id}/attempts",
+                  method: "POST",
+                  price: "request.entry",
+                  recipient: config.agentBountyMppRecipient,
+                },
               ],
             }
           : {}),
@@ -732,7 +669,7 @@ const discovery = (config) => ({
       "history",
     ],
   scheme:
-    "Tempo wallet session or Payment-Authorization zero-value Tempo proof (REST and MCP)",
+    "Tempo wallet session for browser players or paid native MPP for agents (REST and MCP)",
   },
   invariants: {
     oneActiveAttemptPerBounty: true,
@@ -760,9 +697,9 @@ const openapi = {
       mppProof: {
         type: "apiKey",
         in: "header",
-        name: "Payment-Authorization",
+        name: "Authorization",
         description:
-          "MPP Tempo charge proof. Send the exact credential returned for the route challenge; zero-value proof authenticates the wallet without charging it.",
+          "MPP Tempo credential. Send the exact Payment credential returned for the route challenge in the standard Authorization header. Payment-Authorization is accepted as a compatibility alias.",
       },
     },
   },
@@ -796,71 +733,6 @@ const openapi = {
         description:
           "On V4 deployments with native MPP enabled, this route returns a 402 challenge for the exact entry and then enters through the bounded relayer after the MPP client retries. Other deployments prepare a direct enterBounty plan for the caller's Tempo wallet. Body: maxEntry, maxPlatformFeeBps, participantName and showAddress.",
         security: [{ bearerAuth: [] }, { mppProof: [] }],
-      },
-    },
-    "/agent/practice": {
-      post: {
-        summary: "Run one MPP-paid simulation",
-        description:
-          "Available only when discovery payments.mpp is true. The first request returns an MPP 402 challenge; retry with the exact Payment-Authorization credential. This route is paid separately from autonomous bounty operations and requires an existing wallet session or agent key.",
-        security: [{ bearerAuth: [] }],
-        parameters: [
-          {
-            name: "Idempotency-Key",
-            in: "header",
-            required: true,
-            schema: {
-              type: "string",
-              minLength: 16,
-              maxLength: 100,
-              pattern: "^[A-Za-z0-9_-]+$",
-            },
-          },
-          {
-            name: "Payment-Authorization",
-            in: "header",
-            required: false,
-            description:
-              "MPP payment credential returned by the selected Tempo client after the 402 challenge.",
-            schema: { type: "string" },
-          },
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                additionalProperties: false,
-                required: ["challenger"],
-                properties: {
-                  challenger: { type: "object" },
-                  defender: { type: "object" },
-                  bountyId: { type: "string" },
-                  seed: { type: "integer", minimum: 0, maximum: 4294967295 },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          "200": {
-            description: "Practice result",
-            headers: {
-              "Payment-Receipt": { schema: { type: "string" } },
-            },
-          },
-          "402": {
-            description:
-              "MPP payment challenge. Retry with Payment-Authorization.",
-            headers: {
-              "WWW-Authenticate": { schema: { type: "string" } },
-            },
-          },
-          "401": { description: "A wallet session or agent key is required." },
-          "409": { description: "Idempotency-Key conflict." },
-          "503": { description: "MPP service is not configured or paused." },
-        },
       },
     },
     "/attempts/{id}": {
@@ -901,17 +773,6 @@ async function bodyOf(request) {
   }
 }
 async function dbAuth(db, request) {
-  const raw = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  if (raw) {
-    const token = await hex(raw);
-    const row = await db
-      .prepare(
-        "SELECT id,account,name,'agent' AS role FROM agent_keys WHERE token_hash=? AND revoked=0",
-      )
-      .bind(token)
-      .first();
-    if (row) return row;
-  }
   const value = cookie(request, "wm_session");
   if (!value) return null;
   const token = await hex(value),
@@ -1176,7 +1037,6 @@ async function activity(db, accountId) {
   for (const row of finances.results) {
     const message =
       {
-        "agent-mpp-practice": "Paid agent simulation",
         "entry-paid": "Entry payment",
         "reward-funded": "Reward funding",
         "winner-payout": "Winner payout",
@@ -1423,19 +1283,19 @@ async function mppCharge(
   request,
   { amountUnits, recipient, operation, description, meta, expires },
 ) {
-  // `requiresAuth` advertises Payment-Authorization so a normal Bearer
-  // session can coexist with an MPP credential. Keep the fallback below for
-  // older clients that still send Authorization: Payment, but always issue
-  // the challenge with the canonical split header.
-  const mppRequest = request.headers.get("Payment-Authorization")
-    ? request
-    : (() => {
-        const authorization = request.headers.get("Authorization");
-        if (!authorization || !/^Payment\s+/i.test(authorization)) return request;
-        const headers = new Headers(request.headers);
-        headers.set("Payment-Authorization", authorization);
-        return new Request(request.clone(), { headers });
-      })();
+  // MPP's protocol-default credential header is Authorization: Payment. A
+  // few older clients still send Payment-Authorization, so normalize that
+  // alias only on the retry request. The challenge must be generated with
+  // the default header or clients that echo the standard challenge cannot
+  // verify its HMAC binding.
+  const paymentAuthorization = request.headers.get("Payment-Authorization"),
+    mppRequest = paymentAuthorization
+      ? (() => {
+          const headers = new Headers(request.headers);
+          headers.set("Authorization", paymentAuthorization);
+          return new Request(request.clone(), { headers });
+        })()
+      : request;
   const method = tempoMpp.charge({
       currency: config.token,
       decimals: config.decimals,
@@ -1449,7 +1309,6 @@ async function mppCharge(
       methods: [method],
       secretKey: config.mppSecret,
       realm: new URL(config.origin).hostname,
-      requiresAuth: true,
     }),
     result = await mppx.charge({
       amount: display(amountUnits),
@@ -1469,9 +1328,7 @@ async function mppCharge(
 }
 function mppCredentialSource(request) {
   try {
-    const credential = MppCredential.fromRequest(request, {
-      header: "Payment-Authorization",
-    });
+    const credential = MppCredential.fromRequest(request);
     const parsed = credential.source
       ? MppProof.parsePkhSource(credential.source)
       : null;
@@ -2353,8 +2210,8 @@ async function accountForTempoAddress(db, address) {
   return accountId;
 }
 async function mppAgentAuth(db, config, request, scope, operation) {
-  const mppEnabled = config.agentMppEnabled || config.agentBountyMppEnabled,
-    recipient = config.agentMppRecipient || config.agentBountyMppRecipient;
+  const mppEnabled = config.agentBountyMppEnabled,
+    recipient = config.agentBountyMppRecipient;
   check(
     mppEnabled && recipient,
     "MPP agent access is not configured. Set the MPP relayer, recipient and secret first.",
@@ -5199,8 +5056,8 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       );
     const body = ["POST", "PATCH"].includes(method)
       // Keep the original request readable for MPP authentication. The
-      // Tempo CLI may need the request clone when normalizing its standard
-      // Authorization header to Payment-Authorization.
+      // native MPP client may need a clone when using the legacy
+      // Payment-Authorization alias.
       ? await bodyOf(request.clone())
       : {},
       auth = await dbAuth(db, request);
@@ -5215,7 +5072,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         mode: "tempo-mainnet",
         paymentsEnabled: config.enabled,
         directEscrow: !!config.directEscrow,
-        mppAgentApi: !!(config.agentMppEnabled || config.agentBountyMppEnabled),
+        mppAgentApi: !!config.agentBountyMppEnabled,
         activation: config.enabled
           ? config.acceptingNewBounties
             ? "ready"
@@ -5253,60 +5110,6 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       config.reason || "Mainnet payments are unavailable.",
       503,
     );
-    if (path === "/api/agent/practice" && method === "POST") {
-      check(
-        config.agentMppEnabled,
-        "MPP agent practice is not configured. Set a separate agent recipient, exact pathUSD price and MPP secret; this never enables bounty funding.",
-        503,
-      );
-      const actor = requireAuth(auth),
-        key = request.headers.get("idempotency-key");
-      validKey(key);
-      const operation = "agent-practice:" + actor.account + ":" + key,
-        previous = await prior(db, actor.account, key, "agent-practice", body);
-      if (previous) {
-        const cached = await savedMppResult(db, previous);
-        check(
-          cached,
-          "The paid agent simulation is temporarily unavailable; retry with the same idempotency key.",
-          503,
-        );
-        return response(cached.result, 200, {
-          "payment-receipt": cached.receipt,
-        });
-      }
-      const payment = await gateway(db, config)(request, {
-        amountUnits: config.agentMppPriceUnits,
-        recipient: config.agentMppRecipient,
-        operation,
-        description: "War Machines paid agent simulation",
-        meta: {
-          kind: "agent-practice",
-          engineHash: CLIENT_ENGINE_HASH,
-          scope: "practice-only",
-        },
-        expires: now() + 5 * 60 * 1000,
-      });
-      if (!payment.paid) return payment.response;
-      const result = await practice(db, body, actor.account);
-      await recordFinancial(db, {
-        kind: "agent-mpp-practice",
-        account: actor.account,
-        ref: operation,
-        amountUnits: config.agentMppPriceUnits,
-        recipient: config.agentMppRecipient,
-        status: "confirmed",
-        providerRef: payment.receipt,
-      });
-      await saveMppResult(db, operation, {
-        result,
-        receipt: payment.receipt,
-      });
-      await remember(db, actor.account, key, "agent-practice", body, operation);
-      return response(result, 200, {
-        "payment-receipt": payment.receipt,
-      });
-    }
     if (path === "/api/me/wallet" && method === "GET") {
       const me = await account(db, requireAuth(auth).account),
         address = me.payoutAddress;
@@ -5522,61 +5325,6 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
           .bind(auth.account, match[1])
           .run();
       return response({ saved: method === "PUT", bounty: match[1] });
-    }
-    if (path === "/api/agents" && method === "GET") {
-      requireOwner(auth);
-      const rows = await db
-        .prepare(
-          "SELECT id,name,created,revoked FROM agent_keys WHERE account=? ORDER BY created DESC",
-        )
-        .bind(auth.account)
-        .all();
-      return response(
-        rows.results.map((row) => ({
-          ...row,
-          revoked: !!row.revoked,
-          scopes: ["read", "save-build"],
-        })),
-      );
-    }
-    if (path === "/api/agents" && method === "POST") {
-      requireOwner(auth);
-      fields(body, ["name"]);
-      const count = await db
-        .prepare(
-          "SELECT COUNT(*) AS total FROM agent_keys WHERE account=? AND revoked=0",
-        )
-        .bind(auth.account)
-        .first();
-      check(count.total < 8, "Revoke an old agent key first.", 409);
-      const token = randomSecret(),
-        agent = id(),
-        created = now();
-      await db
-        .prepare(
-          "INSERT INTO agent_keys (id,account,token_hash,name,revoked,created) VALUES (?,?,?,?,0,?)",
-        )
-        .bind(
-          agent,
-          auth.account,
-          await hex(token),
-          text(body.name, 28, "agent name"),
-          created,
-        )
-        .run();
-      return response(
-        { token, id: agent, scopes: ["read", "save-build"] },
-        201,
-      );
-    }
-    match = path.match(/^\/api\/agents\/([a-f0-9-]{36})$/);
-    if (match && method === "DELETE") {
-      requireOwner(auth);
-      await db
-        .prepare("UPDATE agent_keys SET revoked=1 WHERE id=? AND account=?")
-        .bind(match[1], auth.account)
-        .run();
-      return response({ ok: true });
     }
     if (path === "/api/bounties" && method === "GET") {
       const completedAfter = now() - COMPLETED_BOUNTY_BOARD_MS,

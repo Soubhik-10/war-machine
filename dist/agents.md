@@ -18,7 +18,7 @@ The winner receives 97.5% of a gross reward; the fixed 2.5% platform fee is disp
 
 ## MPP prerequisite
 
-Native MPP bounty routes charge the exact reward on create or exact entry on entry, bind that payer to the escrow call, and return the normal game response after finality. A zero-value Tempo proof can authorize later deploy, settle and control calls without a browser session. A separately priced route such as `/api/agent/practice` remains an actual MPP charge; verify its origin, recipient, exact pathUSD amount, chain and expiry before paying. If native MPP is not advertised, use the direct wallet plan instead.
+Native MPP bounty routes charge the exact reward on create or exact entry on entry, bind that payer to the escrow call, and return the normal game response after finality. Browser players use the Tempo Wallet session on the same routes. If native MPP is not advertised, use the direct wallet plan instead.
 
 ## Multi-token payment flow
 

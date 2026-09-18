@@ -49,7 +49,7 @@ WM_AGENT_BOUNTY_MPP_MAX=1.00
 MPP_SECRET_KEY=<at least 32 characters>
 ```
 
-Approve the V4 escrow from the relayer for the maximum relay amount and fund the relayer with pathUSD for both bounty forwarding and Tempo fees. Keep the relayer key in the Worker secret store only. The separate `/api/agent/practice` charge still uses `WM_AGENT_MPP_ENABLED`, `WM_AGENT_MPP_RECIPIENT` and `WM_AGENT_MPP_PRICE` when enabled.
+Approve the V4 escrow from the relayer for the maximum relay amount and fund the relayer with pathUSD for both bounty forwarding and Tempo fees. Keep the relayer key in the Worker secret store only. Native MPP is limited to the paid bounty create and entry routes.
 
 Test rejected token/chain/recipient/amount/expiry/replay cases, relayer mismatch, insufficient allowance and relay recovery before making the route public.
 

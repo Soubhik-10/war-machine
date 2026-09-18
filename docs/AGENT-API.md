@@ -16,7 +16,7 @@ Use the discovery document as the authority for live mode, engine hash, token, c
 
 MCP-capable agents can connect to `/api/mcp` using the stateless Streamable HTTP transport. `/mcp` and `/mcp/` remain compatibility aliases for older discovery documents. The endpoint exposes the same validated API as tools named `war_machines_*`, including rules, scouts, validation, direct escrow plans, intent confirmation, deploy, settlement and bounty control. It does not run an AI model and it does not hold a wallet private key.
 
-Read tools work without authentication. On a V4 deployment with native MPP enabled, create and entry tool calls return an exact MPP challenge and the MPP client retries the same request; the Worker relays the matching V4 escrow call and returns the final result. On direct deployments, mutation tool calls may carry a zero-value Tempo MPP credential and the returned direct plan includes a `calls` array: for funding or entry it is one atomic `approve(pathUSD, escrow, amount)` plus escrow call; for control and settlement it is the single escrow call. MCP is the transport; the connected Tempo access-key limit authorizes and caps direct wallet transactions.
+Read tools work without authentication. On a V4 deployment with native MPP enabled, create and entry tool calls return an exact MPP challenge and the MPP client retries the same request; the Worker relays the matching V4 escrow call and returns the final result. Browser players use the Tempo Wallet session on those same routes. MCP is the transport; the connected Tempo access-key limit authorizes and caps direct wallet transactions on deployments without native MPP.
 
 ### Local Tempo wallet MCP fallback
 
@@ -42,7 +42,7 @@ It exposes `war_machines_find_and_beat_optimal_bounty`. The tool discovers the l
 
 ### Agent benchmark
 
-Run `npm run benchmark:agent` before and after agent changes. It measures public scout ranking, deterministic battle search, the synthetic zero-value MPP challenge/retry, live discovery and bounty reads, a live no-spend MPP challenge probe, and local MCP transport. It never broadcasts a wallet transaction or spends a credential. After deployment, the live MPP probe should receive `402`; `401` indicates the deployed artifact is still using the older agent-auth surface.
+Run `npm run benchmark:agent` before and after agent changes. It measures public scout ranking, deterministic battle search, live discovery and bounty reads, a live no-spend native MPP challenge probe, and local MCP transport. It never broadcasts a wallet transaction or spends a credential. After deployment, the live MPP probe should receive `402`.
 
 ## Engineering before entry
 
@@ -124,12 +124,10 @@ The contract processes each exit; the worker never sends a custody payout.
 
 ## MPP agent work
 
-When discovery lists native MPP bounty routes, the MPP client pays the exact reward or entry challenge and retries the identical request. V4 preserves the payer identity onchain through `createBountyFor`/`enterBountyFor`, and the Worker verifies the event before responding. A zero-value Tempo proof is still available for later deploy, settle and control calls without a browser session. New bounties are listed on the display board by default; send `listed: false` when you want a link-only bounty.
+When discovery lists native MPP bounty routes, the MPP client pays the exact reward or entry challenge and retries the identical request. V4 preserves the payer identity onchain through `createBountyFor`/`enterBountyFor`, and the Worker verifies the event before responding. New bounties are listed on the display board by default; send `listed: false` when you want a link-only bounty.
 
 If the paid discovery response includes `payments.supportedInputTokens`, configure mppx Tempo charge with `autoSwap.tokenIn` from that exact list and `payments.swap.slippageBps / 100`. The client quotes and atomically swaps the selected stablecoin into pathUSD before its exact MPP transfer. The escrow remains pathUSD-only, and the Worker rejects transfers in any other token. Direct wallet clients should use the Tempo Wallet swap-to-pathUSD flow before executing a direct escrow plan.
 
-`/api/agent/practice` is a separately priced `tempo.charge` simulation service, independent of bounty entry. Verify the advertised origin, recipient, pathUSD amount, chain and expiry before paying.
-
-Keep wallet sessions, agent keys, idempotency keys and MPP credentials out of URLs, blueprints, logs and source control. Unlisted bounty links are visible to anyone who receives them.
+Keep wallet sessions, idempotency keys and MPP credentials out of URLs, blueprints, logs and source control. Unlisted bounty links are visible to anyone who receives them.
 
 See [Tempo mainnet operations](TEMPO-MAINNET.md) and the downloadable `SKILL.md` for the signer workflow and current trial limits.

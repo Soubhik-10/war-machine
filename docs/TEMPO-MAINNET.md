@@ -50,9 +50,8 @@ WM_AGENT_BOUNTY_MPP_MAX=1.00
 MPP_SECRET_KEY=<32+ character server secret>
 ```
 
-The relayer must hold enough pathUSD for reward/entry forwarding and fee payment, and must approve the deployed V4 escrow for the configured maximum relay amount. The Worker secret is the only private value in this list; never put it in Git, D1 or the browser. A zero-value MPP proof remains available for later deploy, settle and control calls.
+The relayer must hold enough pathUSD for reward/entry forwarding and fee payment, and must approve the deployed V4 escrow for the configured maximum relay amount. The Worker secret is the only private value in this list; never put it in Git, D1 or the browser. Native MPP is used for paid bounty creation and entry; browser sessions continue to use the Tempo Wallet path for the same operations.
 
-The optional `/api/agent/practice` charge remains separately configured with `WM_AGENT_MPP_ENABLED`, `WM_AGENT_MPP_RECIPIENT` and `WM_AGENT_MPP_PRICE`.
 
 ### Allowlisted stablecoin inputs
 

@@ -63,17 +63,6 @@ const TOOLS = [
     },
   ),
   tool(
-    "war_machines_practice",
-    "Run a local deterministic simulation with two explicit blueprints. This never operates on a funded bounty.",
-    {
-      challenger: object("Packed challenger blueprint."),
-      defender: object("Packed defender blueprint, unless bountyId is supplied."),
-      bountyId: string("Bounty UUID previously revealed to this caller."),
-      seed: integer("Optional uint32 practice seed."),
-    },
-    ["challenger"],
-  ),
-  tool(
     "war_machines_create_bounty",
     "Create a bounty. When live discovery advertises native MPP bounty payments, the call itself is paid for the exact reward and returns the created bounty after relayed escrow confirmation; otherwise it returns the direct Tempo escrow plan.",
     {
@@ -231,8 +220,6 @@ const apiSpec = (name, args) => {
       };
     case "war_machines_validate_blueprint":
       return { method: "POST", path: "/api/blueprints/validate", body: args };
-    case "war_machines_practice":
-      return { method: "POST", path: "/api/practice", body: args };
     case "war_machines_create_bounty": {
       const idempotencyKey = requiredString(args.idempotencyKey, "idempotencyKey");
       if (!validIdempotencyKey(idempotencyKey))

@@ -147,23 +147,27 @@ async function benchmarkLive() {
         await measure(
           "live_mpp_challenge_only",
           async (index) => {
-            const response = await fetch(`${baseUrl}/api/agent/practice`, {
+            const response = await fetch(`${baseUrl}/api/bounties`, {
               method: "POST",
               headers: {
                 "content-type": "application/json",
                 "idempotency-key": `agent_bench_${index.toString().padStart(8, "0")}`,
               },
               body: JSON.stringify({
-                challenger: packChallenge(PRESETS[0], "foundry", 0),
-                defender: packChallenge(PRESETS[1], "foundry", 0),
-                seed: 7,
+                title: "Benchmark challenge",
+                blueprint: packChallenge(PRESETS[0], "foundry", 0),
+                entry: "0.01",
+                reward: "0.01",
+                hours: 1,
+                listed: false,
+                maxPlatformFeeBps: 250,
               }),
             });
             if (response.status !== 402) throw new Error(`expected 402, received ${response.status}`);
             await response.arrayBuffer();
           },
           liveSamples,
-          { url: `${baseUrl}/api/agent/practice`, spends: 0, proofRetries: 0 },
+          { url: `${baseUrl}/api/bounties`, spends: 0, proofRetries: 0 },
         ),
       );
     }

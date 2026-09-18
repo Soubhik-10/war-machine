@@ -109,7 +109,9 @@ const json = (url, method = "GET", body, token, key) =>
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
 const call = async (env, url, method, body, token, key) => {
-  const response = await worker.fetch(json(url, method, body, token, key), env);
+  const response = await worker.fetch(json(url, method, body, token, key), env, {
+    waitUntil() {},
+  });
   return {
     status: response.status,
     body: await response.json(),
@@ -224,122 +226,85 @@ test("Tempo mode is fail-closed and never falls back to sandbox credits", async 
   assert.match(practice.body.error, /paid entry.*timed counter deployment/i);
 });
 
-test("MPP practice advertises a bounded Tempo charge and returns a challenge before payment", async (t) => {
+test("native MPP exposes only paid bounty routes and uses the standard Authorization header", async (t) => {
   const DB = new D1Mock();
   await DB.migrate();
   t.after(() => DB.close());
-  const escrow = "0xb14a3aA99C9349094612143089F55aE5372DeB24",
-    recipient = "0x4444444444444444444444444444444444444444",
-    signer = privateKeyToAccount("0x" + "04".repeat(32)),
+  const relayer = privateKeyToAccount("0x" + "09".repeat(32)),
+    settlementKey = "0x" + "0a".repeat(32),
+    settlement = privateKeyToAccount(settlementKey),
     env = {
       DB,
       WM_MODE: "tempo-mainnet",
-      WM_BOUNTY_ESCROW_ADDRESS: escrow,
-      WM_AGENT_MPP_ENABLED: "true",
-      WM_AGENT_MPP_RECIPIENT: recipient,
-      WM_AGENT_MPP_PRICE: "0.01",
+      WM_BOUNTY_ESCROW_VERSION: "4",
+      WM_BOUNTY_ESCROW_ADDRESS:
+        "0x5555555555555555555555555555555555555555",
+      WM_ESCROW_SETTLEMENT_SIGNER: settlement.address,
+      WM_SETTLEMENT_PRIVATE_KEY: settlementKey,
+      WM_RESULT_SIGNING_READY: "true",
+      WM_BOUNTY_RELAYER_ADDRESS: relayer.address,
+      WM_BOUNTY_RELAYER_PRIVATE_KEY: "0x" + "09".repeat(32),
+      WM_AGENT_BOUNTY_MPP_ENABLED: "true",
+      WM_AGENT_BOUNTY_MPP_MAX: "1.00",
       MPP_SECRET_KEY: "m".repeat(32),
     };
-  const mppConfig = runtimeConfig(env, "https://foundry.example");
-  assert.equal(mppConfig.agentMppEnabled, true);
-  assert.equal(
-    runtimeConfig(
-      { ...env, WM_AGENT_MPP_RECIPIENT: escrow },
-      "https://foundry.example",
-    ).agentMppEnabled,
-    false,
-  );
-  assert.equal(
-    runtimeConfig(
-      { ...env, WM_AGENT_MPP_PRICE: "1.000001" },
-      "https://foundry.example",
-    ).agentMppEnabled,
-    false,
-  );
+  const config = runtimeConfig(env, "https://foundry.example");
+  assert.equal(config.agentBountyMppEnabled, true);
+  assert.equal(config.agentMppEnabled, undefined);
+  const ctx = { waitUntil() {} };
   const discovery = await worker.fetch(
     new Request("https://foundry.example/.well-known/war-machines.json"),
     env,
+    ctx,
   );
   const discoveryBody = await discovery.json();
   assert.equal(discoveryBody.payments.mpp, true);
-  assert.equal(discoveryBody.mcp.endpoint, "/api/mcp");
-  assert.deepEqual(discoveryBody.mcp.aliases, ["/mcp", "/mcp/"]);
-  assert.equal(discoveryBody.mcp.transport, "streamable-http");
   assert.deepEqual(discoveryBody.payments.mppRoutes, [
     {
-      path: "/api/agent/practice",
-      price: "0.01",
-      recipient,
+      path: "/api/bounties",
+      method: "POST",
+      price: "request.reward",
+      recipient: relayer.address,
+    },
+    {
+      path: "/api/bounties/{id}/attempts",
+      method: "POST",
+      price: "request.entry",
+      recipient: relayer.address,
     },
   ]);
   const openapi = await call(env, "/api/openapi.json");
   assert.equal(openapi.status, 200);
-  assert.match(
-    openapi.body.paths["/agent/practice"].post.description,
-    /Payment-Authorization/,
+  assert.equal(openapi.body.paths["/agent/practice"], undefined);
+  assert.equal(
+    openapi.body.components.securitySchemes.mppProof.name,
+    "Authorization",
   );
 
-  const mppEntryChallenge = await worker.fetch(
+  const challenge = await worker.fetch(
     new Request("https://foundry.example/api/bounties", {
       method: "POST",
       headers: {
         "content-type": "application/json",
         "idempotency-key": "mpp_create_fixture_0001",
       },
-      body: JSON.stringify({}),
-    }),
-    env,
-  );
-  assert.equal(mppEntryChallenge.status, 402);
-  assert.match(
-    mppEntryChallenge.headers.get("www-authenticate"),
-    /Payment/i,
-  );
-  assert.match(
-    mppEntryChallenge.headers.get("www-authenticate"),
-    /header="Payment-Authorization"/i,
-  );
-
-  const challenge = await call(env, "/api/auth/challenge", "POST", {
-    chainId: 4217,
-  });
-  const signature = await signer.signMessage({
-    message: challenge.body.message,
-  });
-  const verified = await call(env, "/api/auth/verify", "POST", {
-    address: signer.address,
-    message: challenge.body.message,
-    signature,
-  });
-  assert.equal(verified.status, 200, JSON.stringify(verified.body));
-  const response = await worker.fetch(
-    new Request("https://foundry.example/api/agent/practice", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        cookie: verified.headers.get("set-cookie"),
-        "idempotency-key": "mpp_practice_fixture_0001",
-      },
       body: JSON.stringify({
-        challenger: packChallenge(PRESETS[0], "foundry", 0),
-        defender: packChallenge(PRESETS[1], "foundry", 0),
-        seed: 7,
+        title: "Native MPP fixture",
+        blueprint: packChallenge(PRESETS[0], "foundry", 0),
+        entry: "0.01",
+        reward: "0.02",
+        hours: 1,
+        listed: false,
+        maxPlatformFeeBps: 250,
       }),
     }),
     env,
+    ctx,
   );
-  assert.equal(response.status, 402);
-  assert.match(response.headers.get("www-authenticate"), /Payment/i);
-  assert.equal(
-    DB.sqlite
-      .prepare("SELECT COUNT(*) AS total FROM financial_operations")
-      .get().total,
-    0,
-  );
-  assert.equal(
-    DB.sqlite.prepare("SELECT COUNT(*) AS total FROM idempotency").get().total,
-    0,
-  );
+  assert.equal(challenge.status, 402);
+  const wwwAuthenticate = challenge.headers.get("www-authenticate");
+  assert.match(wwwAuthenticate, /Payment/i);
+  assert.doesNotMatch(wwwAuthenticate, /header=/i);
 });
 
 test("V4 discovery enables exact native MPP bounty routes only for a matching relayer", async () => {
@@ -449,13 +414,19 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
   const env = {
     DB,
     WM_MODE: "tempo-mainnet",
+    WM_BOUNTY_ESCROW_VERSION: "4",
     WM_BOUNTY_ESCROW_ADDRESS:
       "0xb14a3aA99C9349094612143089F55aE5372DeB24",
-    WM_AGENT_MPP_ENABLED: "true",
-    WM_AGENT_MPP_RECIPIENT: "0x4444444444444444444444444444444444444444",
-    WM_AGENT_MPP_PRICE: "0.01",
-    MPP_SECRET_KEY: "m".repeat(32),
+    WM_ESCROW_SETTLEMENT_SIGNER: privateKeyToAccount("0x" + "0a".repeat(32)).address,
+    WM_SETTLEMENT_PRIVATE_KEY: "0x" + "0a".repeat(32),
+    WM_RESULT_SIGNING_READY: "true",
+    WM_BOUNTY_RELAYER_ADDRESS: privateKeyToAccount("0x" + "09".repeat(32)).address,
+    WM_BOUNTY_RELAYER_PRIVATE_KEY: "0x" + "09".repeat(32),
+    WM_AGENT_BOUNTY_MPP_ENABLED: "true",
+      WM_AGENT_BOUNTY_MPP_MAX: "1.00",
+      MPP_SECRET_KEY: "m".repeat(32),
   };
+  const ctx = { waitUntil() {} };
   const init = await worker.fetch(
     new Request("https://foundry.example/mcp", {
       method: "POST",
@@ -468,6 +439,7 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
       }),
     }),
     env,
+    ctx,
   );
   assert.equal(init.status, 200);
   const initBody = await init.json();
@@ -486,6 +458,7 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
       }),
     }),
     env,
+    ctx,
   );
   assert.equal(initWithTrailingSlash.status, 200);
 
@@ -501,6 +474,7 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
       }),
     }),
     env,
+    ctx,
   );
   assert.equal(initWithApiPrefix.status, 200);
 
@@ -511,6 +485,7 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
       body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
     }),
     env,
+    ctx,
   );
   assert.equal(listed.status, 200);
   const listedBody = await listed.json();
@@ -531,6 +506,7 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
       }),
     }),
     env,
+    ctx,
   );
   assert.equal(read.status, 200);
   const readBody = await read.json();
@@ -546,11 +522,21 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
         method: "tools/call",
         params: {
           name: "war_machines_create_bounty",
-          arguments: { idempotencyKey: "mcp_create_fixture_0001" },
+          arguments: {
+            title: "MCP fixture",
+            blueprint: packChallenge(PRESETS[0], "foundry", 0),
+            entry: "0.01",
+            reward: "0.02",
+            hours: 1,
+            listed: false,
+            maxPlatformFeeBps: 250,
+            idempotencyKey: "mcp_create_fixture_0001",
+          },
         },
       }),
     }),
     env,
+    ctx,
   );
   assert.equal(mutation.status, 402);
   assert.match(mutation.headers.get("www-authenticate"), /Payment/i);
