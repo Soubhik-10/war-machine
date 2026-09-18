@@ -9,6 +9,7 @@ import worker from "../sites/worker/index.mjs";
 import {
   reopenDefendedBounties,
   automaticTimeoutState,
+  archivePreV5Bounties,
   runtimeConfig,
   validateEscrowAttestation,
 } from "../sites/worker/mainnet.mjs";
@@ -706,6 +707,31 @@ test("expired engineering attempts move to the public onchain finalizer path", (
     ),
     "signable-loss",
   );
+});
+
+test("pre-V5 bounties leave the board without deleting recoverable escrow records", async (t) => {
+  const DB = new D1Mock();
+  await DB.migrate();
+  t.after(() => DB.close());
+  const stamp = Date.now();
+  DB.sqlite.exec(`
+    INSERT INTO accounts (id,token_hash,name,balance,created) VALUES ('creator','creator-token','Creator',0,${stamp});
+    INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,entry_units,reward_units,reserve_units,fee_policy_version) VALUES
+      ('legacy','creator','Legacy','{}',0,0,'open',1,${stamp},${stamp},'10000','1000000','1000000','pathusd-direct-escrow-v4'),
+      ('current','creator','Current','{}',0,0,'open',1,${stamp},${stamp},'10000','1000000','1000000','pathusd-direct-escrow-v5');
+  `);
+  await archivePreV5Bounties(DB);
+  const rows = DB.sqlite
+    .prepare("SELECT id,listed,fee_policy_version FROM bounties ORDER BY id")
+    .all();
+  assert.deepEqual(
+    rows.map((row) => ({ ...row })),
+    [
+      { id: "current", listed: 1, fee_policy_version: "pathusd-direct-escrow-v5" },
+      { id: "legacy", listed: 0, fee_policy_version: "pathusd-direct-escrow-v4" },
+    ],
+  );
+  assert.equal(DB.sqlite.prepare("SELECT COUNT(*) AS total FROM bounties").get().total, 2);
 });
 
 test("a withdrawn, claimed or depleted bounty is never reopened by recovery", async (t) => {

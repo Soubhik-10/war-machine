@@ -175,6 +175,40 @@ const MIN_BUILD_SECONDS = 180;
 const MAX_BUILD_SECONDS = 300;
 const SETTLEMENT_RESERVE_SECONDS = 120;
 const ESCROW_SETTLEMENT_GRACE_SECONDS = 120;
+const CURRENT_ESCROW_POLICY = "pathusd-direct-escrow-v5";
+const LEGACY_BOUNTY_ARCHIVE_KEY = "migration:archive-pre-v5-bounties-v1";
+const SETTLEMENT_RUNNER_KEY = "system:settlement-runner";
+
+export async function archivePreV5Bounties(db) {
+  // Keep the database records for audit and possible owner-led recovery, but
+  // remove every pre-V5 bounty from the public board. Deleting a funded row
+  // would strand its reward in an older immutable escrow contract.
+  const marker = json({ completedAt: now() });
+  const claimed = await db
+    .prepare(
+      "INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING",
+    )
+    .bind(LEGACY_BOUNTY_ARCHIVE_KEY, marker)
+    .run();
+  if (claimed.meta.changes !== 1) return;
+  const rows = (
+    await db
+      .prepare(
+        "SELECT id,status,listed,fee_policy_version FROM bounties WHERE COALESCE(fee_policy_version,'')<>? AND listed=1",
+      )
+      .bind(CURRENT_ESCROW_POLICY)
+      .all()
+  ).results;
+  if (!rows.length) return;
+  const updated = now();
+  await db.batch(
+    rows.map((row) =>
+      db
+        .prepare("UPDATE bounties SET listed=0,updated=? WHERE id=? AND listed=1")
+        .bind(updated, row.id),
+    ),
+  );
+}
 
 function scoutBlueprint(blueprint) {
   const challenge = unpackChallenge(blueprint, true);
@@ -5494,12 +5528,13 @@ async function finalizeOnchainV3Timeout(db, env, config, attempt, bounty) {
 }
 
 export async function finalizeExpiredV3Builds(db, env, config) {
+  const policy = "pathusd-direct-escrow-v" + config.escrowVersion;
   const expired = (
     await db
       .prepare(
-        "SELECT id FROM attempts WHERE status IN ('engineering','queued','awaiting-signatures','ready-to-settle') AND build_deadline<=? ORDER BY build_deadline LIMIT 10",
+        "SELECT a.id FROM attempts a JOIN bounties b ON b.id=a.bounty WHERE b.fee_policy_version=? AND a.status IN ('engineering','queued','awaiting-signatures','ready-to-settle') AND a.build_deadline<=? ORDER BY a.build_deadline LIMIT 10",
       )
-      .bind(now())
+      .bind(policy, now())
       .all()
   ).results;
   for (const row of expired) {
@@ -5583,15 +5618,26 @@ export async function reopenDefendedBounties(db) {
 export async function runAutomaticSettlement(env) {
   const config = runtimeConfig(env, "https://service.internal");
   if (!config.enabled || !config.automaticSettlementReady || !env.DB) return;
+  // Fetch requests can overlap in a stateless Worker. Claim one short-lived
+  // runner lease so two invocations cannot write the same D1 rows together.
+  const runnerExpiry = now() + 30_000;
+  const runner = await env.DB
+    .prepare(
+      "INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(json_extract(payment_kv.value,'$.expires') AS INTEGER)<?",
+    )
+    .bind(SETTLEMENT_RUNNER_KEY, json({ expires: runnerExpiry }), now())
+    .run();
+  if (runner.meta.changes !== 1) return;
   try {
     v3SettlementAccount(env, config);
     await reopenDefendedBounties(env.DB);
     await finalizeExpiredV3Builds(env.DB, env, config);
+    const policy = "pathusd-direct-escrow-v" + config.escrowVersion;
     const jobs = (
       await env.DB.prepare(
-        "SELECT * FROM settlement_jobs WHERE state!='complete' AND next_run<=? AND lease_until<=? ORDER BY next_run,created LIMIT 10",
+        "SELECT j.* FROM settlement_jobs j JOIN attempts a ON a.id=j.attempt JOIN bounties b ON b.id=a.bounty WHERE b.fee_policy_version=? AND j.state!='complete' AND j.next_run<=? AND j.lease_until<=? ORDER BY j.next_run,j.created LIMIT 10",
       )
-        .bind(now(), now())
+        .bind(policy, now(), now())
         .all()
     ).results;
     for (const job of jobs) {
@@ -5687,7 +5733,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
   const url = new URL(request.url),
     path = url.pathname,
     config = runtimeConfig(env, url.origin);
-  if (config.automaticSettlementReady)
+  if (config.automaticSettlementReady && request.method === "GET")
     ctx.waitUntil(runAutomaticSettlement(env));
   if (path === "/.well-known/war-machines.json" && request.method === "GET")
     return response(discovery(config));
@@ -5705,6 +5751,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     check(env.DB, "D1 storage is unavailable.");
     const db = env.DB,
       method = request.method;
+    await archivePreV5Bounties(db);
     check(
       ["GET", "POST", "PATCH", "PUT", "DELETE"].includes(method),
       "Method not allowed.",
