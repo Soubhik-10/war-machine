@@ -1095,6 +1095,18 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         return false;
       }
     }
+    async function claimTechnicalRetry(a) {
+      const retried = await api(
+        "/attempts/" + a.id + "/retry",
+        "POST",
+        {
+          participantName: a.participantName || null,
+          showAddress: a.addressVisible === true,
+        },
+        uid(),
+      );
+      await attempt(retried.id);
+    }
     async function poll() {
       try {
         const a = await api("/attempts/" + id);
@@ -1196,7 +1208,8 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         const r = a.result,
           won = r?.outcome === "win",
           technical = r?.outcome === "technical-refund",
-          reopened = !!r && !won && !technical;
+          infrastructure = r?.outcome === "technical-failure",
+          reopened = !!r && !won && !technical && !infrastructure;
         app.innerHTML =
           header(
             "THE VERDICT.",
@@ -1207,7 +1220,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
                 : "Your entry was returned onchain.",
           ) +
           paymentPanel(a) +
-          `<section class="panel official-result ${won ? "won" : ""}"><span class="eyebrow">${r?.payoutStatus === "settled-onchain" ? "ESCROW SETTLED" : technical ? "TECHNICAL REFUND" : "ON-CHAIN RESULT"}</span><h2>${won ? "REWARD PAID." : technical ? "ENTRY RETURNED." : reopened ? "OPPONENT SURVIVED — CHALLENGE OPEN." : "ENTRY RETURNED."}</h2><div class="contract-economy"><div><b>${r ? (Number(r.net) > 0 ? "+" : "") + r.net : "REFUND"}</b><small>${esc(runtime.currency).toUpperCase()} CHANGE</small></div><div><b>${r?.time ? Number(r.time).toFixed(1) + "s" : "—"}</b><small>TRIAL DURATION</small></div><div><b>${r?.payoutStatus === "settled-onchain" ? "✓" : "—"}</b><small>ESCROW</small></div></div><p>${r?.integrity ? `Your machine: ${(r.integrity[0] * 100).toFixed(1)}% · Opponent: ${(r.integrity[1] * 100).toFixed(1)}%. ${won ? "The payout was sent by the escrow after the 2.5% platform fee." : reopened ? "Your entry was paid to the creator. The reward stays funded and the challenge is open for another player." : "The escrow processed this result."}` : esc(a.error || "No server-side balance was held.")}</p>${r ? `<div class="notice fee-disclosure">Gross reward: ${money(r.grossReward ?? r.reward ?? 0)} · Platform fee: ${money(r.platformFee ?? 0)} (${money((r.platformFeeBps ?? 0) / 100)}% on wins) · Paid to winner: ${money(r.payout ?? 0)} · Separate entry: ${money(r.entry ?? 0)} ${esc(runtime.currency)}.</div>` : ""}<div class="bounty-actions">${a.replay ? '<button id="verified-replay" class="primary">▶ Watch exact replay</button>' : ""}<button id="result-contract">${reopened ? "View reopened bounty" : "Back to challenge"}</button><button id="result-refit">Edit your machine</button></div><p class="hint">Attempt ${esc(a.id)} · ${time(a.updated)}<br>The replay reconstructs the committed machine pair, arena, seed and engine release.</p><p id="bounty-error" class="error-message"></p></section>`;
+          `<section class="panel official-result ${won ? "won" : ""}"><span class="eyebrow">${r?.payoutStatus === "settled-onchain" ? "ESCROW SETTLED" : infrastructure ? "TECHNICAL FAILURE" : technical ? "TECHNICAL REFUND" : "ON-CHAIN RESULT"}</span><h2>${won ? "REWARD PAID." : infrastructure ? "RETRY AVAILABLE." : technical ? "ENTRY RETURNED." : reopened ? "OPPONENT SURVIVED — CHALLENGE OPEN." : "ENTRY RETURNED."}</h2><div class="contract-economy"><div><b>${r ? (Number(r.net) > 0 ? "+" : "") + r.net : "REFUND"}</b><small>${esc(runtime.currency).toUpperCase()} CHANGE</small></div><div><b>${r?.time ? Number(r.time).toFixed(1) + "s" : "—"}</b><small>TRIAL DURATION</small></div><div><b>${r?.payoutStatus === "settled-onchain" ? "✓" : "—"}</b><small>ESCROW</small></div></div><p>${infrastructure ? "The result was not settled because the settlement infrastructure timed out. Your entry was not treated as a loss; the bounty has reopened and the next entry is sponsored." : r?.integrity ? `Your machine: ${(r.integrity[0] * 100).toFixed(1)}% · Opponent: ${(r.integrity[1] * 100).toFixed(1)}%. ${won ? "The payout was sent by the escrow after the 2.5% platform fee." : reopened ? "Your entry was paid to the creator. The reward stays funded and the challenge is open for another player." : "The escrow processed this result."}` : esc(a.error || "No server-side balance was held.")}</p>${r ? `<div class="notice fee-disclosure">Gross reward: ${money(r.grossReward ?? r.reward ?? 0)} · Platform fee: ${money(r.platformFee ?? 0)} (${money((r.platformFeeBps ?? 0) / 100)}% on wins) · Paid to winner: ${money(r.payout ?? 0)} · Separate entry: ${money(r.entry ?? 0)} ${esc(runtime.currency)}.</div>` : ""}<div class="bounty-actions">${a.payment?.retryAvailable ? '<button id="retry-free" class="primary">Retry free</button>' : ""}${a.replay ? '<button id="verified-replay" class="primary">▶ Watch exact replay</button>' : ""}<button id="result-contract">${reopened ? "View reopened bounty" : "Back to challenge"}</button><button id="result-refit">Edit your machine</button></div><p class="hint">Attempt ${esc(a.id)} · ${time(a.updated)}<br>The replay reconstructs the committed machine pair, arena, terrain, seed and engine release.</p><p id="bounty-error" class="error-message"></p></section>`;
         const identityNotice = document.createElement("div");
         identityNotice.className = "result-identity";
         identityNotice.innerHTML = `This run appears as ${attemptIdentity(a)}`;
@@ -1226,6 +1239,9 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         if ($("#verified-replay"))
           $("#verified-replay").onclick = (e) =>
             act(e.currentTarget, () => watchOfficialReplay(a));
+        if ($("#retry-free"))
+          $("#retry-free").onclick = (e) =>
+            act(e.currentTarget, () => claimTechnicalRetry(a));
       } catch (e) {
         if (g !== generation) return;
         app.innerHTML =

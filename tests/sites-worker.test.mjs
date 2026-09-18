@@ -236,7 +236,7 @@ test("native MPP exposes only paid bounty routes and uses the standard Authoriza
     env = {
       DB,
       WM_MODE: "tempo-mainnet",
-      WM_BOUNTY_ESCROW_VERSION: "4",
+      WM_BOUNTY_ESCROW_VERSION: "5",
       WM_BOUNTY_ESCROW_ADDRESS:
         "0x5555555555555555555555555555555555555555",
       WM_ESCROW_SETTLEMENT_SIGNER: settlement.address,
@@ -307,7 +307,7 @@ test("native MPP exposes only paid bounty routes and uses the standard Authoriza
   assert.doesNotMatch(wwwAuthenticate, /header=/i);
 });
 
-test("V4 discovery enables exact native MPP bounty routes only for a matching relayer", async () => {
+test("legacy V4 discovery is recovery-only even when its relayer is configured", async () => {
   const relayer = privateKeyToAccount("0x" + "09".repeat(32));
   const env = {
     WM_MODE: "tempo-mainnet",
@@ -343,21 +343,8 @@ test("V4 discovery enables exact native MPP bounty routes only for a matching re
       { ...env, DB },
     );
     const body = await discovery.json();
-    assert.deepEqual(body.payments.mppRoutes, [
-      {
-        path: "/api/bounties",
-        method: "POST",
-        price: "request.reward",
-        recipient: relayer.address,
-      },
-      {
-        path: "/api/bounties/{id}/attempts",
-        method: "POST",
-        price: "request.entry",
-        recipient: relayer.address,
-      },
-    ]);
-    assert.equal(body.payments.mpp, true);
+    assert.equal(body.payments.mpp, false);
+    assert.equal(body.payments.mppRoutes, undefined);
     assert.equal(body.version, "4.0");
     assert.deepEqual(body.payments.supportedInputTokens, [
       PATH_USD_TOKEN,
@@ -414,7 +401,7 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
   const env = {
     DB,
     WM_MODE: "tempo-mainnet",
-    WM_BOUNTY_ESCROW_VERSION: "4",
+    WM_BOUNTY_ESCROW_VERSION: "5",
     WM_BOUNTY_ESCROW_ADDRESS:
       "0xb14a3aA99C9349094612143089F55aE5372DeB24",
     WM_ESCROW_SETTLEMENT_SIGNER: privateKeyToAccount("0x" + "0a".repeat(32)).address,

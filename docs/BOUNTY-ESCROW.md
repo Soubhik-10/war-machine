@@ -1,10 +1,10 @@
 # War Machines bounty escrow
 
-`contracts/src/WarMachineBountyEscrow.sol` and `contracts/src/WarMachineBountyEscrowV3.sol` are direct-wallet escrows. `contracts/src/WarMachineBountyEscrowV4.sol` is the non-upgradeable pathUSD escrow for native MPP agent create/entry calls.
+`contracts/src/WarMachineBountyEscrow.sol` and `contracts/src/WarMachineBountyEscrowV3.sol` are historical direct-wallet escrows. V4 is the legacy non-upgradeable pathUSD escrow for native MPP agent create/entry calls. `contracts/src/WarMachineBountyEscrowV5.sol` is the current release: it keeps direct entry payment semantics, adds a two-minute settlement grace, and separates technical reopen from real timeout forfeiture.
 
 The retired v1 escrow remains immutable at [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494). Its historical record remains in [`contracts/deployments/tempo-mainnet.json`](../contracts/deployments/tempo-mainnet.json); do not send it new bounty funds.
 
-The public application prepares direct wallet calls to this escrow and verifies the emitted events. It does not custody player funds or contain settlement private keys. The current V4 small-amount trial uses one fixed settlement signer (`settlementQuorum = 1`) so the Worker can settle automatically; that is a limited-trial trust boundary, not independent multi-party protection. Do not increase bounty sizes until a reviewed multi-signer contract version is deployed.
+The public application prepares direct wallet calls to this escrow and verifies the emitted events. It does not custody player funds or contain settlement private keys. The current V5 small-amount trial uses one fixed settlement signer (`settlementQuorum = 1`) so the Worker can settle automatically; that is a limited-trial trust boundary, not independent multi-party protection. Do not increase bounty sizes until a reviewed multi-signer contract version is deployed.
 
 ## Live immutable configuration
 
@@ -14,11 +14,11 @@ The public application prepares direct wallet calls to this escrow and verifies 
 | Token          | pathUSD, `0x20C0000000000000000000000000000000000000` (6 decimals)       |
 | Platform fee   | 2.5% (`250` bps), recipient `0xc20131e9132888993de6519D486E5558A5DbCb7A` |
 | Attempt window | 600 seconds: 3–5 minutes to build plus signer/relay reserve              |
-| Pause guardian | `<configured V4 guardian>`                                             |
-| Agent relayer  | `<configured V4 relayer>`                                              |
-| Settlement     | V4: one configured EIP-712 result signer; V3/legacy records may differ   |
+| Pause guardian | `<configured V5 guardian>`                                             |
+| Agent relayer  | `<configured V5 relayer>`                                              |
+| Settlement     | V5: one configured EIP-712 result signer plus 120-second relay grace; V3/V4 records may differ |
 
-The token, fee and attempt-window values are the V4 deployment policy. Replace the address fields with the values printed by the V4 deployment and verify the resulting bytecode. This is a code-level audit, not an independent third-party audit.
+The token, fee and attempt-window values are the V5 deployment policy. Replace the address fields with the values printed by the V5 deployment and verify the resulting bytecode. This is a code-level audit, not an independent third-party audit.
 
 ## What the contract protects
 
@@ -27,16 +27,16 @@ The token, fee and attempt-window values are the V4 deployment policy. Replace t
 - The 2.5% reward fee and its recipient (`0xc20131e9132888993de6519D486E5558A5DbCb7A`) are immutable bytecode constants.
 - The payout recipient is always the active challenger. A result signer cannot substitute a wallet, a fee rate, a token, a reward, or an entry amount.
 - The creator receives the separately disclosed entry amount after a completed non-technical attempt. The platform receives no hidden entry fee.
-- A creator cannot cancel or expire while an attempt is active. If no signed result settles before the immutable deadline, anyone can finalize the timeout and the entry goes to the bounty creator. Expiry only returns an idle bounty's unused reward reserve.
+- A creator cannot cancel or expire while an attempt is active. Missing the build deadline is a real loss; after the V5 grace, anyone can call the timeout finalizer and the entry remains with the creator. If a committed result was not settled because infrastructure failed, the Worker calls `reopenTimedOutAttempt` instead, reopens the bounty, and grants one sponsored retry without another user payment. Expiry only returns an idle bounty's unused reward reserve.
 - The pause guardian can stop new bounties and entries, but cannot block settlement, cancellation, expiry, or player refunds. There is no owner withdrawal, upgrade function, proxy, rescue method, or arbitrary transfer function.
-- A battle outcome needs the constructor's fixed EIP-712 quorum. Current V4 uses one signer for a small trial; the constructor permanently fixes that set and quorum. Use an independently reviewed multi-signer contract for a public release.
+- A battle outcome needs the constructor's fixed EIP-712 quorum. Current V5 uses one signer for a small trial; the constructor permanently fixes that set and quorum. Use an independently reviewed multi-signer contract for a public release.
 - Exact token balance checks reject fee-on-transfer or non-conforming token behavior. All value fields are integer token base units; pathUSD uses six decimals.
 
 ## What it does not prove
 
 The on-chain contract cannot simulate the game. Settlement signers are an oracle for the off-chain deterministic replay. A quorum prevents one compromised signer from fabricating a result, but it does not make the oracle trustless. The complete replay must be published and its canonical hash must equal `resultHash` in the signed settlement. No administrator can reverse a settlement.
 
-V4's relayer methods are intentionally narrower than a general payment channel: the Worker verifies the MPP receipt, then submits the exact payer, terms, reward or entry supplied by the route. The contract never lets the relayer choose a different bounty recipient or settlement result. Direct wallet methods remain available for browser players.
+V5's relayer methods are intentionally narrower than a general payment channel: the Worker verifies the MPP receipt, then submits the exact payer, terms, reward or entry supplied by the route. The contract never lets the relayer choose a different bounty recipient or settlement result. Direct wallet methods remain available for browser players.
 
 ## Contract lifecycle
 
@@ -46,7 +46,8 @@ stateDiagram-v2
     Open --> Active: challenger escrows entry
     Active --> Claimed: signed challenger win
     Active --> Open: signed loss/draw or technical refund
-    Active --> Open: public timeout finalizer sends entry to creator
+    Active --> Open: timeout finalizer sends entry to creator
+    Active --> Open: technical reopen grants one sponsored retry
     Open --> Cancelled: creator cancels
     Open --> Expired: expiry
 ```
@@ -59,7 +60,7 @@ The defender blueprint is committed by the bounty's immutable `termsHash`, but i
 
 That paid challenger gets a server-recorded build deadline, then submits one valid counter with `POST /api/attempts/:id/deploy`. The Worker commits the defender, challenger, arena, seed, engine hash and simulation result to `resultHash` before the configured signer attests it. Other users cannot obtain the defender from bounty, validation, attempt or replay routes.
 
-This escrow's 600-second attempt window gives the Worker a cost-scaled three-to-five-minute construction phase and leaves at least five minutes for the signer quorum and wallet relay. Once the deadline passes, settlement is rejected and the public timeout finalizer sends the entry to the creator. Do not point the public Worker at this escrow until its address, immutable fee constants, signer set, source verification, and signer service have been reviewed and pinned in `runtimeConfig`.
+V5's 600-second attempt window gives the Worker a cost-scaled three-to-five-minute construction phase and leaves a two-minute relay grace. A valid committed result can settle during that grace. If the result still cannot settle, the public Worker uses the technical-reopen function; only a missing build uses timeout forfeiture. Do not point the public Worker at this escrow until its address, immutable fee constants, signer set, source verification, and signer service have been reviewed and pinned in `runtimeConfig`.
 
 ## Development checks
 
@@ -78,41 +79,41 @@ The tests cover payout accounting, fixed fees, loss/draw reserve retention, acti
 Do not take a payment through the Site until all of these are true:
 
 1. Have an independent Solidity reviewer inspect the exact deployed bytecode and source.
-2. Rehearse the configured V4 signer, pause guardian, expiry, cancellation, incorrect signatures, signer outage, wrong token, and wallet rejection. A future multi-signer release must rehearse each independent signer.
-3. Keep the V4 settlement signer key in a dedicated server secret store and replace the trial signer with a separately operated multi-signer replay/attestation service before public funds. The retired custodial payout queue must remain disabled.
-4. Rehearse direct wallet calls for `approve`, `createBounty`, `enterBounty`, settlement, timeout forfeiture, cancellation and expiry. For V4, also rehearse exact MPP challenge/retry, relayer allowance, relay recovery and refund behavior.
+2. Rehearse the configured V5 signer, pause guardian, expiry, cancellation, incorrect signatures, signer outage, wrong token, and wallet rejection. A future multi-signer release must rehearse each independent signer.
+3. Keep the V5 settlement signer key in a dedicated server secret store and replace the trial signer with a separately operated multi-signer replay/attestation service before public funds. The retired custodial payout queue must remain disabled.
+4. Rehearse direct wallet calls for `approve`, `createBounty`, `enterBounty`, settlement, timeout forfeiture, technical reopen, cancellation and expiry. For V5, also rehearse exact MPP challenge/retry, relayer allowance, relay recovery and the sponsored technical retry.
 5. Display this contract address, token, gross reward, 2.5% fee, winner payout, entry amount, expiry, attempt deadline, signer quorum, result hash, and relevant events before every signing request.
 6. Test first with a deliberately low real-money cap and no fee sponsorship. Paid-entry prize rules, tax, sanctions, consumer protection, and payment-provider requirements still need an operator review.
 
 Tempo documents Foundry deployment and verification at <https://docs.tempo.xyz/sdk/foundry> and <https://docs.tempo.xyz/quickstart/verify-contracts>. Tempo mainnet is chain ID 4217 and pathUSD uses six decimals: <https://docs.tempo.xyz/protocol/exchange/pathUSD>.
 
-## V4 deployment with the desktop launcher
+## V5 deployment with the desktop launcher
 
-The current V4 script deploys the pathUSD escrow with a separate pause guardian, agent relayer and settlement signer. It reads public constructor values from the ignored local file and never reads a relayer or settlement private key.
+The current V5 script deploys the pathUSD escrow with a separate pause guardian, agent relayer and settlement signer. It reads public constructor values from the ignored local file and never reads a relayer or settlement private key. V5 adds a two-minute result relay grace and the technical-reopen event used for sponsored recovery.
 
 ```powershell
 cd C:\Users\soubh\Documents\Codex\2026-09-12\hey\work\github-war-machine
-.\scripts\deploy-tempo-escrow-v4.ps1 -Initialize
+.\scripts\deploy-tempo-escrow-v5.ps1 -Initialize
 ```
 
-Edit `contracts\deployments\tempo-mainnet-v4.local.env` with three distinct public addresses and a `600` second window, preview, then broadcast with the existing encrypted deployer keystore:
+Edit `contracts\deployments\tempo-mainnet-v5.local.env` with three distinct public addresses and a `600` second window, preview, then broadcast with the existing encrypted deployer keystore:
 
 ```powershell
-.\scripts\deploy-tempo-escrow-v4.ps1 `
+.\scripts\deploy-tempo-escrow-v5.ps1 `
   -DeployerAddress 0xCA57cA8E21670fCaD76aD6485223fc231fd020D5 `
   -KeystorePath "$env:LOCALAPPDATA\WarMachines\deployer\war-machines-tempo-deployer"
 
-.\scripts\deploy-tempo-escrow-v4.ps1 `
+.\scripts\deploy-tempo-escrow-v5.ps1 `
   -DeployerAddress 0xCA57cA8E21670fCaD76aD6485223fc231fd020D5 `
   -KeystorePath "$env:LOCALAPPDATA\WarMachines\deployer\war-machines-tempo-deployer" `
   -Broadcast
 ```
 
-Type `DEPLOY` exactly at the confirmation prompt. Record the new V4 address and verification result, then configure the Worker with the same escrow, signer and relayer addresses. Keep the private settlement, relayer and MPP secret values in the hosting provider's secret store only.
+Type `DEPLOY` exactly at the confirmation prompt. Record the new V5 address and verification result, then configure the Worker with the same escrow, signer and relayer addresses. Keep the private settlement, relayer and MPP secret values in the hosting provider's secret store only.
 
-## Legacy V3 and browser deployment (historical only)
+## Legacy V3/V4 and browser deployment (historical only)
 
-The commands below target older direct-wallet contracts and are retained only for reading historical deployments. Do not use them for the current V4 native-MPP release.
+The commands below target older direct-wallet contracts and are retained only for reading historical deployments. Do not use them for the current V5 native-MPP release.
 
 Copy `contracts/deployments/tempo-mainnet.env.example`, enter public addresses only, and load it in the shell. The deployer must remain in a wallet or hardware-backed interactive signer; never paste a private key into this file, the shell history, the repository, ChatGPT Sites, or chat.
 

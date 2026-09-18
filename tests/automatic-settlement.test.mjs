@@ -79,7 +79,7 @@ test('timeout never invents a refund and a late receipt can still reconcile an e
   await processJob(f.env,f.job(),adapters,f.r.deadline*1000+1);assert.equal(f.job().state,'timeout');assert.equal(confirmed,0);
   f.DB.sqlite.prepare('UPDATE settlement_jobs SET tx_hash=?').run(txHash);
   await processJob(f.env,f.job(),adapters,f.r.deadline*1000+61000);assert.equal(f.job().state,'complete');assert.equal(confirmed,1);
-  const status=paymentStatus({payment:{state:'timeout'},result:{outcome:'win'}});assert.equal(status.label,'Settlement timed out');assert.match(status.detail,/No payout or refund is confirmed/);
+  const status=paymentStatus({payment:{state:'timeout'},result:{outcome:'win'}});assert.equal(status.label,'Settlement recovery in progress');assert.match(status.detail,/not being recorded as a player loss/);
 });
 test('global pause blocks new signatures but permits receipt reconciliation',async t=>{
   const f=fixture(t);f.DB.sqlite.prepare('UPDATE settlement_control SET paused=1').run();let calls=0;

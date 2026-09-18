@@ -2,14 +2,14 @@
 
 ## Live bounty rail
 
-War Machines uses direct pathUSD escrow on Tempo mainnet, with an optional V4 native MPP lane for stateless agent create/entry.
+War Machines uses direct pathUSD escrow on Tempo mainnet, with a V5 native MPP lane for stateless agent create/entry. V5 is required for new paid bounties because it adds settlement grace and technical recovery.
 
 - Chain: Tempo Mainnet `4217`
 - pathUSD: `0x20C0000000000000000000000000000000000000` (6 decimals)
 - Escrow: [Bounty Escrow v2](https://explore.tempo.xyz/address/0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e) ([Sourcify match](https://contracts.tempo.xyz/verify-ui/jobs/c14fe4d2-651b-4adc-9670-19b5e726ffb8))
 - Platform fee: 2.5% of the gross winning reward to `0xc20131e9132888993de6519D486E5558A5DbCb7A`
 
-The browser prepares the exact approval and escrow calls in direct mode. In native MPP mode, the Worker relays only the matching V4 method after the exact MPP payment is finalized. The Worker verifies receipts, binds locked rules and builds to the result, and records attestation state.
+The browser prepares the exact approval and escrow calls in direct mode. In native MPP mode, the Worker relays only the matching V5 method after the exact MPP payment is finalized. The Worker verifies receipts, binds locked rules and builds to the result, and records attestation state.
 
 ## Settlement
 
@@ -20,7 +20,7 @@ The browser prepares the exact approval and escrow calls in direct mode. In nati
 5. Both result signers run `scripts/attest-escrow-result.ps1` using their independent encrypted keystores.
 6. Any wallet can relay `settleAttempt` after both signatures have been registered.
 
-The current deployment uses a ten-minute attempt window. The Worker gives the challenger a cost-scaled three-to-five-minute build window, then retains enough time for the configured signer quorum and relay. A loss, draw, or missed counter deadline settles the entry to the bounty creator. If the signer service fails, anybody can call the timeout finalizer after the immutable deadline; it also sends the entry to the creator. Only an idle bounty can expire and release its reward.
+The current deployment uses a ten-minute attempt window. The Worker gives the challenger a cost-scaled three-to-five-minute build window, then retains time for the configured signer and relay plus a two-minute V5 grace. A loss, draw, or missed counter deadline settles the entry to the bounty creator. If settlement infrastructure fails after an on-time build, the Worker calls the V5 technical-reopen path and grants one free sponsored retry; it does not record a player loss. Only an idle bounty can expire and release its reward.
 
 ## Operating limits
 
@@ -30,26 +30,26 @@ Keep the two result signer keystores separate from each other, the Site runtime,
 
 ## Native MPP bounty rail
 
-The V4 escrow supports native MPP reward and entry payments for agents. The Worker receives the exact MPP payment at the configured relayer, persists the payment and raw relay transaction, then calls only the matching `createBountyFor` or `enterBountyFor` method. The V4 contract binds the supplied payer identity and limits those methods to the immutable relayer address.
+The V5 escrow supports native MPP reward and entry payments for agents. The Worker receives the exact MPP payment at the configured relayer, persists the payment and raw relay transaction, then calls only the matching `createBountyFor` or `enterBountyFor` method. The V5 contract binds the supplied payer identity and limits those methods to the immutable relayer address. V3/V4 remain readable for recovery but do not accept new paid actions.
 
 ### Multi-token input
 
-V4 still accounts in pathUSD only. Operators may publish a reviewed `WM_TEMPO_SUPPORTED_TOKENS` allowlist (pathUSD is always included) and `WM_TEMPO_SWAP_SLIPPAGE_BPS` from 0 to 500. mppx clients use the published list as `autoSwap.tokenIn`; Tempo DEX approval, exact pathUSD output and the MPP transfer are one atomic Tempo transaction. The server validates the pathUSD transfer and then forwards pathUSD into escrow. This avoids adding arbitrary-token branches to the contract and means a token without a live quote, balance or approved route fails before payment is broadcast.
+V5 still accounts in pathUSD only. Operators may publish a reviewed `WM_TEMPO_SUPPORTED_TOKENS` allowlist (pathUSD is always included) and `WM_TEMPO_SWAP_SLIPPAGE_BPS` from 0 to 500. mppx clients use the published list as `autoSwap.tokenIn`; Tempo DEX approval, exact pathUSD output and the MPP transfer are one atomic Tempo transaction. The server validates the pathUSD transfer and then forwards pathUSD into escrow. This avoids adding arbitrary-token branches to the contract and means a token without a live quote, balance or approved route fails before payment is broadcast.
 
 To enable a paid agent service, configure all of these runtime values:
 
 ```text
-WM_BOUNTY_ESCROW_VERSION=4
-WM_BOUNTY_ESCROW_ADDRESS=<deployed V4 escrow>
-WM_ESCROW_SETTLEMENT_SIGNER=<public V4 settlement signer>
-WM_BOUNTY_RELAYER_ADDRESS=<V4 agentRelayer address>
+WM_BOUNTY_ESCROW_VERSION=5
+WM_BOUNTY_ESCROW_ADDRESS=<deployed V5 escrow>
+WM_ESCROW_SETTLEMENT_SIGNER=<public V5 settlement signer>
+WM_BOUNTY_RELAYER_ADDRESS=<V5 agentRelayer address>
 WM_BOUNTY_RELAYER_PRIVATE_KEY=<Worker secret>
 WM_AGENT_BOUNTY_MPP_ENABLED=true
 WM_AGENT_BOUNTY_MPP_MAX=1.00
 MPP_SECRET_KEY=<at least 32 characters>
 ```
 
-Approve the V4 escrow from the relayer for the maximum relay amount and fund the relayer with pathUSD for both bounty forwarding and Tempo fees. Keep the relayer key in the Worker secret store only. Native MPP is limited to the paid bounty create and entry routes.
+Approve the V5 escrow from the relayer for the maximum relay amount and fund the relayer with pathUSD for both bounty forwarding and Tempo fees. Keep the relayer key in the Worker secret store only. Native MPP is limited to the paid bounty create and entry routes. After deploying V5, configure `WM_BOUNTY_ESCROW_VERSION=5`; leaving V4 configured puts the Worker in recovery-only mode.
 
 Test rejected token/chain/recipient/amount/expiry/replay cases, relayer mismatch, insufficient allowance and relay recovery before making the route public.
 

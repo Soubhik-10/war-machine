@@ -12,6 +12,10 @@ const mime = {
   ".md": "text/markdown; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
 };
+await writeFile(
+  resolve(dist, "TEMPO-SETUP.md"),
+  await readFile(resolve(root, "docs", "TEMPO-SETUP.md"), "utf8"),
+);
 async function files(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   return (

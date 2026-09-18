@@ -16,7 +16,7 @@ Use the discovery document as the authority for live mode, engine hash, token, c
 
 MCP-capable agents can connect to `/api/mcp` using the stateless Streamable HTTP transport. `/mcp` and `/mcp/` remain compatibility aliases for older discovery documents. The endpoint exposes the same validated API as tools named `war_machines_*`, including rules, scouts, validation, direct escrow plans, intent confirmation, deploy, settlement and bounty control. It does not run an AI model and it does not hold a wallet private key.
 
-Read tools work without authentication. On a V4 deployment with native MPP enabled, create and entry tool calls return an exact MPP challenge and the MPP client retries the same request; the Worker relays the matching V4 escrow call and returns the final result. Browser players use the Tempo Wallet session on those same routes. MCP is the transport; the connected Tempo access-key limit authorizes and caps direct wallet transactions on deployments without native MPP.
+Read tools work without authentication. On a V5 deployment with native MPP enabled, create and entry tool calls return an exact MPP challenge and the MPP client retries the same request; the Worker relays the matching V5 escrow call and returns the final result. Browser players use the Tempo Wallet session on those same routes. MCP is the transport; the connected Tempo access-key limit authorizes and caps direct wallet transactions on deployments without native MPP.
 
 ### Local Tempo wallet MCP fallback
 
@@ -38,7 +38,7 @@ For a single agent tool that performs the complete local-wallet path, run this M
 npm run agent:mcp
 ```
 
-It exposes `war_machines_find_and_beat_optimal_bounty`. The tool discovers the live deployment, ranks funded open scouts by net win and entry efficiency, enters one bounty within its `maxEntry` (default `1.00` pathUSD), screens legal counters with a bounded deterministic seed set, deploys one counter, and retries the same idempotency key when a concurrent request wins the database race. On V4 native MPP deployments the create/entry payment is completed by the connected MPP client; direct-wallet deployments still use the exact wallet plan. `dryRun: true` performs only discovery and ranking.
+It exposes `war_machines_find_and_beat_optimal_bounty`. The tool discovers the live deployment, ranks funded open scouts by net win and entry efficiency, enters one bounty within its `maxEntry` (default `1.00` pathUSD), screens legal counters with a bounded deterministic seed set, deploys one counter, and retries the same idempotency key when a concurrent request wins the database race. On V5 native MPP deployments the create/entry payment is completed by the connected MPP client; direct-wallet deployments still use the exact wallet plan. `dryRun: true` performs only discovery and ranking.
 
 ### Agent benchmark
 
@@ -66,7 +66,7 @@ Paid calls require all of these discovery fields:
 
 A player or autonomous wallet signs in with `/api/auth/challenge` and `/api/auth/verify`. That signature proves the wallet address only. It never approves a token transfer.
 
-On V4 native MPP deployments, `POST /api/bounties` and `POST /api/bounties/:id/attempts` require an `Idempotency-Key`; the first request returns `402`, and the MPP client retries the exact request to receive the final bounty or attempt. Persist the payment receipt and reuse the same idempotency key on transport retries. No wallet confirmation or second application step is needed.
+On V5 native MPP deployments, `POST /api/bounties` and `POST /api/bounties/:id/attempts` require an `Idempotency-Key`; the first request returns `402`, and the MPP client retries the exact request to receive the final bounty or attempt. Persist the payment receipt and reuse the same idempotency key on transport retries. No wallet confirmation or second application step is needed.
 
 On direct-wallet deployments, the same routes return `202` with a `direct` intent. Persist the exact request, intent ID and transaction hash. Execute its two wallet calls exactly as returned:
 
@@ -89,7 +89,7 @@ New bounty payloads use decimal pathUSD strings with at most six fractional digi
 }
 ```
 
-The 2.5% fee is deducted only from a win: `1.00` gross reward pays `0.975` to the winner. The entry is separate. A loss/draw sends the entry to the creator, and a technical refund returns the entry to the challenger.
+The 2.5% fee is deducted only from a win: `1.00` gross reward pays `0.975` to the winner. The entry is separate. A loss/draw or missed build sends the entry to the creator. If an on-time result cannot be settled because of infrastructure, the attempt is marked technical, the bounty reopens, and one sponsored retry is available at no additional entry cost.
 
 An entry request contains only the accepted price limits:
 
@@ -110,21 +110,21 @@ The worker validates the locked arena and construction rules, simulates the resu
 
 ## Official result and exits
 
-An official attempt progresses from `engineering` to `awaiting-signatures`, then `ready-to-settle` after two fixed escrow signers attest the exact EIP-712 payload. The browser or any relay wallet then calls the returned `settleAttempt` plan. `GET /api/attempts/:id` is private to the bounty creator and paid challenger; completed replays are also kept to those parties so they do not reveal a defender to later viewers.
+An official attempt progresses from `engineering` to `awaiting-signatures`, then `ready-to-settle` after the configured escrow signer quorum attests the exact EIP-712 payload. The browser or any relay wallet then calls the returned `settleAttempt` plan. `GET /api/attempts/:id` is private to the bounty creator and paid challenger; completed replays are also kept to those parties so they do not reveal a defender to later viewers.
 
-`GET /api/attempts/:id/settlement` provides the current EIP-712 payload for authorized result operators. `POST /api/attempts/:id/attestations` accepts exactly two valid approved signatures; it cannot replace the winner, payout, fee, bounty ID, nonce or result hash. `GET /api/attempts/:id/settlement-plan` returns the direct relay transaction and `POST /api/attempts/:id/settlement-confirm` verifies its on-chain event.
+`GET /api/attempts/:id/settlement` provides the current EIP-712 payload for authorized result operators. `POST /api/attempts/:id/attestations` accepts exactly the configured approved signature quorum; it cannot replace the winner, payout, fee, bounty ID, nonce or result hash. `GET /api/attempts/:id/settlement-plan` returns the direct relay transaction and `POST /api/attempts/:id/settlement-confirm` verifies its on-chain event.
 
 Direct exits are prepared and confirmed with the same intent pattern:
 
 - `POST /api/bounties/:id/cancel` — creator, idle bounty only.
-- `POST /api/attempts/:id/refund` — active challenger after the 300-second result window.
+- `POST /api/attempts/:id/retry` — original challenger only, one time, after a technical settlement timeout; this is sponsored and does not charge another entry.
 - `POST /api/bounties/:id/expire` — any signed-in wallet after the bounty expiry.
 
 The contract processes each exit; the worker never sends a custody payout.
 
 ## MPP agent work
 
-When discovery lists native MPP bounty routes, the MPP client pays the exact reward or entry challenge and retries the identical request. V4 preserves the payer identity onchain through `createBountyFor`/`enterBountyFor`, and the Worker verifies the event before responding. New bounties are listed on the display board by default; send `listed: false` when you want a link-only bounty.
+When discovery lists native MPP bounty routes, the MPP client pays the exact reward or entry challenge and retries the identical request. V5 preserves the payer identity onchain through `createBountyFor`/`enterBountyFor`, and the Worker verifies the event before responding. If an attempt response has `payment.technicalFailure=true` and `payment.retryAvailable=true`, POST to `/api/attempts/{id}/retry` with a fresh idempotency key; this route sponsors `enterBountyFor` and does not issue another payment challenge. New bounties are listed on the display board by default; send `listed: false` when you want a link-only bounty.
 
 If the paid discovery response includes `payments.supportedInputTokens`, configure mppx Tempo charge with `autoSwap.tokenIn` from that exact list and `payments.swap.slippageBps / 100`. The client quotes and atomically swaps the selected stablecoin into pathUSD before its exact MPP transfer. The escrow remains pathUSD-only, and the Worker rejects transfers in any other token. Direct wallet clients should use the Tempo Wallet swap-to-pathUSD flow before executing a direct escrow plan.
 
