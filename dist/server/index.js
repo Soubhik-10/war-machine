@@ -5272,13 +5272,13 @@ export function createBountyUI(adapter) {\r
         });\r
         return;\r
       }\r
-      const guide = \`<section class="contract-hero" id="challenge-guide" \${guideDismissed ? "hidden" : ""}><div class="challenge-hero-copy"><div class="guide-heading"><div><span class="eyebrow">\${runtime.paid ? "HOW PAID CHALLENGES WORK" : "HOW LOCAL CHALLENGES WORK"}</span><h2>How to enter and play.</h2></div><button id="close-challenge-guide" class="guide-close" type="button" aria-label="Hide challenge guide">Hide</button></div><ol class="challenge-steps"><li><b>1. Read the challenge</b><span>Check the arena, build limits, reward and entry cost.</span></li><li><b>2. Pay the entry</b><span>Tempo Wallet reveals the opponent and starts your build timer.</span></li><li><b>3. Build and submit</b><span>Stay within the locked limits, then submit before the timer ends.</span></li><li><b>4. Watch the result</b><span>Both machines fight automatically. The escrow pays the winner.</span></li></ol><div class="contract-hero-actions"><button class="primary" id="new-contract" \${runtime.paid && !runtime.acceptingNewBounties ? "disabled" : ""}>\${runtime.paid && !runtime.acceptingNewBounties ? "New paid challenges paused" : "+ Create a challenge"}</button><button id="my-history">My runs</button></div>\${runtime.paid && !runtime.acceptingNewBounties ? '<p class="notice bounty-footnote">' + esc(runtime.settlementReason) + '</p>' : ''}</div><aside class="credit-summary"><span class="status-stamp">\${runtime.paid ? "TEMPO MAINNET / pathUSD" : "LOCAL MODE / NO CASH VALUE"}</span><h3>\${runtime.paid ? "Payment details" : "Practice mode"}</h3><div class="credit-balance"><b>\${runtime.paid ? (me ? money(me.reserved || 0) : "CONNECT WALLET") : me ? money(me.balance) : "1,000"}</b><span>\${runtime.paid ? (me ? "RESERVED FOR CHALLENGES" : "REQUIRED TO PAY") : me ? "AVAILABLE CREDITS" : "STARTING CREDITS"}</span></div><p>\${runtime.paid ? (me ? "Connected wallet: confirm the entry or reward transaction shown by Tempo Wallet." : "Connect Tempo Wallet before creating or entering a paid challenge.") : me ? money(me.reserved) + " reserved in your challenges" : "Create a local profile to practice without money."}</p><div class="credit-rules"><p><b>Creator:</b> chooses entry, reward, arena and build limits.</p><p><b>Player:</b> pays entry and sees the full opponent.</p><p><b>Fee:</b> 2.5% of a winning reward; 97.5% goes to the winner.</p></div></aside></section><button id="show-challenge-guide" class="guide-reopen" type="button" \${guideDismissed ? "" : "hidden"}>Show how it works</button>\`;\r
+const guide = \`<section class="contract-hero" id="challenge-guide" \${guideDismissed ? "hidden" : ""}><div class="challenge-hero-copy"><div class="guide-heading"><div><span class="eyebrow">\${runtime.paid ? "HOW PAID CHALLENGES WORK" : "HOW LOCAL CHALLENGES WORK"}</span><h2>How to enter and play.</h2></div><button id="close-challenge-guide" class="guide-close" type="button" aria-label="Hide challenge guide">Hide</button></div><ol class="challenge-steps"><li><b>1. Read the challenge</b><span>Check the arena, build limits, reward and entry cost.</span></li><li><b>2. Pay the entry</b><span>Tempo Wallet reveals the opponent and starts your build timer.</span></li><li><b>3. Build and submit</b><span>Stay within the locked limits, then submit before the timer ends.</span></li><li><b>4. Watch the result</b><span>Both machines fight automatically. The escrow pays the winner.</span></li></ol><div class="contract-hero-actions"><button class="primary" id="new-contract" \${runtime.paid && !runtime.acceptingNewBounties ? "disabled" : ""}>\${runtime.paid && !runtime.acceptingNewBounties ? "New paid challenges paused" : "+ Create a challenge"}</button><button id="my-history">My runs</button></div>\${runtime.paid && !runtime.acceptingNewBounties ? '<p class="notice bounty-footnote">' + esc(runtime.settlementReason) + '</p>' : ''}</div><aside class="credit-summary"><span class="status-stamp">\${runtime.paid ? "TEMPO MAINNET / pathUSD" : "LOCAL MODE / NO CASH VALUE"}</span><h3>\${runtime.paid ? "Payment details" : "Practice mode"}</h3><div class="credit-balance"><b>\${runtime.paid ? (me ? money(me.reserved || 0) : "CONNECT WALLET") : me ? money(me.balance) : "1,000"}</b><span>\${runtime.paid ? (me ? "RESERVED FOR CHALLENGES" : "REQUIRED TO PAY") : me ? "AVAILABLE CREDITS" : "STARTING CREDITS"}</span></div><p>\${runtime.paid ? (me ? "Connected wallet: confirm the entry or reward transaction shown by Tempo Wallet." : "Connect Tempo Wallet before creating or entering a paid challenge.") : me ? money(me.reserved) + " reserved in your challenges" : "Create a local profile to practice without money."}</p><div class="credit-rules"><p><b>Creator</b><span>Sets the entry, reward, arena, and build limits.</span></p><p><b>Player</b><span>Pays the entry, then sees the full opponent and starts the build timer.</span></p><p><b>Fee</b><span>2.5% of a winning reward. The remaining 97.5% goes to the winner.</span></p></div></aside></section><button id="show-challenge-guide" class="guide-reopen" type="button" \${guideDismissed ? "" : "hidden"}>Show how it works</button>\`;
       app.innerHTML =\r
         header(\r
           "CHOOSE A CHALLENGE.",\r
           "Review the rules, then create or join a challenge.",\r
         ) +\r
-        \`\${guide}<div class="contract-filter"><div class="segmented">\${[\r
+        \`<div class="bounty-board-layout"><aside class="bounty-guide-side">\${guide}</aside><section class="bounty-board-main"><div class="contract-filter"><div class="segmented">\${[
           ["open", "Available"],\r
           ["mine", "My bounties"],\r
           ["saved", "Saved"],\r
@@ -5290,7 +5290,7 @@ export function createBountyUI(adapter) {\r
           )\r
           .join(\r
             "",\r
-          )}</div><button id="refresh-contracts">\u27F3 Refresh board</button></div><div class="contract-search"><input id="contract-search" type="search" aria-label="Search bounties" placeholder="Search machines or bounties" value="\${esc(searchText)}"><select id="arena-filter" aria-label="Filter bounties by arena"><option value="">All arenas</option>\${ARENAS.map((a) => \`<option value="\${a.id}" \${a.id === arenaFilter ? "selected" : ""}>\${esc(a.name)}</option>\`).join("")}</select><input id="fee-filter" type="number" min="0" step="\${runtime.paid ? ".01" : "1"}" aria-label="Maximum entry fee" placeholder="Max entry \xB7 any" value="\${esc(feeFilter)}"></div><div class="contract-grid" id="contract-grid"></div><div class="notice bounty-footnote">\${runtime.paid ? "Construction limits are separate from the reward. A paid run locks both machines, the arena, terrain and rules. A fresh seed decides the match." : "Construction limits are separate from the reward. A paid run locks both machines, the arena, terrain and rules. A fresh seed decides the match. Local simulation never pays rewards."}</div>\`;\r
+          )}</div><button id="refresh-contracts">\u27F3 Refresh board</button></div><div class="contract-search"><input id="contract-search" type="search" aria-label="Search bounties" placeholder="Search machines or bounties" value="\${esc(searchText)}"><select id="arena-filter" aria-label="Filter bounties by arena"><option value="">All arenas</option>\${ARENAS.map((a) => \`<option value="\${a.id}" \${a.id === arenaFilter ? "selected" : ""}>\${esc(a.name)}</option>\`).join("")}</select><input id="fee-filter" type="number" min="0" step="\${runtime.paid ? ".01" : "1"}" aria-label="Maximum entry fee" placeholder="Max entry \xB7 any" value="\${esc(feeFilter)}"></div><div class="contract-grid" id="contract-grid"></div><div class="notice bounty-footnote">\${runtime.paid ? "Construction limits are separate from the reward. A paid run locks both machines, the arena, terrain and rules. A fresh seed decides the match." : "Construction limits are separate from the reward. A paid run locks both machines, the arena, terrain and rules. A fresh seed decides the match. Local simulation never pays rewards."}</div></section></div>\`;
       if (runtime.paid) {
         const feeInput = $("#fee-filter");
         if (feeInput) feeInput.step = "0.01";
@@ -6255,7 +6255,7 @@ export function createBountyUI(adapter) {\r
   }\r
   return { open, leave, profile, attempt, deploy: deployCounter };\r
 }\r
-`,"text/javascript; charset=utf-8","b8a8b8be02b24f01"],"/camera.mjs":[`const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+`,"text/javascript; charset=utf-8","8672474f5aeb7ead"],"/camera.mjs":[`const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 export function newCamera(battle=false){return {yaw:battle?-.65:-2.55,elevation:battle?.86:.68,zoom:1,panX:0,panZ:0,follow:'both',drag:'orbit',current:null};}
 export function screenDirection(x,y,camera){return {x:Math.cos(camera.yaw)*x+Math.sin(camera.yaw)*y,y:-Math.sin(camera.yaw)*x+Math.cos(camera.yaw)*y};}
 export function fittedSpan(machine,aspect,yaw,elevation,gap=1.65){const xs=machine.modules.map(m=>m.x-4),zs=machine.modules.map(m=>m.y-4),heights=machine.modules.map(m=>(m.z||0)*gap+1.7);const minX=Math.min(...xs)-.8,maxX=Math.max(...xs)+.8,minZ=Math.min(...zs)-.8,maxZ=Math.max(...zs)+.8,maxH=Math.max(...heights),center=[(minX+maxX)/2,maxH*.46,(minZ+maxZ)/2];let minU=Infinity,maxU=-Infinity,minV=Infinity,maxV=-Infinity;for(const x of [minX,maxX])for(const z of [minZ,maxZ])for(const h of [0,maxH]){const u=x*Math.cos(yaw)-z*Math.sin(yaw),v=-x*Math.sin(yaw)*Math.sin(elevation)+h*Math.cos(elevation)-z*Math.cos(yaw)*Math.sin(elevation);minU=Math.min(minU,u);maxU=Math.max(maxU,u);minV=Math.min(minV,v);maxV=Math.max(maxV,v);}return {center,span:Math.max(6,maxV-minV+1.8,(maxU-minU+1.8)/Math.max(.3,aspect))};}
@@ -7045,6 +7045,15 @@ button,input,select,textarea,.file-button{border-radius:10px}.panel{border-radiu
 @media(max-width:760px){.topbar{height:64px;padding:8px 14px}.topbar .brand{font-size:14px;letter-spacing:.7px}.brand-mark{width:34px;height:36px;font-size:25px}.brand small{font-size:8px;letter-spacing:2px;margin-top:3px}.mobile-nav-toggle{display:flex;margin-left:auto}.topbar nav{position:absolute;top:calc(100% + 8px);left:12px;right:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:8px;background:color-mix(in srgb,var(--panel) 96%,transparent);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 45px #0008;opacity:0;transform:translateY(-8px) scale(.98);pointer-events:none;transition:opacity .18s,transform .18s}.nav-open .topbar nav{opacity:1;transform:none;pointer-events:auto}.topbar .nav{justify-content:flex-start;width:100%;min-height:42px;padding:9px 12px}.header-tools{margin-left:0}.header-tools .local-tag{display:none}.icon-button{min-width:38px;min-height:40px}.app-loading{min-height:70vh}}
 @media(prefers-reduced-motion:reduce){.loading-mark{animation:none}.mobile-nav-toggle span{transition:none}.topbar nav{transition:none}}
 
+/* Keep the payment guide readable in its narrow side column. */
+.credit-summary{min-width:0;align-self:stretch}
+.credit-summary>p{max-width:34rem}
+.credit-rules{display:grid;grid-template-columns:1fr;gap:12px;margin-top:16px;padding-top:14px}
+.credit-rules p{display:grid;grid-template-columns:64px minmax(0,1fr);gap:10px;align-items:start;margin:0!important;font-size:12px!important;line-height:1.55!important;color:var(--portal-muted)}
+.credit-rules p b{display:block!important;font:700 12px/1.45 Inter,ui-sans-serif,system-ui,sans-serif!important;letter-spacing:.02em;color:var(--portal-accent)!important;white-space:nowrap}
+.credit-rules p span{display:block;min-width:0;color:var(--portal-muted)}
+@media(max-width:760px){.credit-rules{grid-template-columns:1fr;gap:10px}.credit-rules p{grid-template-columns:72px minmax(0,1fr)}}
+
 /* Bounty board visual pass: cool steel surfaces, readable type and balanced rhythm. */
 :root{
   --bg:#0b131d;
@@ -7181,7 +7190,34 @@ main{max-width:1500px;padding:34px clamp(18px,4vw,64px) 54px}
   .credit-summary{padding:14px 0 0}
   .credit-summary b{font-size:30px}
 }
-`,"text/css; charset=utf-8","e9e657d7988e1482"],"/portal.mjs":[`import {PARTS,ARENAS,PRESETS,clone,packChallenge,stats} from './data.mjs';
+
+/* Final guide pass: stack the side-panel terms and keep every sentence visible. */
+.credit-summary{min-width:0}
+.credit-rules{display:grid;grid-template-columns:1fr;gap:12px;margin-top:16px;padding-top:14px}
+.credit-rules p{display:grid;grid-template-columns:66px minmax(0,1fr);gap:10px;align-items:start;margin:0!important;font:12px/1.55 Inter,ui-sans-serif,system-ui,sans-serif!important;letter-spacing:0!important;color:var(--portal-muted)!important}
+.credit-rules p b{display:block!important;margin:0!important;font:700 12px/1.45 Inter,ui-sans-serif,system-ui,sans-serif!important;letter-spacing:.02em!important;color:var(--portal-accent)!important;white-space:nowrap}
+.credit-rules p span{display:block;min-width:0;font:inherit!important;letter-spacing:0!important;color:var(--portal-muted)!important}
+@media(max-width:760px){.credit-rules{gap:10px}.credit-rules p{grid-template-columns:72px minmax(0,1fr)}}
+
+/* Keep the how-to guide in a narrow rail so the bounty board stays primary. */
+.bounty-board-layout{display:grid;grid-template-columns:minmax(270px,330px) minmax(0,1fr);gap:24px;align-items:start}
+.bounty-guide-side{min-width:0;position:sticky;top:88px}
+.bounty-guide-side .contract-hero{display:block;margin:0;padding:20px 18px;border-radius:14px}
+.bounty-guide-side .contract-hero h2{font-size:30px;line-height:1.08;margin:12px 0 15px}
+.bounty-guide-side .challenge-steps{grid-template-columns:1fr;gap:8px;margin-top:10px}
+.bounty-guide-side .challenge-steps li{min-height:0;padding:11px 12px}
+.bounty-guide-side .challenge-steps span{font-size:12px;line-height:1.45}
+.bounty-guide-side .contract-hero-actions{margin-top:15px;display:grid;grid-template-columns:1fr;gap:8px}
+.bounty-guide-side .contract-hero-actions button{width:100%;min-height:40px}
+.bounty-guide-side .credit-summary{border-left:0;border-top:1px solid #3a566a;padding:17px 0 0;margin-top:18px}
+.bounty-guide-side .credit-summary h3{margin-top:9px;font-size:16px}
+.bounty-guide-side .credit-summary b{font-size:clamp(28px,3vw,42px);margin-top:13px;overflow-wrap:anywhere}
+.bounty-guide-side .credit-summary p{font-size:12px;line-height:1.55}
+.bounty-board-main{min-width:0}
+@media(max-width:1050px){.bounty-board-layout{grid-template-columns:minmax(240px,290px) minmax(0,1fr);gap:18px}}
+@media(max-width:760px){.bounty-board-layout{grid-template-columns:1fr;gap:15px}.bounty-guide-side{position:static}.bounty-guide-side .contract-hero{padding:17px}.bounty-guide-side .contract-hero h2{font-size:28px}.bounty-guide-side .challenge-steps{grid-template-columns:1fr 1fr}.bounty-guide-side .credit-summary{margin-top:14px}.bounty-guide-side .credit-rules{grid-template-columns:1fr}}
+@media(max-width:480px){.bounty-guide-side .challenge-steps{grid-template-columns:1fr}}
+`,"text/css; charset=utf-8","46f55b9a12e70dbf"],"/portal.mjs":[`import {PARTS,ARENAS,PRESETS,clone,packChallenge,stats} from './data.mjs';
 import {Renderer,Geometry} from './renderer.mjs';
 import {fittedSpan} from './camera.mjs';
 import {installAgentActivity} from './activity.mjs';
