@@ -44,6 +44,7 @@ const read = (key, fallback) => {
 const save = (key, value) => localStorage.setItem(key, JSON.stringify(value));
 const OUTBOX_KEY = "wm-sandbox-outbox";
 const OUTBOX_VERSION = 3;
+const GUIDE_DISMISSED_KEY = "wm-bounty-guide-dismissed";
 const validHash = (value) =>
   typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
 function clearOutbox() {
@@ -95,6 +96,7 @@ export function createBountyUI(adapter) {
     walletBalance = null,
     tempoClient = null,
     accountUpdate = null;
+  let guideDismissed = read(GUIDE_DISMISSED_KEY, false) === true;
   const getCache = new Map();
   const publicCachePrefix = "wm-public-cache-v1:";
   function readPublicCache(path, ttl) {
@@ -572,12 +574,13 @@ export function createBountyUI(adapter) {
         });
         return;
       }
+      const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismissed ? "hidden" : ""}><div class="challenge-hero-copy"><div class="guide-heading"><div><span class="eyebrow">${runtime.paid ? "HOW PAID CHALLENGES WORK" : "HOW LOCAL CHALLENGES WORK"}</span><h2>How to enter and play.</h2></div><button id="close-challenge-guide" class="guide-close" type="button" aria-label="Hide challenge guide">Hide</button></div><ol class="challenge-steps"><li><b>1. Read the challenge</b><span>Check the arena, build limits, reward and entry cost.</span></li><li><b>2. Pay the entry</b><span>Tempo Wallet reveals the opponent and starts your build timer.</span></li><li><b>3. Build and submit</b><span>Stay within the locked limits, then submit before the timer ends.</span></li><li><b>4. Watch the result</b><span>Both machines fight automatically. The escrow pays the winner.</span></li></ol><div class="contract-hero-actions"><button class="primary" id="new-contract" ${runtime.paid && !runtime.acceptingNewBounties ? "disabled" : ""}>${runtime.paid && !runtime.acceptingNewBounties ? "New paid challenges paused" : "+ Create a challenge"}</button><button id="my-history">My runs</button></div>${runtime.paid && !runtime.acceptingNewBounties ? '<p class="notice bounty-footnote">' + esc(runtime.settlementReason) + '</p>' : ''}</div><aside class="credit-summary"><span class="status-stamp">${runtime.paid ? "TEMPO MAINNET / pathUSD" : "LOCAL MODE / NO CASH VALUE"}</span><h3>${runtime.paid ? "Payment details" : "Practice mode"}</h3><div class="credit-balance"><b>${runtime.paid ? (me ? money(me.reserved || 0) : "CONNECT WALLET") : me ? money(me.balance) : "1,000"}</b><span>${runtime.paid ? (me ? "RESERVED FOR CHALLENGES" : "REQUIRED TO PAY") : me ? "AVAILABLE CREDITS" : "STARTING CREDITS"}</span></div><p>${runtime.paid ? (me ? "Connected wallet: confirm the entry or reward transaction shown by Tempo Wallet." : "Connect Tempo Wallet before creating or entering a paid challenge.") : me ? money(me.reserved) + " reserved in your challenges" : "Create a local profile to practice without money."}</p><div class="credit-rules"><p><b>Creator:</b> chooses entry, reward, arena and build limits.</p><p><b>Player:</b> pays entry and sees the full opponent.</p><p><b>Fee:</b> 2.5% of a winning reward; 97.5% goes to the winner.</p></div></aside></section><button id="show-challenge-guide" class="guide-reopen" type="button" ${guideDismissed ? "" : "hidden"}>Show how it works</button>`;
       app.innerHTML =
         header(
           "CHOOSE A CHALLENGE.",
           "Review the rules, then create or join a challenge.",
         ) +
-        `<section class="contract-hero"><div class="challenge-hero-copy"><span class="eyebrow">${runtime.paid ? "HOW PAID CHALLENGES WORK" : "HOW LOCAL CHALLENGES WORK"}</span><h2>How to enter and play.</h2><ol class="challenge-steps"><li><b>1. Read the challenge</b><span>Check the arena, build limits, reward and entry cost.</span></li><li><b>2. Pay the entry</b><span>Tempo Wallet reveals the opponent and starts your build timer.</span></li><li><b>3. Build and submit</b><span>Stay within the locked limits, then submit before the timer ends.</span></li><li><b>4. Watch the result</b><span>Both machines fight automatically. The escrow pays the winner.</span></li></ol><div class="contract-hero-actions"><button class="primary" id="new-contract" ${runtime.paid && !runtime.acceptingNewBounties ? "disabled" : ""}>${runtime.paid && !runtime.acceptingNewBounties ? "New paid challenges paused" : "＋ Create a challenge"}</button><button id="my-history">My runs</button></div>${runtime.paid && !runtime.acceptingNewBounties ? `<p class="notice bounty-footnote">${esc(runtime.settlementReason)}</p>` : ""}</div><div class="credit-summary"><span class="status-stamp">${runtime.paid ? "TEMPO MAINNET · pathUSD" : "LOCAL MODE · NO CASH VALUE"}</span><h3>${runtime.paid ? "Payment details" : "Practice mode"}</h3><div class="credit-balance"><b>${runtime.paid ? (me ? money(me.reserved || 0) : "CONNECT WALLET") : me ? money(me.balance) : "1,000"}</b><span>${runtime.paid ? (me ? "RESERVED FOR CHALLENGES" : "REQUIRED TO PAY") : me ? "AVAILABLE CREDITS" : "STARTING CREDITS"}</span></div><p>${runtime.paid ? (me ? "Connected wallet: confirm the entry or reward transaction shown by Tempo Wallet." : "Connect Tempo Wallet before creating or entering a paid challenge.") : me ? money(me.reserved) + " reserved in your challenges" : "Create a local profile to practice without money."}</p><div class="credit-rules"><p><b>Creator:</b> chooses the entry, reward, arena and build limits.</p><p><b>Player:</b> pays the entry to join and gets the full opponent.</p><p><b>Fee:</b> 2.5% of a winning reward. The remaining 97.5% goes to the winner.</p></div></div></section><div class="contract-filter"><div class="segmented">${[
+        `${guide}<div class="contract-filter"><div class="segmented">${[
           ["open", "Available"],
           ["mine", "My bounties"],
           ["saved", "Saved"],
@@ -594,6 +597,23 @@ export function createBountyUI(adapter) {
         const feeInput = $("#fee-filter");
         if (feeInput) feeInput.step = "0.01";
       }
+      const guidePanel = $("#challenge-guide"),
+        closeGuide = $("#close-challenge-guide"),
+        showGuide = $("#show-challenge-guide");
+      if (closeGuide)
+        closeGuide.onclick = () => {
+          guideDismissed = true;
+          save(GUIDE_DISMISSED_KEY, true);
+          guidePanel.hidden = true;
+          showGuide.hidden = false;
+        };
+      if (showGuide)
+        showGuide.onclick = () => {
+          guideDismissed = false;
+          save(GUIDE_DISMISSED_KEY, false);
+          guidePanel.hidden = false;
+          showGuide.hidden = true;
+        };
       const draw = () => {
         const shown = data.filter(
           (b) =>
