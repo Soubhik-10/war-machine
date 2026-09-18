@@ -3204,7 +3204,7 @@ async function mppCreateBounty(db, config, request, body, key) {
         ),
       db
         .prepare(
-          "INSERT INTO idempotency (account,key,kind,digest,ref,created) VALUES (?,?,?,?,?,?)",
+          "INSERT OR IGNORE INTO idempotency (account,key,kind,digest,ref,created) VALUES (?,?,?,?,?,?)",
         )
         .bind(account, key, "create", digest, bounty, now()),
     ]);
@@ -3467,7 +3467,7 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
       .bind(attempt, json({ ...saved, rawTransaction: raw, validBefore, relayTransactionHash: escrowHash, attempt }), updated, hold.id),
     db
       .prepare(
-        "INSERT INTO idempotency (account,key,kind,digest,ref,created) VALUES (?,?,?,?,?,?)",
+        "INSERT OR IGNORE INTO idempotency (account,key,kind,digest,ref,created) VALUES (?,?,?,?,?,?)",
       )
       .bind(account, key, "enter:" + row.id, digest, attempt, updated),
   ]);
