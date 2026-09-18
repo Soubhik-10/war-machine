@@ -145,4 +145,8 @@ export function installAgentActivity(adapter) {
   const observer = new MutationObserver(mount);
   observer.observe(app, { childList: true, subtree: true });
   mount();
+  return () => {
+    observer.disconnect();
+    stop();
+  };
 }
