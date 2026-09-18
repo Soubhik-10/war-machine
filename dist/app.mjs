@@ -398,7 +398,7 @@ function workshop() {
  <div class="deploy-bar"><div><h3>Ready to test.</h3><p>Choose how it moves, run a fight, and fix what breaks.</p></div><div class="deploy-actions"><button id="save-btn">Save blueprint</button><button class="primary" id="deploy-btn">Open the arena ↗</button></div></div><div class="footer-note"><span id="rules-footer">${rulesLabel(rules)}</span><span>R ROTATE / CTRL+Z UNDO / ARROWS + ENTER BUILD</span></div>`;
   renderParts();
   const customization = $(".customization-row");
-  if (customization) $(".workspace")?.before(customization);
+  if (customization) $(".right-column")?.prepend(customization);
   $("#save-btn")?.insertAdjacentHTML("afterend", '<button id="stress-btn">Stress test</button>');
   bindWorkshop();
   bindRules();
