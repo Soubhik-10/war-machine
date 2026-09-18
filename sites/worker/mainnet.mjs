@@ -2427,6 +2427,9 @@ async function reconcile(db, config) {
 const TOKEN_ABI = parseAbi([
   "function balanceOf(address account) view returns (uint256)",
 ]);
+const TOKEN_APPROVE_ABI = parseAbi([
+  "function approve(address spender,uint256 amount) returns (bool)",
+]);
 const TOKEN_TRANSFER_ABI = parseAbi([
   "function transfer(address to,uint256 amount) returns (bool)",
 ]);
@@ -2665,10 +2668,25 @@ function agentRelayerAccount(config) {
   return account;
 }
 
-async function prepareAgentRelayerTransaction(config, { to, data, lane }) {
+function relayerApprovalCall(config, amountUnits) {
+  return {
+    to: config.token,
+    data: encodeFunctionData({
+      abi: TOKEN_APPROVE_ABI,
+      functionName: "approve",
+      args: [config.escrowAddress, BigInt(amountUnits)],
+    }),
+  };
+}
+
+async function prepareAgentRelayerTransaction(
+  config,
+  { to, data, calls, lane },
+) {
   const account = agentRelayerAccount(config),
     validBefore = Math.floor(now() / 1000) + 24 * 60 * 60,
     nonceKey = BigInt("0x" + (await hex("v4-agent:" + lane)).slice(0, 48)),
+    transactionCalls = calls || [{ to, data }],
     wallet = createWalletClient({
       account,
       chain: tempo,
@@ -2676,8 +2694,7 @@ async function prepareAgentRelayerTransaction(config, { to, data, lane }) {
     }),
     prepared = await wallet.prepareTransactionRequest({
       account,
-      to,
-      data,
+      calls: transactionCalls,
       value: 0n,
       nonce: 0,
       nonceKey,
@@ -2687,8 +2704,7 @@ async function prepareAgentRelayerTransaction(config, { to, data, lane }) {
     raw = await wallet.signTransaction({
       chainId: config.chainId,
       type: "tempo",
-      to,
-      data,
+      calls: prepared.calls || transactionCalls,
       value: 0n,
       nonce: 0,
       nonceKey,
@@ -2916,15 +2932,63 @@ async function mppCreateBounty(db, config, request, body, key) {
     };
     await writeAgentBountyState(db, operation, state);
   }
-  const payment = await agentBountyPayment(
-    db,
-    config,
-    request,
-    operation,
-    reward,
-    "War Machines bounty reward",
-    { kind: "bounty-create", engineHash: CLIENT_ENGINE_HASH },
-  );
+  let hold = state?.hold
+    ? await db.prepare("SELECT * FROM payment_holds WHERE id=?").bind(state.hold).first()
+    : await db
+        .prepare(
+          "SELECT * FROM payment_holds WHERE request_key=? AND digest=? AND purpose='mpp-create' ORDER BY created DESC LIMIT 1",
+        )
+        .bind(key, digest)
+        .first();
+  if (hold?.status === "accepted") {
+    const saved = parse(hold.body);
+    const account = state.account || (await accountForTempoAddress(db, saved.creator));
+    await writeAgentBountyState(db, operation, {
+      ...state,
+      phase: "accepted",
+      account,
+      source: saved.creator,
+      hold: hold.id,
+      receipt: state.receipt || saved.mppReceipt,
+    });
+    return {
+      value: await bountyView(db, await bountyRow(db, state.bounty || hold.bounty), account, true),
+      status: 200,
+      receipt: state.receipt,
+      escrowHash: saved.relayTransactionHash || hold.provider_ref || null,
+    };
+  }
+  const heldBody = hold ? parse(hold.body) : null,
+    heldSource = state?.source || heldBody?.creator || null;
+  let payment;
+  if (
+    hold &&
+    ["awaiting-relay", "relay-prepared"].includes(hold.status) &&
+    heldSource
+  ) {
+    payment = {
+      paid: true,
+      source: heldSource,
+      receipt: state?.receipt || heldBody.mppReceipt,
+    };
+  } else if (state?.phase === "paid") {
+    check(
+      hold && ["awaiting-relay", "relay-prepared"].includes(hold.status),
+      "The paid bounty request is awaiting recovery. Retry the same request; do not send another wallet payment.",
+      503,
+    );
+    payment = { paid: true, source: state.source, receipt: state.receipt };
+  } else {
+    payment = await agentBountyPayment(
+      db,
+      config,
+      request,
+      operation,
+      reward,
+      "War Machines bounty reward",
+      { kind: "bounty-create", engineHash: CLIENT_ENGINE_HASH },
+    );
+  }
   if (!payment.paid) return payment;
   const source = payment.source;
   if (state.source)
@@ -2953,12 +3017,13 @@ async function mppCreateBounty(db, config, request, body, key) {
     },
     termsHash = "0x" + (await hex(json(terms))),
     bounty = state.bounty || id();
-  let hold = await db
-    .prepare(
-      "SELECT * FROM payment_holds WHERE account=? AND request_key=? AND purpose='mpp-create' ORDER BY created DESC LIMIT 1",
-    )
-    .bind(account, key)
-    .first();
+  if (!hold)
+    hold = await db
+      .prepare(
+        "SELECT * FROM payment_holds WHERE account=? AND request_key=? AND purpose='mpp-create' ORDER BY created DESC LIMIT 1",
+      )
+      .bind(account, key)
+      .first();
   if (!hold) {
     await db
       .prepare(
@@ -3023,11 +3088,11 @@ async function mppCreateBounty(db, config, request, body, key) {
     };
   }
   await writeAgentBountyState(db, operation, state);
-  const saved = parse(hold.body);
+  let saved = parse(hold.body);
   let raw = typeof saved.rawTransaction === "string" ? saved.rawTransaction : null,
     escrowHash = validHash(hold.provider_ref) ? hold.provider_ref : null,
     validBefore = Number(saved.validBefore || 0);
-  if (!raw || !escrowHash) {
+  if (!raw || !escrowHash || !Array.isArray(saved.relayerCalls)) {
     const data = encodeFunctionData({
       abi: ESCROW_ABI,
       functionName: "createBountyFor",
@@ -3039,20 +3104,24 @@ async function mppCreateBounty(db, config, request, body, key) {
         BigInt(saved.expiresAt),
       ],
     });
+    const relayerCalls = [
+      relayerApprovalCall(config, reward),
+      { to: config.escrowAddress, data },
+    ];
     const prepared = await prepareAgentRelayerTransaction(config, {
-      to: config.escrowAddress,
-      data,
+      calls: relayerCalls,
       lane: operation,
     });
     raw = prepared.raw;
     escrowHash = prepared.hash;
     validBefore = prepared.validBefore;
+    saved = { ...saved, relayerCalls, rawTransaction: raw, validBefore };
     const stored = await db
       .prepare(
         "UPDATE payment_holds SET body=?,provider_ref=?,status='relay-prepared',updated=? WHERE id=? AND status IN ('awaiting-relay','relay-prepared')",
       )
       .bind(
-        json({ ...saved, rawTransaction: raw, validBefore }),
+        json(saved),
         escrowHash,
         now(),
         hold.id,
@@ -3064,9 +3133,9 @@ async function mppCreateBounty(db, config, request, body, key) {
       409,
     );
   }
-  await broadcastAgentRelayerTransaction(config, raw);
   let receiptValue;
   try {
+    await broadcastAgentRelayerTransaction(config, raw);
     receiptValue = await receipt(config, escrowHash);
   } catch (error) {
     if (/reverted|no bounty funds were accepted/i.test(String(error?.message || error)))
@@ -3155,7 +3224,6 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
   validKey(key);
   const identity = participantIdentity(body),
     initialRow = await bountyRow(db, bountyId);
-  check(initialRow.status === "open", "This bounty is busy or closed. No payment was requested.", 409);
   check(initialRow.escrow_bounty_id, "This legacy bounty is not backed by the direct escrow.", 409);
   check(!initialRow.expires || initialRow.expires > now(), "This bounty has expired.", 409);
   const entry = BigInt(initialRow.entry_units),
@@ -3186,15 +3254,64 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
     state = { phase: "quoted", operation, digest, kind: "entry", created: now() };
     await writeAgentBountyState(db, operation, state);
   }
-  const payment = await agentBountyPayment(
-    db,
-    config,
-    request,
-    operation,
-    entry,
-    "War Machines bounty entry",
-    { kind: "bounty-entry", bounty: bountyId, engineHash: CLIENT_ENGINE_HASH },
-  );
+  check(initialRow.status === "open", "This bounty is busy or closed. No payment was requested.", 409);
+  let hold = state?.hold
+    ? await db.prepare("SELECT * FROM payment_holds WHERE id=?").bind(state.hold).first()
+    : await db
+        .prepare(
+          "SELECT * FROM payment_holds WHERE bounty=? AND request_key=? AND digest=? AND purpose='mpp-entry' ORDER BY created DESC LIMIT 1",
+        )
+        .bind(bountyId, key, digest)
+        .first();
+  if (hold?.status === "accepted") {
+    const saved = parse(hold.body);
+    const account = state.account || (await accountForTempoAddress(db, saved.source));
+    await writeAgentBountyState(db, operation, {
+      ...state,
+      phase: "accepted",
+      account,
+      source: saved.source,
+      hold: hold.id,
+      receipt: state.receipt || saved.mppReceipt,
+    });
+    return {
+      value: await attemptView(db, saved.attempt || hold.provider_ref, account),
+      status: 200,
+      receipt: state.receipt,
+      escrowHash: saved.relayTransactionHash || hold.provider_ref || null,
+    };
+  }
+  const heldBody = hold ? parse(hold.body) : null,
+    heldSource = state?.source || heldBody?.source || null;
+  let payment;
+  if (
+    hold &&
+    ["awaiting-relay", "relay-prepared"].includes(hold.status) &&
+    heldSource
+  ) {
+    payment = {
+      paid: true,
+      source: heldSource,
+      receipt: state?.receipt || heldBody.mppReceipt,
+    };
+  } else if (state?.phase === "paid") {
+    check(
+      hold && ["awaiting-relay", "relay-prepared"].includes(hold.status),
+      "The paid entry request is awaiting recovery. Retry the same request; do not send another wallet payment.",
+      503,
+    );
+    payment = { paid: true, source: state.source, receipt: state.receipt };
+  } else {
+    payment = await agentBountyPayment(
+      db,
+      config,
+      request,
+      operation,
+      entry,
+      "War Machines bounty entry",
+      { kind: "bounty-entry", bounty: bountyId, engineHash: CLIENT_ENGINE_HASH },
+    );
+  }
   if (!payment.paid) return payment;
   const source = payment.source,
     row = await bountyRow(db, bountyId),
@@ -3203,12 +3320,13 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
     return refundAgentBountyPayment(db, config, operation, source, entry, "You cannot enter your own bounty.");
   if (row.status !== "open" || (row.expires && row.expires <= now()))
     return refundAgentBountyPayment(db, config, operation, source, entry, "This bounty became unavailable before the entry was relayed.");
-  let hold = await db
-    .prepare(
-      "SELECT * FROM payment_holds WHERE account=? AND bounty=? AND request_key=? AND purpose='mpp-entry' ORDER BY created DESC LIMIT 1",
-    )
-    .bind(account, bountyId, key)
-    .first();
+  if (!hold)
+    hold = await db
+      .prepare(
+        "SELECT * FROM payment_holds WHERE account=? AND bounty=? AND request_key=? AND purpose='mpp-entry' ORDER BY created DESC LIMIT 1",
+      )
+      .bind(account, bountyId, key)
+      .first();
   if (!hold) {
     const created = now();
     await db
@@ -3270,35 +3388,39 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
     };
   }
   await writeAgentBountyState(db, operation, state);
-  const saved = parse(hold.body);
+  let saved = parse(hold.body);
   let raw = typeof saved.rawTransaction === "string" ? saved.rawTransaction : null,
     escrowHash = validHash(hold.provider_ref) ? hold.provider_ref : null,
     validBefore = Number(saved.validBefore || 0);
-  if (!raw || !escrowHash) {
+  if (!raw || !escrowHash || !Array.isArray(saved.relayerCalls)) {
     const data = encodeFunctionData({
       abi: ESCROW_ABI,
       functionName: "enterBountyFor",
       args: [getAddress(source), BigInt(saved.escrowBountyId)],
     });
+    const relayerCalls = [
+      relayerApprovalCall(config, entry),
+      { to: config.escrowAddress, data },
+    ];
     const prepared = await prepareAgentRelayerTransaction(config, {
-      to: config.escrowAddress,
-      data,
+      calls: relayerCalls,
       lane: operation,
     });
     raw = prepared.raw;
     escrowHash = prepared.hash;
     validBefore = prepared.validBefore;
+    saved = { ...saved, relayerCalls, rawTransaction: raw, validBefore };
     const stored = await db
       .prepare(
         "UPDATE payment_holds SET body=?,provider_ref=?,status='relay-prepared',updated=? WHERE id=? AND status IN ('awaiting-relay','relay-prepared')",
       )
-      .bind(json({ ...saved, rawTransaction: raw, validBefore }), escrowHash, now(), hold.id)
+      .bind(json(saved), escrowHash, now(), hold.id)
       .run();
     check(stored.meta.changes === 1, "This paid entry request is being recovered by another retry.", 409);
   }
-  await broadcastAgentRelayerTransaction(config, raw);
   let receiptValue;
   try {
+    await broadcastAgentRelayerTransaction(config, raw);
     receiptValue = await receipt(config, escrowHash);
   } catch (error) {
     if (/reverted|no bounty funds were accepted/i.test(String(error?.message || error)))
