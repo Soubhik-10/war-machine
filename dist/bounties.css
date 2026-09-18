@@ -1078,3 +1078,43 @@
     min-height: 280px;
   }
 }
+
+/* An official paid run is the product surface: give the battle the full viewport. */
+body.official-replay .opponents-panel {
+  display: none;
+}
+body.official-replay .arena-layout {
+  grid-template-columns: minmax(0, 1fr);
+  width: min(1500px, calc(100vw - 40px));
+  margin-inline: auto;
+}
+body.official-replay .arena-main {
+  min-width: 0;
+}
+body.official-replay .arena-screen {
+  min-height: 520px;
+  height: min(76dvh, 820px);
+  aspect-ratio: auto;
+}
+body.official-replay .page-heading,
+body.official-replay .match-rules-banner,
+body.official-replay .arena-challenge,
+body.official-replay .battle-bottom,
+body.official-replay .footer-note {
+  width: min(1500px, calc(100vw - 40px));
+  margin-inline: auto;
+}
+@media (max-width: 760px) {
+  body.official-replay .arena-layout,
+  body.official-replay .page-heading,
+  body.official-replay .match-rules-banner,
+  body.official-replay .arena-challenge,
+  body.official-replay .battle-bottom,
+  body.official-replay .footer-note {
+    width: calc(100vw - 20px);
+  }
+  body.official-replay .arena-screen {
+    min-height: 420px;
+    height: 68dvh;
+  }
+}

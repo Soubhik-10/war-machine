@@ -234,6 +234,7 @@ function stopBattle() {
   cancelAnimationFrame(raf);
 }
 function cleanupView() {
+  document.body.classList.remove("official-replay");
   portal?.leave();
   bountyUI?.leave();
   clearInterval(bountyClock);
@@ -1332,6 +1333,7 @@ function loadChallenge(c) {
 function arenaView() {
   if (!challenge) window.history.replaceState(null, "", "#arena");
   cleanupView();
+  document.body.classList.toggle("official-replay", !!officialReceipt);
   view = "arena";
   setNav();
   Object.assign(fightCamera, newCamera(true));
@@ -1630,6 +1632,8 @@ function updateHUD() {
     $("#" + id + "-hp").style.width = Math.max(0, battle.health(v) * 100) + "%";
     $("#" + id + "-systems").textContent = v.dead
       ? "CORE LOST"
+      : v.coreLost
+        ? `CORE DESTROYED · POWER ROUTING DAMAGED · ${Math.round(v.heat)}° · ${Math.round(v.energy)} PWR`
       : `${Math.round(core.hp)} CORE · ${Math.round(v.heat)}° · ${Math.round(v.energy)} PWR${v.disabled > 0 ? " · EMP" : v.overheated ? " · OVERHEAT" : v.coolingDown ? " · COOLING" : v.chill > 0 ? " · FROZEN" : ""}`;
     const heatRatio = v.heat / HEAT_LIMIT,
       powerRatio = v.energy / Math.max(1, v.maxEnergy),

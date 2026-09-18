@@ -47,6 +47,7 @@ const OUTBOX_VERSION = 3;
 const GUIDE_DISMISSED_KEY = "wm-bounty-guide-dismissed";
 const validHash = (value) =>
   typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
+const officialReplayPlayed = new Set();
 function clearOutbox() {
   localStorage.removeItem(OUTBOX_KEY);
 }
@@ -1071,6 +1072,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
     async function autoplayOfficialReplay(a) {
       if (!a.replay || !["win", "loss", "draw"].includes(a.result?.outcome))
         return false;
+      if (officialReplayPlayed.has(a.id)) return false;
       const replayKey =
         "wm-watched-official-replay-" +
         a.id +
@@ -1085,9 +1087,11 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         // Private browsing may deny session storage. The replay can still run.
       }
       try {
+        officialReplayPlayed.add(a.id);
         await watchOfficialReplay(a);
         return true;
       } catch (error) {
+        officialReplayPlayed.delete(a.id);
         try {
           sessionStorage.removeItem(replayKey);
         } catch {}
@@ -1162,6 +1166,16 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
           return;
         }
         if (["queued", "running"].includes(a.status)) {
+          if (a.replay && !officialReplayPlayed.has(a.id)) {
+            officialReplayPlayed.add(a.id);
+            try {
+              await watchOfficialReplay(a);
+            } catch (error) {
+              officialReplayPlayed.delete(a.id);
+              throw error;
+            }
+            return;
+          }
           app.innerHTML =
             header(
               "YOUR MACHINE IS COMMITTED.",

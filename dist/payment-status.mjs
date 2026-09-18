@@ -6,7 +6,7 @@ export function paymentStatus(attempt, time=Date.now()) {
   if(payment.finalized) return {label:result?.outcome==='win'?'Paid':result?.outcome==='draw'?'Draw':result?.outcome==='technical-refund'?'Refunded':'Lost',detail:`Paid to your wallet: ${result?.payout || '0'} pathUSD. Entry: ${result?.entry || '0'} pathUSD. Platform fee: ${result?.platformFee || '0'} pathUSD.`};
   if(payment.state==='timeout') return {label:'Settlement recovery in progress',detail:'The settlement service is recovering this attempt. It is not being recorded as a player loss; do not pay again.'};
   if(payment.transactionHash) return {label:'Confirming payout',detail:'The settlement was submitted. Waiting for chain finality before confirming the exact payment.'};
-  return {label:payment.state==='retry'?'Payout delayed':'Verifying result',detail:'Independent services are verifying the result and settling it automatically. You can close this page; no further wallet action is needed.'};
+  return {label:payment.state==='retry'?'Settlement retrying':'Verifying result',detail:payment.state==='retry'?'The result is recorded. The service is retrying the automatic payout; do not pay again.':'The result is being verified and settled automatically. No further wallet action is needed.'};
 }
 export function paymentPanel(attempt) {
   const status=paymentStatus(attempt),payment=attempt.payment || {};

@@ -2031,10 +2031,20 @@ async function attemptView(db, attemptId, viewer) {
     };
   }
   const counterBlueprint = attempt.blueprint ? parse(attempt.blueprint) : null;
+  let replayEngineHash = CLIENT_ENGINE_HASH;
+  if (attempt.match_record) {
+    try {
+      replayEngineHash = parse(attempt.match_record)?.engineHash || CLIENT_ENGINE_HASH;
+    } catch {
+      replayEngineHash = CLIENT_ENGINE_HASH;
+    }
+  }
   if (
     counterBlueprint &&
     (done ||
-      ["awaiting-signatures", "ready-to-settle"].includes(attempt.status)) &&
+      ["queued", "running", "awaiting-signatures", "ready-to-settle"].includes(
+        attempt.status,
+      )) &&
     (challenger || creator)
   )
     value.replay = {
@@ -2043,7 +2053,7 @@ async function attemptView(db, attemptId, viewer) {
       arena: parse(bounty.blueprint).a,
       seed: attempt.seed,
       swapSpawns: !!(attempt.seed & 1),
-      versions: { hash: CLIENT_ENGINE_HASH },
+      versions: { hash: replayEngineHash },
     };
   if (attempt.settlement_payload) {
     const payload = parse(attempt.settlement_payload);

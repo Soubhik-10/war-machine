@@ -33,7 +33,7 @@ export const PATTERNS=['solid','racing','hazard','camo'];
 export const GRADES={stock:{name:'Standard',cost:1,hp:1,mass:1},reinforced:{name:'Reinforced',cost:1.3,hp:1.35,mass:1.25},tuned:{name:'Overclocked',cost:1.35,hp:.85,mass:1}};
 export const validColor=c=>typeof c==='string'&&/^#[0-9a-fA-F]{6}$/.test(c);
 export const PARTS=[
- {id:'core',name:'Command core',cat:'Structure',cost:80,hp:300,mass:14,power:14,cooling:9,desc:'The heart of your machine. Everything must connect to it. Lose it and the fight is over.'},
+ {id:'core',name:'Command core',cat:'Structure',cost:80,hp:300,mass:14,power:14,cooling:9,desc:'The heart of your machine. Everything must connect to it. If it is destroyed, power routing collapses and the machine fights on at reduced output until the time limit.'},
  {id:'frame',name:'Link frame',cat:'Structure',cost:12,hp:105,mass:2,desc:'Lightweight structural link. A broken link can detach an entire branch of your machine.'},
  {id:'armor',name:'Bastion armor',cat:'Structure',cost:30,hp:310,mass:17,armor:0.38,desc:'Absorbs 38% of incoming damage. Heavy plating trades acceleration for survival.'},
  {id:'wheel',name:'Rally wheel',cat:'Mobility',cost:35,hp:110,mass:4,thrust:32,desc:'Fast and light. Spreading wheels around the chassis keeps you moving after a hit.'},
