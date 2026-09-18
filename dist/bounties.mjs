@@ -204,7 +204,7 @@ export function createBountyUI(adapter) {
     } catch (e) {
       if (e?.name === "AbortError")
         throw Error(
-          "The arena server took too long to respond. Try Refresh board; your saved build is safe.",
+          "The arena server took too long to respond. Try Refresh board. Your saved build is safe.",
         );
       throw Error(
         e?.message ||
@@ -216,7 +216,7 @@ export function createBountyUI(adapter) {
       result = await response.json();
     } catch {
       throw Error(
-        "Bounties need the game server. Start play-local.bat or node server.mjs; the static sandbox still works.",
+        "Bounties need the game server. Start play-local.bat or node server.mjs. The static sandbox still works.",
       );
     }
     if (!response.ok) {
@@ -887,7 +887,7 @@ export function createBountyUI(adapter) {
         )
         .join(
           "",
-        )}</div><p class="hint">Custom cap 0 = no limit. Unlimited removes all four caps; supports and the 9×9×3 grid still apply.</p><div class="form-two"><label class="field"><span>Duration · hours (0 = no deadline)</span><input id="contract-hours" type="number" min="0" max="8760" step="1" value="24" required></label><label class="field"><span>Sharing</span><select id="contract-listed"><option value="true">Listed on bounty board</option><option value="false">Unlisted · share by link</option></select></label></div><p class="hint">New bounties appear on the board by default. Choose unlisted when you want access by link only. Anyone with an unlisted link can view this challenge. Any Tempo Wallet can pay the posted entry and try the challenge. Terms lock after funding; close an idle bounty to return its unused reward.</p><p id="bounty-error" class="error-message" role="status"></p><button class="primary contract-enter" id="fund-contract" type="submit">Fund & create challenge</button></section></form>`;
+        )}</div><p class="hint">Custom cap 0 = no limit. Unlimited removes all four caps. Supports and the 9×9×3 grid still apply.</p><div class="form-two"><label class="field"><span>Duration · hours (0 = no deadline)</span><input id="contract-hours" type="number" min="0" max="8760" step="1" value="24" required></label><label class="field"><span>Sharing</span><select id="contract-listed"><option value="true">Listed on bounty board</option><option value="false">Unlisted · share by link</option></select></label></div><p class="hint">New bounties appear on the board by default. Choose unlisted when you want access by link only. Anyone with an unlisted link can view this challenge. Any Tempo Wallet can pay the posted entry and try the challenge. Terms lock after funding. Close an idle bounty to return its unused reward.</p><p id="bounty-error" class="error-message" role="status"></p><button class="primary contract-enter" id="fund-contract" type="submit">Fund & create challenge</button></section></form>`;
     if (runtime.paid) {
       const entryInput = $("#contract-entry"),
         rewardInput = $("#contract-reward");
