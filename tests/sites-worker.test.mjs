@@ -94,6 +94,12 @@ class D1Mock {
         "utf8",
       ),
     );
+    this.sqlite.exec(
+      await readFile(
+        new URL("../drizzle/0008_escrow_policy_identity.sql", import.meta.url),
+        "utf8",
+      ),
+    );
   }
   close() {
     this.sqlite.close();
@@ -716,9 +722,9 @@ test("pre-V5 bounties leave the board without deleting recoverable escrow record
   const stamp = Date.now();
   DB.sqlite.exec(`
     INSERT INTO accounts (id,token_hash,name,balance,created) VALUES ('creator','creator-token','Creator',0,${stamp});
-    INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,entry_units,reward_units,reserve_units,fee_policy_version) VALUES
-      ('legacy','creator','Legacy','{}',0,0,'open',1,${stamp},${stamp},'10000','1000000','1000000','pathusd-direct-escrow-v4'),
-      ('current','creator','Current','{}',0,0,'open',1,${stamp},${stamp},'10000','1000000','1000000','pathusd-direct-escrow-v5');
+    INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,entry_units,reward_units,reserve_units,escrow_bounty_id,fee_policy_version) VALUES
+      ('legacy','creator','Legacy','{}',0,0,'open',1,${stamp},${stamp},'10000','1000000','1000000','1','pathusd-direct-escrow-v4'),
+      ('current','creator','Current','{}',0,0,'open',1,${stamp},${stamp},'10000','1000000','1000000','1','pathusd-direct-escrow-v5');
   `);
   await archivePreV5Bounties(DB);
   const rows = DB.sqlite

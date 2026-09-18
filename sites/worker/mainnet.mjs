@@ -923,9 +923,9 @@ async function account(db, accountId) {
   check(row, "Account not found.", 404);
   const reserveRows = await db
     .prepare(
-      "SELECT reward_units FROM bounties WHERE owner=? AND status IN ('open','busy','completed') AND reward_units IS NOT NULL",
+      "SELECT reward_units FROM bounties WHERE owner=? AND fee_policy_version=? AND status IN ('open','busy') AND reward_units IS NOT NULL",
     )
-    .bind(accountId)
+    .bind(accountId, CURRENT_ESCROW_POLICY)
     .all();
   const day = new Date(now()).setUTCHours(0, 0, 0, 0),
     spentRows = await db

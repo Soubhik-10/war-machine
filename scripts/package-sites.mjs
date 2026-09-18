@@ -49,6 +49,7 @@ for (const required of [
   "dist/.openai/drizzle/0002_direct_escrow.sql",
   "dist/.openai/drizzle/0003_paid_reveal.sql",
   "dist/.openai/drizzle/0007_attempt_identity.sql",
+  "dist/.openai/drizzle/0008_escrow_policy_identity.sql",
 ])
   if (!stdout.split(/\r?\n/).includes(required))
     throw Error(`Archive is missing ${required}.`);
