@@ -630,7 +630,13 @@ export function createBountyUI(adapter) {
               (b.title + " " + b.ownerName)
                 .toLowerCase()
                 .includes(searchText.toLowerCase())),
-        );
+        ).sort((a, b) => {
+          const stamp = (item) => {
+            const value = item.created || item.updated || 0;
+            return typeof value === "number" ? value : Date.parse(value) || 0;
+          };
+          return stamp(b) - stamp(a);
+        });
         $("#contract-grid").innerHTML = shown.length
           ? shown.map(card).join("")
           : '<div class="bounty-empty">No bounties yet. Create one from a workshop build.</div>';

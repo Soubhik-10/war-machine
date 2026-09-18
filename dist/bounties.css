@@ -902,6 +902,99 @@
     transform: none;
   }
 }
+
+/* Keep the board useful at a glance. The guide stays beside payment details instead of becoming a full-page wall of copy. */
+.contract-hero {
+  grid-template-columns: minmax(0, 1.25fr) minmax(285px, 0.75fr);
+  gap: 20px;
+  padding: 18px 22px;
+  margin-bottom: 12px;
+}
+.contract-hero h2 {
+  font-size: clamp(26px, 2.6vw, 34px);
+  margin: 7px 0 10px;
+}
+.contract-hero p {
+  line-height: 1.5;
+}
+.challenge-steps {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+.challenge-steps li {
+  min-height: 86px;
+  padding: 9px 10px;
+}
+.challenge-steps span {
+  font-size: 12px;
+  line-height: 1.4;
+}
+.contract-hero-actions {
+  margin-top: 14px;
+}
+.credit-summary {
+  align-self: stretch;
+  padding: 0 0 0 18px;
+}
+.credit-summary h3 {
+  margin: 9px 0 0;
+  font-size: 16px;
+}
+.credit-summary .credit-balance b {
+  font-size: 25px;
+  margin-top: 10px;
+}
+.credit-summary p {
+  margin: 9px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.credit-rules {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 9px;
+  padding-top: 9px;
+}
+.credit-rules p,
+.credit-rules b {
+  font-size: 11px;
+  line-height: 1.4;
+}
+.credit-rules b {
+  color: var(--gold);
+}
+.contract-filter {
+  margin: 15px 0 13px;
+}
+.contract-grid {
+  gap: 14px;
+}
+.contract-card:hover {
+  transform: translateY(-2px);
+}
+@media (max-width: 1150px) {
+  .challenge-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .contract-hero {
+    padding: 16px;
+  }
+  .challenge-steps {
+    grid-template-columns: 1fr 1fr;
+  }
+  .credit-rules {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+@media (max-width: 480px) {
+  .challenge-steps,
+  .credit-rules {
+    grid-template-columns: 1fr;
+  }
+}
 .vault-panel {
   max-width: 900px;
 }

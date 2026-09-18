@@ -35,14 +35,28 @@ export function combatSummary(battle,side=0){
  return {rows,failures,destroyed,timeline,score:timeoutScore(v),breakdown:integrityBreakdown(v),integrity:Math.round(battle.health(v)*100),enemyIntegrity:Math.round(battle.health(enemy)*100),heat:Math.round(v.heat),peakHeat:Math.round(v.peakHeat||v.heat),energy:Math.round(v.energy),sensor:Math.round((v.s.sensor||0)*100),sensors:v.s.sensors||0,batterySurges:v.batterySurges||0,objective:battle.objective,overheats:v.overheatCount,powerBrownouts:v.brownoutCount||0,powerLimitedTime:Math.round((v.powerLimitedTime||0)*10)/10,thermalStressTime:Math.round((v.thermalStressTime||0)*10)/10,cooldownTime:Math.round((v.cooldownTime||0)*10)/10,cooldownCount:v.cooldownCount||0,mobilityLossTime:Math.round((v.mobilityLossTime||0)*10)/10};
 }
 
-export function stressTest(machine,opponent,arenaId='foundry',seed=42817,{seeds=[seed>>>0,(seed+1013904223)>>>0,(seed^0x9e3779b9)>>>0],objective='reactor'}={}){
- const arenas=arenaId==='all'?ARENAS:ARENAS.filter(a=>a.id===arenaId);
- const runs=[];
- for(const arena of arenas)for(const runSeed of seeds){const battle=new Battle(clone(machine),clone(opponent),arena.id,runSeed,{objective});const result=battle.run(),own=battle.vehicles[0],enemy=battle.vehicles[1];runs.push({arena:arena.name,arenaId:arena.id,seed:runSeed,result,time:result.time,won:result.winner===0,score:timeoutScore(own),overheats:own.overheatCount,mobilityLossTime:own.mobilityLossTime||0,ownRows:weaponRows(own),enemyRows:weaponRows(enemy)});}
+function summarizeStressRuns(runs){
  const average=(key,list=runs)=>list.length?list.reduce((n,row)=>n+row[key],0)/list.length:0;
  const terrainScores=[...new Set(runs.map(r=>r.arenaId))].map(id=>{const list=runs.filter(r=>r.arenaId===id);return {id,name:list[0].arena,winRate:average('won',list),score:average('score',list),time:average('time',list)};}).sort((a,b)=>b.winRate-a.winRate||b.score-a.score);
  const damage=new Map(),danger=new Map();for(const run of runs){for(const row of run.ownRows){const item=damage.get(row.id)||{id:row.id,name:row.name,damage:0,runs:0};item.damage+=row.damage;item.runs++;damage.set(row.id,item);}for(const row of run.enemyRows){const item=danger.get(row.id)||{id:row.id,name:row.name,damage:0,runs:0};item.damage+=row.damage;item.runs++;danger.set(row.id,item);}}
  return {runs,summary:{averageSurvival:average('time'),averageScore:average('score'),averageOverheats:average('overheats'),averageMobilityLoss:average('mobilityLossTime'),winRate:average('won')},bestTerrain:terrainScores[0]||null,worstTerrain:terrainScores.at(-1)||null,terrainScores,damagePerWeapon:[...damage.values()].map(r=>({...r,damage:r.damage/Math.max(1,r.runs)})).sort((a,b)=>b.damage-a.damage),dangerousWeapon:[...danger.values()].sort((a,b)=>b.damage-a.damage)[0]||null};
+}
+function stressRun(machine,opponent,arena,runSeed,objective){const battle=new Battle(clone(machine),clone(opponent),arena.id,runSeed,{objective}),result=battle.run(),own=battle.vehicles[0],enemy=battle.vehicles[1];return {arena:arena.name,arenaId:arena.id,seed:runSeed,result,time:result.time,won:result.winner===0,score:timeoutScore(own),overheats:own.overheatCount,mobilityLossTime:own.mobilityLossTime||0,ownRows:weaponRows(own),enemyRows:weaponRows(enemy)};}
+export function stressTest(machine,opponent,arenaId='foundry',seed=42817,{seeds=[seed>>>0,(seed+1013904223)>>>0,(seed^0x9e3779b9)>>>0],objective='reactor'}={}){
+ const arenas=arenaId==='all'?ARENAS:ARENAS.filter(a=>a.id===arenaId),runs=[];
+ for(const arena of arenas)for(const runSeed of seeds)runs.push(stressRun(machine,opponent,arena,runSeed,objective));
+ return summarizeStressRuns(runs);
+}
+export async function stressTestAsync(machine,opponent,arenaId='foundry',seed=42817,{seeds=[seed>>>0,(seed+1013904223)>>>0],objective='reactor',onProgress,shouldCancel}={}){
+ const arenas=arenaId==='all'?ARENAS:ARENAS.filter(a=>a.id===arenaId),cases=arenas.flatMap(arena=>seeds.map(runSeed=>({arena,runSeed}))),runs=[];
+ for(let index=0;index<cases.length;index++){
+  if(shouldCancel?.())return {cancelled:true,runs};
+  const {arena,runSeed}=cases[index];
+  runs.push(stressRun(machine,opponent,arena,runSeed,objective));
+  onProgress?.({completed:index+1,total:cases.length,arena:arena.name,seed:runSeed});
+  await new Promise(resolve=>setTimeout(resolve,0));
+ }
+ return summarizeStressRuns(runs);
 }
 
 export function battleAdvice(battle,side=0){

@@ -59,6 +59,7 @@ import {
   weaponRows,
   combatSummary,
   stressTest,
+  stressTestAsync,
   pickModule,
 } from "./engineering.mjs";
 const $ = (s) => document.querySelector(s),
@@ -396,6 +397,8 @@ function workshop() {
  <section class="panel"><div class="panel-head"><h3>Machine behavior</h3><small>CHOOSE BEFORE THE FIGHT</small></div><div class="tactics-body"><label class="field"><span>Movement</span><select id="tactic"><option value="balanced">Hold optimal range</option><option value="kite">Kite & retreat</option><option value="flank">Flank & circle</option><option value="ram">Ram & overwhelm</option></select></label><label class="field"><span>Target priority</span>${targetSelect("target")}</label><label class="field"><span>Range <b id="range-value">${machine.range} m</b></span><input type="range" id="range" min="80" max="600" step="10" value="${machine.range}"></label><label class="field"><span>Damage response</span><select id="stance"><option value="steady">Hold the line</option><option value="aggressive">Push when enemy weakens</option><option value="guarded">Protect the damaged side</option></select></label></div></section></div>
  <div class="deploy-bar"><div><h3>Ready to test.</h3><p>Choose how it moves, run a fight, and fix what breaks.</p></div><div class="deploy-actions"><button id="save-btn">Save blueprint</button><button class="primary" id="deploy-btn">Open the arena ↗</button></div></div><div class="footer-note"><span id="rules-footer">${rulesLabel(rules)}</span><span>R ROTATE / CTRL+Z UNDO / ARROWS + ENTER BUILD</span></div>`;
   renderParts();
+  const customization = $(".customization-row");
+  if (customization) $(".workspace")?.before(customization);
   $("#save-btn")?.insertAdjacentHTML("afterend", '<button id="stress-btn">Stress test</button>');
   bindWorkshop();
   bindRules();
@@ -2144,9 +2147,32 @@ function showBattleReport() {
   );
 }
 function showStressTest() {
-  const result = stressTest(machine, opponent(), "all", seed, { objective }), s = result.summary;
-  const bar = (value, max = 1) => `<span class="metric-bar"><i style="width:${Math.max(0, Math.min(100, (value / max) * 100)).toFixed(1)}%"></i></span>`;
-  showModal("Build stress test", `<p>Three deterministic seeds across every arena. These runs are local and never touch a bounty or wallet.</p><div class="report-score"><div><strong>${Math.round(s.averageSurvival)}s</strong><span>AVERAGE SURVIVAL</span></div><div><strong>${Math.round(s.winRate * 100)}%</strong><span>WIN RATE</span></div><div><strong>${s.averageOverheats.toFixed(1)}</strong><span>OVERHEATS / RUN</span></div></div><div class="stress-grid"><section><h3>Terrain spread</h3>${result.terrainScores.map(t => `<div class="stress-row"><b>${esc(t.name)}</b><span>${Math.round(t.winRate * 100)}% wins · ${Math.round(t.time)}s</span>${bar(t.winRate)}</div>`).join("")}</section><section><h3>Failure pressure</h3><p><b>Most dangerous weapon:</b> ${result.dangerousWeapon ? `${esc(result.dangerousWeapon.name)} · ${Math.round(result.dangerousWeapon.damage / Math.max(1, result.dangerousWeapon.runs))} damage/run` : "none recorded"}</p><p><b>Average mobility loss:</b> ${s.averageMobilityLoss.toFixed(1)}s</p><p><b>Best terrain:</b> ${result.bestTerrain ? esc(result.bestTerrain.name) : "—"}</p><p><b>Worst terrain:</b> ${result.worstTerrain ? esc(result.worstTerrain.name) : "—"}</p></section></div><h3>Average damage by weapon</h3><div class="report-bars">${result.damagePerWeapon.slice(0, 8).map(r => `<div class="stress-row"><b>${esc(r.name)}</b><span>${Math.round(r.damage)}</span>${bar(r.damage, Math.max(1, result.damagePerWeapon[0]?.damage || 1))}</div>`).join("") || '<p class="hint">No weapon impacts recorded.</p>'}</div><div class="modal-footer"><button data-close>Back to home</button><button class="primary" id="stress-deploy">Open the arena</button></div>`, () => { $("#stress-deploy").onclick = () => { closeModal(); arenaView(); }; });
+  let cancelled = false;
+  const progress = (completed, total, arena = "Preparing") => {
+    const fill = $("#stress-progress-fill"), label = $("#stress-progress-label"), count = $("#stress-progress-count");
+    if (fill) fill.style.width = `${Math.round((completed / Math.max(1, total)) * 100)}%`;
+    if (label) label.textContent = completed ? `Testing ${arena}` : "Preparing deterministic tests";
+    if (count) count.textContent = `${completed} of ${total} runs`;
+  };
+  showModal("Build stress test", `<p>Running two fixed seeds across every arena. The test yields between battles so the page stays responsive. Results are local and never touch a bounty or wallet.</p><div class="stress-progress" role="status" aria-live="polite"><div class="stress-progress-head"><strong id="stress-progress-label">Preparing deterministic tests</strong><span id="stress-progress-count">0 of 0 runs</span></div><div class="stress-progress-track"><i id="stress-progress-fill"></i></div><button id="stress-cancel">Stop test</button></div>`, () => {
+    const stop = $("#stress-cancel");
+    if (stop) stop.onclick = () => { cancelled = true; stop.disabled = true; stop.textContent = "Stopping…"; };
+    modalCleanup = () => { cancelled = true; };
+    void (async () => {
+      try {
+        const result = await stressTestAsync(machine, opponent(), "all", seed, { objective, onProgress: ({ completed, total, arena }) => progress(completed, total, arena), shouldCancel: () => cancelled });
+        if (cancelled || result.cancelled) {
+          if ($("#stress-progress-label")) $("#stress-progress-label").textContent = "Test stopped";
+          if ($("#stress-cancel")) { $("#stress-cancel").textContent = "Close"; $("#stress-cancel").disabled = false; $("#stress-cancel").onclick = closeModal; }
+          return;
+        }
+        const s = result.summary, bar = (value, max = 1) => `<span class="metric-bar"><i style="width:${Math.max(0, Math.min(100, (value / max) * 100)).toFixed(1)}%"></i></span>`;
+        showModal("Build stress test", `<p>Completed ${result.runs.length} deterministic runs across ${result.terrainScores.length} arenas. Use the spread to find builds that only work on one surface.</p><div class="report-score"><div><strong>${Math.round(s.averageSurvival)}s</strong><span>AVERAGE SURVIVAL</span></div><div><strong>${Math.round(s.winRate * 100)}%</strong><span>WIN RATE</span></div><div><strong>${s.averageOverheats.toFixed(1)}</strong><span>OVERHEATS / RUN</span></div></div><div class="stress-grid"><section><h3>Terrain spread</h3>${result.terrainScores.map(t => `<div class="stress-row"><b>${esc(t.name)}</b><span>${Math.round(t.winRate * 100)}% wins · ${Math.round(t.time)}s</span>${bar(t.winRate)}</div>`).join("")}</section><section><h3>Failure pressure</h3><p><b>Most dangerous weapon:</b> ${result.dangerousWeapon ? `${esc(result.dangerousWeapon.name)} · ${Math.round(result.dangerousWeapon.damage / Math.max(1, result.dangerousWeapon.runs))} damage/run` : "none recorded"}</p><p><b>Average mobility loss:</b> ${s.averageMobilityLoss.toFixed(1)}s</p><p><b>Best terrain:</b> ${result.bestTerrain ? esc(result.bestTerrain.name) : "—"}</p><p><b>Worst terrain:</b> ${result.worstTerrain ? esc(result.worstTerrain.name) : "—"}</p></section></div><h3>Average damage by weapon</h3><div class="report-bars">${result.damagePerWeapon.slice(0, 8).map(r => `<div class="stress-row"><b>${esc(r.name)}</b><span>${Math.round(r.damage)}</span>${bar(r.damage, Math.max(1, result.damagePerWeapon[0]?.damage || 1))}</div>`).join("") || '<p class="hint">No weapon impacts recorded.</p>'}</div><div class="modal-footer"><button data-close>Close report</button><button class="primary" id="stress-deploy">Open the arena</button></div>`, () => { $("#stress-deploy").onclick = () => { closeModal(); arenaView(); }; });
+      } catch (error) {
+        if (!cancelled) showModal("Build stress test", `<p class="error-message">${esc(error.message || "Stress test failed.")}</p><div class="modal-footer"><button data-close>Close</button><button class="primary" id="stress-retry">Try again</button></div>`, () => { $("#stress-retry").onclick = () => { closeModal(); showStressTest(); }; });
+      }
+    })();
+  });
 }
 function jumpReplay(target) {
   if (!matchSource) return;
