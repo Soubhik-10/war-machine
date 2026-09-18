@@ -124,11 +124,11 @@ export function createBountyUI(adapter) {
   }
   const cacheTtl = (path) =>
     path === "/rules"
-      ? 5 * 60_000
+      ? 10 * 60_000
       : path === "/bounties"
-        ? 8_000
+        ? 60_000
         : /^\/bounties\//.test(path)
-          ? 4_000
+          ? 15_000
           : 0;
   const invalidateBoardCache = () => {
     for (const key of getCache.keys()) {

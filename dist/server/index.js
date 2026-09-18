@@ -4822,11 +4822,11 @@ export function createBountyUI(adapter) {\r
   }\r
   const cacheTtl = (path) =>\r
     path === "/rules"\r
-      ? 5 * 60_000\r
-      : path === "/bounties"\r
-        ? 8_000\r
-        : /^\\/bounties\\//.test(path)\r
-          ? 4_000\r
+      ? 10 * 60_000
+      : path === "/bounties"
+        ? 60_000
+        : /^\\/bounties\\//.test(path)
+          ? 15_000
           : 0;\r
   const invalidateBoardCache = () => {\r
     for (const key of getCache.keys()) {\r
@@ -6255,7 +6255,7 @@ export function createBountyUI(adapter) {\r
   }\r
   return { open, leave, profile, attempt, deploy: deployCounter };\r
 }\r
-`,"text/javascript; charset=utf-8","3d7f58603b1fb275"],"/camera.mjs":[`const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+`,"text/javascript; charset=utf-8","b8a8b8be02b24f01"],"/camera.mjs":[`const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 export function newCamera(battle=false){return {yaw:battle?-.65:-2.55,elevation:battle?.86:.68,zoom:1,panX:0,panZ:0,follow:'both',drag:'orbit',current:null};}
 export function screenDirection(x,y,camera){return {x:Math.cos(camera.yaw)*x+Math.sin(camera.yaw)*y,y:-Math.sin(camera.yaw)*x+Math.cos(camera.yaw)*y};}
 export function fittedSpan(machine,aspect,yaw,elevation,gap=1.65){const xs=machine.modules.map(m=>m.x-4),zs=machine.modules.map(m=>m.y-4),heights=machine.modules.map(m=>(m.z||0)*gap+1.7);const minX=Math.min(...xs)-.8,maxX=Math.max(...xs)+.8,minZ=Math.min(...zs)-.8,maxZ=Math.max(...zs)+.8,maxH=Math.max(...heights),center=[(minX+maxX)/2,maxH*.46,(minZ+maxZ)/2];let minU=Infinity,maxU=-Infinity,minV=Infinity,maxV=-Infinity;for(const x of [minX,maxX])for(const z of [minZ,maxZ])for(const h of [0,maxH]){const u=x*Math.cos(yaw)-z*Math.sin(yaw),v=-x*Math.sin(yaw)*Math.sin(elevation)+h*Math.cos(elevation)-z*Math.cos(yaw)*Math.sin(elevation);minU=Math.min(minU,u);maxU=Math.max(maxU,u);minV=Math.min(minV,v);maxV=Math.max(maxV,v);}return {center,span:Math.max(6,maxV-minV+1.8,(maxU-minU+1.8)/Math.max(.3,aspect))};}
