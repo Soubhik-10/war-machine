@@ -127,7 +127,8 @@ let portal = null,
   bountyContext = null,
   replayRestore = null,
   officialReceipt = null,
-  officialAttemptId = null;
+  officialAttemptId = null,
+  officialRedirectTimer = 0;
 let rules = clone(DEFAULT_RULES),
   preChallengeRules = null,
   mirrorOpponent = false;
@@ -236,6 +237,10 @@ function stopBattle() {
 }
 function cleanupView() {
   document.body.classList.remove("official-replay");
+  if (officialRedirectTimer) {
+    clearTimeout(officialRedirectTimer);
+    officialRedirectTimer = 0;
+  }
   portal?.leave();
   bountyUI?.leave();
   clearInterval(bountyClock);
@@ -1980,6 +1985,12 @@ function finishBattle() {
       : officialReceipt
         ? bountyUI.open(bountyContext.id)
         : startBattle(false);
+  if (officialReceipt && officialAttemptId) {
+    officialRedirectTimer = window.setTimeout(() => {
+      officialRedirectTimer = 0;
+      bountyUI.attempt(officialAttemptId);
+    }, 1400);
+  }
   $("#inspect-wreck").onclick = () => {
     overlay.hidden = true;
     inspectMode = true;

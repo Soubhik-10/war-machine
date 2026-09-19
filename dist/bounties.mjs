@@ -1183,10 +1183,10 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
           }
           app.innerHTML =
             header(
-              "YOUR MACHINE IS COMMITTED.",
-              "The entry is recorded once. You can leave and return safely.",
+              "RESULT IN PROGRESS.",
+              "The official battle is complete or being finalized. Settlement will open here automatically.",
             ) +
-            `<section class="panel trial-wait"><div class="trial-spinner" aria-hidden="true">◈</div><span class="eyebrow">${a.status === "queued" ? "RESULT IN REVIEW" : "SIMULATING"}</span><h2>Simulation running.</h2><p>Both builds are locked. The result is being recorded. You can leave this page and find it under My runs.</p><p class="hint">No need to keep this tab open. Find the result under My runs.</p><button id="pending-contract">View challenge</button></section>`;
+            `<section class="panel trial-wait compact-result"><div class="trial-spinner" aria-hidden="true">◈</div><span class="eyebrow">${a.status === "queued" ? "QUEUED FOR SETTLEMENT" : "FINALIZING RESULT"}</span><h2>Preparing your result.</h2><p>Do not pay again. This page will switch to the result as soon as the escrow record is ready.</p><button id="pending-contract">View challenge</button></section>`;
           wireHeader();
           $("#pending-contract").onclick = () => open(a.bounty);
           schedule(poll, g, 1000);

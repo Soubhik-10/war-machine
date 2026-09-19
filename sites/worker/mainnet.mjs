@@ -6052,9 +6052,9 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         account = auth?.account || "";
       const rows = await db
         .prepare(
-          "SELECT * FROM bounties WHERE entry_units IS NOT NULL AND (owner=? OR (listed=1 AND (status IN ('open','busy') OR (status IN ('completed','claimed') AND updated>=?)))) ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'busy' THEN 1 WHEN 'completed' THEN 2 WHEN 'claimed' THEN 2 ELSE 3 END, updated DESC LIMIT 100",
+          "SELECT * FROM bounties WHERE entry_units IS NOT NULL AND fee_policy_version=? AND (owner=? OR (listed=1 AND (status IN ('open','busy') OR (status IN ('completed','claimed') AND updated>=?)))) ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'busy' THEN 1 WHEN 'completed' THEN 2 WHEN 'claimed' THEN 2 ELSE 3 END, updated DESC LIMIT 100",
         )
-        .bind(account, completedAfter)
+        .bind(CURRENT_ESCROW_POLICY, account, completedAfter)
         .all();
       return response(
         await Promise.all(
