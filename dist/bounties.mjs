@@ -376,11 +376,16 @@ export function createBountyUI(adapter) {
     runtime.paid ? "construction credits" : "build credits";
   const bountyExpired = (b) =>
     !!b.expires && Number(b.expires) <= Date.now() && b.status === "open";
+  const bountyEscrowVersion = (b) =>
+    Number(b?.escrowVersion ?? b?.payment?.escrowVersion ?? b?.protocolVersion ?? 0);
+  const isLegacyV5 = (b) =>
+    b?.legacy === true || Number(b?.legacy) === 5 || bountyEscrowVersion(b) === 5;
   const bountyCardState = (b) => {
     if (bountyExpired(b)) return "expired";
     return b.status;
   };
   const bountyAvailabilityLabel = (b, complete) => {
+    if (isLegacyV5(b)) return "LEGACY V5 · READ ONLY";
     if (complete) return "RESULT · 10 MINUTES";
     if (bountyExpired(b)) return "ENTRY CLOSED · EXPIRED";
     if (b.status === "busy")
@@ -535,12 +540,13 @@ export function createBountyUI(adapter) {
   function card(b) {
     const s = scout(b),
       a = bountyArena(b),
+      legacyV5 = isLegacyV5(b),
       complete = ["completed", "claimed"].includes(b.status),
       cardState = bountyCardState(b),
       fee = b.platformFeeBps
         ? `${money(b.payout)} ${paymentUnit()} winner payout · ${money(b.platformFeeBps / 100)}% platform fee`
         : `${money(b.payout)} ${paymentUnit()} winner payout · legacy terms / no platform fee`;
-    return `<article class="contract-card"><div class="contract-card-top">${status(cardState)}<small>${bountyAvailabilityLabel(b, complete)}</small></div><div class="contract-preview">${b.blueprint ? `<canvas data-contract-thumb="${b.id}" width="300" height="260" aria-label="Opponent machine"></canvas>` : sealedPreview(b)}<span class="contract-reward"><b>${money(b.reward)}</b><small>GROSS REWARD · ${esc(paymentUnit())}</small></span></div><div class="contract-content"><h2>${esc(b.title)}</h2><p>${esc(a.name)} · ${s.cost} ${constructionUnit()} · ${s.mass} t · ${s.parts} fitted parts</p>${terrain(a)}<div class="contract-class">${esc(rulesLabel(bountyRules(b)))}</div><p class="card-fee">${fee}</p><div class="contract-footer"><span><b>${b.entry} ${paymentUnit()}</b> entry · ${b.attempts} runs</span><button data-contract="${b.id}">${complete ? "Watch result" : "View challenge"} ↗</button></div></div></article>`;
+    return `<article class="contract-card"><div class="contract-card-top">${status(cardState)}<small>${bountyAvailabilityLabel(b, complete)}</small></div><div class="contract-preview">${b.blueprint ? `<canvas data-contract-thumb="${b.id}" width="300" height="260" aria-label="Opponent machine"></canvas>` : sealedPreview(b)}<span class="contract-reward"><b>${money(b.reward)}</b><small>GROSS REWARD · ${esc(paymentUnit())}</small></span></div><div class="contract-content"><h2>${esc(b.title)}</h2><p>${esc(a.name)} · ${s.cost} ${constructionUnit()} · ${s.mass} t · ${s.parts} fitted parts</p>${terrain(a)}<div class="contract-class">${esc(rulesLabel(bountyRules(b)))}</div><p class="card-fee">${fee}</p><div class="contract-footer"><span><b>${b.entry} ${paymentUnit()}</b> ${legacyV5 ? "historical entry" : "entry"} · ${b.attempts} runs</span><button data-contract="${b.id}">${complete ? "Watch result" : "View challenge"} ↗</button></div></div></article>`;
   }
   function refreshHeaderAccount() {
     const node = $(".bounty-heading"),
@@ -738,31 +744,41 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
     const revealed = !!b.blueprint,
       s = scout(b),
       a = bountyArena(b),
+      legacyV5 = isLegacyV5(b),
       lockedRules = bountyRules(b),
       draft = adapter.getBuild(),
       issues = validate(draft.machine, lockedRules),
       own = b.owner === me?.id,
       m = revealed ? unpackChallenge(b.blueprint, true).machine : null;
     const isExpired = !!b.expires && Number(b.expires) <= Date.now(),
-      canEnter = b.status === "open" && !isExpired && !own,
+      canEnter = !legacyV5 && b.status === "open" && !isExpired && !own,
       counterStatus = revealed
         ? issues.length
           ? esc(issues[0])
           : stats(draft.machine).cost +
             " build credits · eligible for this bounty"
-        : "Pay the entry to reveal the opponent, then build and submit your machine before the deadline.",
+        : legacyV5
+          ? "Legacy V5 challenge is read-only while V6 is active."
+          : "Pay the entry to reveal the opponent, then build and submit your machine before the deadline.",
       preview = revealed
         ? '<canvas id="defender-preview" width="650" height="500" aria-label="Opponent machine preview"></canvas>'
         : sealedPreview(b),
       defenderCaption = revealed
         ? `<h2>${esc(m.name)}</h2><p>${s.cost} build credits · ${s.mass} t · ${s.parts} fitted parts · ${s.height} ${s.height === 1 ? "level" : "levels"}</p><span>${esc(m.tactic)} · targets ${esc(m.target)} · range ${m.range} · front ${["north", "east", "south", "west"][m.front || 0]}</span>`
-        : `<h2>Opponent hidden</h2><p>${s.cost} build credits · ${s.mass} t · ${s.parts} fitted parts · ${s.weapons} weapons · ${s.height} ${s.height === 1 ? "level" : "levels"}</p><span>The full layout, colors and movement settings appear after payment is confirmed.</span>`,
+        : `<h2>Opponent hidden</h2><p>${s.cost} build credits · ${s.mass} t · ${s.parts} fitted parts · ${s.weapons} weapons · ${s.height} ${s.height === 1 ? "level" : "levels"}</p><span>${legacyV5 ? "Legacy V5 challenge is read-only while V6 is active." : "The full layout, colors and movement settings appear after payment is confirmed."}</span>`,
       defenderActions = revealed
         ? `<button id="inspect-defender" ${!b.compatible ? "disabled" : ""}>◎ View machine in 3D</button><button id="export-defender">↓ Blueprint JSON</button>`
-        : '<span class="sealed-note">PAY TO REVEAL · MACHINE HIDDEN</span>',
+        : legacyV5
+          ? '<span class="sealed-note">LEGACY V5 · HISTORICAL CHALLENGE</span>'
+          : '<span class="sealed-note">PAY TO REVEAL · MACHINE HIDDEN</span>',
+      legacyNotice = legacyV5
+        ? '<div class="notice fee-disclosure legacy-bounty-notice"><strong>LEGACY V5 · READ ONLY</strong><br>Existing V5 challenge; new entries are closed while V6 is active.</div>'
+        : "",
       entryAction =
         canEnter
           ? `<button id="official-entry" class="primary contract-enter" ${!b.compatible || (!runtime.paid && !me) || (runtime.paid && !runtime.acceptingNewBounties) ? "disabled" : ""}>${runtime.paid && !runtime.acceptingNewBounties ? "Paid entries paused" : `Pay entry & reveal opponent · ${b.entry} ${paymentUnit()}`}</button>`
+          : legacyV5
+            ? legacyNotice
           : isExpired && b.status === "open"
             ? '<div class="notice fee-disclosure"><strong>Entry closed.</strong> This bounty has expired and cannot accept a new payment.</div>'
           : b.status === "busy" && revealed && !own
@@ -779,7 +795,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
             ? `<div class="notice fee-disclosure"><strong>Reward paid.</strong> Your machine won and the escrow sent the payout. This replay and result stay on the board for 10 minutes.</div>`
             : "",
       returnAction =
-        own && ["open", "completed"].includes(b.status)
+        !legacyV5 && own && ["open", "completed"].includes(b.status)
           ? `<button id="cancel-contract">${b.status === "completed" ? "Return unclaimed reward" : "Delete bounty"} · return ${b.reward} ${runtime.currency}</button>`
           : "";
     app.innerHTML =
@@ -787,7 +803,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         revealed ? "BUILD YOUR MACHINE." : "VIEW THE CHALLENGE.",
         esc(b.title),
       ) +
-      `<div class="contract-detail"><section class="panel defender-card"><div class="contract-card-top">${status(bountyCardState(b))}<small>${b.status === "completed" ? "UNCLAIMED REWARD RESERVED" : bountyExpired(b) ? "ENTRY CLOSED · EXPIRED" : b.status === "busy" ? (hasPendingBountyResult(b) ? "RESULT PENDING · SETTLEMENT" : "IN PROGRESS · ENTRY CLOSED") : b.funded ? "REWARD RESERVED" : "BOUNTY CLOSED"}</small></div>${preview}<div class="defender-caption">${defenderCaption}</div><div class="bounty-actions">${defenderActions}<button id="copy-contract">↗ Copy challenge link</button><button id="save-contract">${savedIds.has(b.id) ? "★ Saved challenge" : "☆ Save challenge"}</button>${navigator.share ? '<button id="native-share-contract">Share…</button>' : ""}</div></section><section class="panel contract-terms"><span class="eyebrow">${esc(b.ownerName)} / CHALLENGE TERMS</span><h2>${esc(b.title)}</h2><div class="contract-economy"><div><b>${money(b.reward)}</b><small>GROSS REWARD · ${esc(paymentUnit())}</small></div><div><b>${money(b.entry)}</b><small>ENTRY COST · ${esc(paymentUnit())}</small></div><div><b>${signed(b.netIfWin)}</b><small>NET BEFORE NETWORK/SWAP FEES · ${esc(paymentUnit())}</small></div></div>${feeNotice(b)}${completionNotice}<div class="contract-rule"><strong>${esc(a.name)}</strong><p>${esc(a.desc)}</p>${terrain(a)}</div><div class="contract-rule"><strong>${esc(rulesLabel(lockedRules))}</strong><p>Both machines use the same locked rules and fight automatically for up to 100 seconds.</p></div><div class="contract-rule"><strong>Your machine: ${esc(draft.machine.name)}</strong><p>${counterStatus}</p></div>${revealed ? `<div class="bounty-actions"><button id="refit-counter" ${!b.compatible ? "disabled" : ""}>Edit your machine</button>${runtime.paid ? "" : '<button id="local-simulation">Local simulation</button>'}</div>` : ""}${entryAction}${!runtime.paid && !me ? '<button id="join-profile">Sign in to enter this sandbox challenge</button>' : ""}<p class="hint">${revealed ? runtime.paid ? "Your entry is active. Submit a valid machine before the timer ends." : "This local challenge can be tested without transferring funds." : runtime.paid && !runtime.acceptingNewBounties ? runtime.settlementReason : runtime.paid ? `Pay the entry in Tempo Wallet. Once it confirms, the full opponent appears and the build timer starts. The entry is ${b.entry} ${paymentUnit()}; construction limits use ${constructionUnit()}.` : "Your entry uses sandbox credits. Construction credits are separate from any live pathUSD payment."} ${own ? "You cannot claim your own reward." : ""}</p><p class="error-message" id="bounty-error">${!b.compatible ? "This challenge uses an older engine version. Its result remains available, but you cannot submit a new machine." : ""}</p><p class="contract-expiry">${b.expires ? (isExpired ? "Expired " : "Expires ") + time(b.expires) : "No deadline · until claimed or closed"} · ${b.attempts} runs<br>${b.listed ? "Visible on the board" : "Unlisted: anyone with the link can view and pay the posted entry."}</p>${returnAction}${me && isExpired && ["open", "busy"].includes(b.status) ? '<button id="expire-contract">Settle expiry onchain</button>' : ""}</section></div><section class="panel contract-history"><h3>Past results</h3>${b.history.length ? b.history.map((a) => (revealed ? `<button data-attempt="${a.id}" class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : a.status === "technical-retry" ? "TECHNICAL RECOVERY" : "RESULT PENDING"}</span><small>${time(a.created)}</small><strong>${a.result?.time ? Number(a.result.time).toFixed(1) + "s" : a.status === "technical-retry" ? "Sponsored retry available" : "Settlement pending"} ↗</strong></button>` : `<div class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : a.status === "technical-retry" ? "TECHNICAL RECOVERY" : "RESULT PENDING"}</span><small>${time(a.created)}</small><strong>Opponent replay sealed</strong></div>`)).join("") : hasPendingBountyResult(b) ? "<p>Result recorded. Settlement confirmation is still pending.</p>" : b.status === "busy" ? "<p>An attempt is in progress. Its signed result will appear here after settlement verification.</p>" : "<p>No results yet. Be the first to try.</p>"}</section>`;
+      `<div class="contract-detail"><section class="panel defender-card"><div class="contract-card-top">${status(bountyCardState(b))}<small>${bountyAvailabilityLabel(b, ["completed", "claimed"].includes(b.status))}</small></div>${preview}<div class="defender-caption">${defenderCaption}</div><div class="bounty-actions">${defenderActions}<button id="copy-contract">↗ Copy challenge link</button><button id="save-contract">${savedIds.has(b.id) ? "★ Saved challenge" : "☆ Save challenge"}</button>${navigator.share ? '<button id="native-share-contract">Share…</button>' : ""}</div></section><section class="panel contract-terms"><span class="eyebrow">${esc(b.ownerName)} / CHALLENGE TERMS</span><h2>${esc(b.title)}</h2><div class="contract-economy"><div><b>${money(b.reward)}</b><small>GROSS REWARD · ${esc(paymentUnit())}</small></div><div><b>${money(b.entry)}</b><small>ENTRY COST · ${esc(paymentUnit())}</small></div><div><b>${signed(b.netIfWin)}</b><small>NET BEFORE NETWORK/SWAP FEES · ${esc(paymentUnit())}</small></div></div>${feeNotice(b)}${completionNotice}<div class="contract-rule"><strong>${esc(a.name)}</strong><p>${esc(a.desc)}</p>${terrain(a)}</div><div class="contract-rule"><strong>${esc(rulesLabel(lockedRules))}</strong><p>Both machines use the same locked rules and fight automatically for up to 100 seconds.</p></div><div class="contract-rule"><strong>Your machine: ${esc(draft.machine.name)}</strong><p>${counterStatus}</p></div>${revealed ? `<div class="bounty-actions"><button id="refit-counter" ${!b.compatible ? "disabled" : ""}>Edit your machine</button>${runtime.paid ? "" : '<button id="local-simulation">Local simulation</button>'}</div>` : ""}${entryAction}${!runtime.paid && !me ? '<button id="join-profile">Sign in to enter this sandbox challenge</button>' : ""}<p class="hint">${legacyV5 ? "Existing V5 challenge; new entries are closed while V6 is active." : revealed ? runtime.paid ? "Your entry is active. Submit a valid machine before the timer ends." : "This local challenge can be tested without transferring funds." : runtime.paid && !runtime.acceptingNewBounties ? runtime.settlementReason : runtime.paid ? `Pay the entry in Tempo Wallet. Once it confirms, the full opponent appears and the build timer starts. The entry is ${b.entry} ${paymentUnit()}; construction limits use ${constructionUnit()}.` : "Your entry uses sandbox credits. Construction credits are separate from any live pathUSD payment."} ${own ? "You cannot claim your own reward." : ""}</p><p class="error-message" id="bounty-error">${!b.compatible ? "This challenge uses an older engine version. Its result remains available, but you cannot submit a new machine." : ""}</p><p class="contract-expiry">${legacyV5 ? "Read-only historical challenge" : b.expires ? (isExpired ? "Expired " : "Expires ") + time(b.expires) : "No deadline · until claimed or closed"} · ${b.attempts} runs<br>${b.listed ? "Visible on the board" : legacyV5 ? "Unlisted: anyone with the link can view." : "Unlisted: anyone with the link can view and pay the posted entry."}</p>${returnAction}${!legacyV5 && me && isExpired && ["open", "busy"].includes(b.status) ? '<button id="expire-contract">Settle expiry onchain</button>' : ""}</section></div><section class="panel contract-history"><h3>Past results</h3>${b.history.length ? b.history.map((a) => (revealed ? `<button data-attempt="${a.id}" class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : a.status === "technical-retry" ? "TECHNICAL RECOVERY" : "RESULT PENDING"}</span><small>${time(a.created)}</small><strong>${a.result?.time ? Number(a.result.time).toFixed(1) + "s" : a.status === "technical-retry" ? "Sponsored retry available" : "Settlement pending"} ↗</strong></button>` : `<div class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : a.status === "technical-retry" ? "TECHNICAL RECOVERY" : "RESULT PENDING"}</span><small>${time(a.created)}</small><strong>Opponent replay sealed</strong></div>`)).join("") : hasPendingBountyResult(b) ? "<p>Result recorded. Settlement confirmation is still pending.</p>" : b.status === "busy" ? "<p>An attempt is in progress. Its signed result will appear here after settlement verification.</p>" : "<p>No results yet. Be the first to try.</p>"}</section>`;
     if (participantPrompt) {
       const template = document.createElement("template");
       template.innerHTML = participantPrompt;

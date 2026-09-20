@@ -11,6 +11,7 @@ import {
   automaticTimeoutState,
   validateEscrowAttestation,
   mainnetFetch,
+  mppEnterBounty,
 } from "../sites/worker/mainnet.mjs";
 import { packChallenge, PRESETS } from "../dist/data.mjs";
 
@@ -218,19 +219,16 @@ test("V6 remains opt-in and publishes one signer with a two-minute grace", () =>
   assert.ok(/^0x[0-9a-f]{64}$/i.test(config.v6DomainSeparator));
 });
 
-test("V6 admission fails closed while any funded non-V6 escrow row remains", async () => {
+test("V6 admission ignores ordinary funded V5 rows because escrows are separate", async () => {
   const db = {
-    prepare() {
+    prepare(sql) {
       return {
         bind() { return this; },
-        async all() { return { results: [{ id: "old", status: "open", fee_policy_version: "pathusd-direct-escrow-v5" }] }; },
+        async all() { return { results: [] }; },
       };
     },
   };
-  await assert.rejects(
-    assertV6MigrationReady(db, { escrowVersion: "6" }),
-    (error) => error.status === 503 && /funded or active V5/.test(error.message),
-  );
+  await assertV6MigrationReady(db, { escrowVersion: "6" });
   const clean = { prepare() { return { bind() { return this; }, async all() { return { results: [] }; } }; } };
   await assertV6MigrationReady(clean, { escrowVersion: "6" });
 });
@@ -295,6 +293,78 @@ test("V6 migration guard blocks funded V4 rows and pending escrow holds", async 
     (error) => error.status === 503 && /pending|hold|funded|active/i.test(error.message),
   );
   db.close();
+});
+
+test("V6 board keeps listed V5 bounties visible and read-only", async () => {
+  const db = new D1Fixture();
+  await db.migrate();
+  const stamp = Date.now();
+  db.sqlite.exec(`
+    INSERT INTO accounts (id,token_hash,name,balance,created,payout_address)
+      VALUES ('legacy-owner','legacy-owner-token','Legacy owner',0,${stamp},'${creator}');
+    INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,entry_units,reward_units,reserve_units,escrow_bounty_id,fee_policy_version,platform_fee_bps)
+      VALUES ('55555555-5555-4555-8555-555555555555','legacy-owner','Legacy V5 challenge','${blueprintJson}',0,0,'open',0,${stamp},${stamp},'10000','1000000','1000000','55','pathusd-direct-escrow-v5',250);
+  `);
+  const env = {
+    ...base,
+    WM_BOUNTY_ESCROW_VERSION: "6",
+    WM_ALLOW_ESCROW_V6: "true",
+    DB: db,
+  };
+  try {
+    const result = await mainnetFetch(
+      new Request("https://foundry.example/api/bounties"),
+      env,
+      { waitUntil() {} },
+      () => new Response("not found", { status: 404 }),
+    );
+    assert.equal(result.status, 200);
+    const rows = await result.json();
+    const legacy = rows.find((row) => row.id === "55555555-5555-4555-8555-555555555555");
+    assert.equal(legacy.escrowVersion, "5");
+    assert.equal(legacy.legacy, true);
+    assert.equal(legacy.readOnly, true);
+    assert.equal(legacy.canEnter, false);
+    assert.match(legacy.compatibilityReason, /Legacy V5 challenge.*read-only/);
+  } finally {
+    db.close();
+  }
+});
+
+test("V6 MPP entry rejects a legacy V5 bounty before charging", async () => {
+  const db = new D1Fixture();
+  await db.migrate();
+  const stamp = Date.now();
+  const legacyId = "66666666-6666-4666-8666-666666666666";
+  db.sqlite.exec(`
+    INSERT INTO accounts (id,token_hash,name,balance,created,payout_address)
+      VALUES ('legacy-entry-owner','legacy-entry-owner-token','Legacy owner',0,${stamp},'${creator}');
+    INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,entry_units,reward_units,reserve_units,escrow_bounty_id,fee_policy_version,platform_fee_bps)
+      VALUES ('${legacyId}','legacy-entry-owner','Legacy entry','${blueprintJson}',0,0,'open',0,${stamp},${stamp},'10000','1000000','1000000','66','pathusd-direct-escrow-v5',250);
+  `);
+  const config = runtimeConfig(
+    { ...base, WM_BOUNTY_ESCROW_VERSION: "6", WM_ALLOW_ESCROW_V6: "true" },
+    "https://foundry.example",
+  );
+  try {
+    await assert.rejects(
+      mppEnterBounty(
+        db,
+        config,
+        new Request("https://foundry.example/api/bounties/" + legacyId + "/attempts"),
+        legacyId,
+        { maxEntry: "0.02", maxPlatformFeeBps: 250, participantName: "Legacy", showAddress: false },
+        "legacy-entry-key-1234",
+      ),
+      (error) => error.status === 409 && /read-only|legacy/i.test(error.message),
+    );
+    assert.equal(
+      db.sqlite.prepare("SELECT COUNT(*) AS count FROM payment_holds WHERE purpose='mpp-entry'").get().count,
+      0,
+    );
+  } finally {
+    db.close();
+  }
 });
 
 test("V6 timeout refund validates event amount, creator, challenger, and nonce", async () => {

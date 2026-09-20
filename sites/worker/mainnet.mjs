@@ -220,6 +220,9 @@ export async function archivePreV5Bounties(db, config = null) {
   // Keep the database records for audit and possible owner-led recovery, but
   // remove every pre-V5 bounty from the public board. Deleting a funded row
   // would strand its reward in an older immutable escrow contract.
+  // V6 has a separate escrow and must keep V5 rows visible for read-only
+  // recovery. Never archive them as a side effect of switching config.
+  if (config?.escrowVersion === "6") return;
   const marker = json({ completedAt: now() });
   const claimed = await db
     .prepare(
@@ -251,19 +254,6 @@ export async function archivePreV5Bounties(db, config = null) {
 
 export async function assertV6MigrationReady(db, config) {
   if (config?.escrowVersion !== "6") return;
-  const rows = (
-    await db
-      .prepare(
-        "SELECT id,status,fee_policy_version FROM bounties WHERE COALESCE(fee_policy_version,'')<>? AND escrow_bounty_id IS NOT NULL AND (CAST(COALESCE(reserve_units,reward_units,'0') AS INTEGER)>0 OR status IN ('open','busy')) LIMIT 1",
-      )
-      .bind(escrowPolicy(config.escrowVersion))
-      .all()
-  ).results;
-  check(
-    rows.length === 0,
-    "V6 admission is paused while funded or active V5 bounties remain. Reconcile every V5 reward and entry before enabling new V6 funds.",
-    503,
-  );
   // A config flip must not strand a paid V5 request that has not reached the
   // escrow row yet.  Current V6 holds carry their version in the body; old
   // holds have no version and therefore fail closed until reconciled.
@@ -277,7 +267,7 @@ export async function assertV6MigrationReady(db, config) {
   ).results;
   check(
     pendingHolds.length === 0,
-    "V6 admission is paused while a pending legacy payment hold has no reconciled V5 bounty. Recover or refund the original payment before enabling V6 funds.",
+    "V6 admission is paused while a pending legacy payment operation remains. Recover or refund the original payment before accepting new V6 funds.",
     503,
   );
   const pendingStates = (
@@ -290,7 +280,7 @@ export async function assertV6MigrationReady(db, config) {
   ).results;
   check(
     pendingStates.length === 0,
-    "V6 admission is paused while a pending paid MPP operation has no reconciled V5 bounty. Recover or refund the original payment before enabling V6 funds.",
+    "V6 admission is paused while a pending paid MPP operation remains. Recover or refund the original payment before accepting new V6 funds.",
     503,
   );
 }
@@ -1248,7 +1238,7 @@ function releaseStatement(db, bountyId, saved, config) {
     .bind("bounty-release:" + bountyId, json({ engineHash: saved.engineHash, chainId: saved.chainId || config.chainId, escrowAddress: saved.escrowAddress || config.escrowAddress, escrowVersion: saved.escrowVersion || config.escrowVersion }));
 }
 
-async function bountyView(db, row, viewer = null, history = false) {
+async function bountyView(db, row, viewer = null, history = false, config = null) {
   const owner = await db
       .prepare("SELECT name FROM accounts WHERE id=?")
       .bind(row.owner)
@@ -1264,6 +1254,7 @@ async function bountyView(db, row, viewer = null, history = false) {
       .first();
   const blueprint = parse(row.blueprint);
   const release = await bountyRelease(db, row);
+  const legacy = config?.escrowVersion === "6" && row.fee_policy_version !== escrowPolicy(config.escrowVersion);
   let complexityIssues = [];
   try { complexityIssues = paidComplexityIssues(unpackChallenge(blueprint).machine).issues; } catch { complexityIssues = ["The paid blueprint could not be replayed under the current catalog."]; }
   const revealed = await canRevealDefender(db, row, viewer);
@@ -1291,8 +1282,14 @@ async function bountyView(db, row, viewer = null, history = false) {
       attempts: "/api/bounties/" + row.id + "/attempts",
     },
     versions: { hash: release?.engineHash || null },
-    compatible: release?.engineHash === CLIENT_ENGINE_HASH && complexityIssues.length === 0,
-    compatibilityReason: release?.engineHash !== CLIENT_ENGINE_HASH
+    escrowVersion: row.fee_policy_version?.split("-v").at(-1) || null,
+    legacy,
+    readOnly: legacy,
+    canEnter: !legacy && release?.engineHash === CLIENT_ENGINE_HASH && complexityIssues.length === 0 && row.status === "open",
+    compatible: !legacy && release?.engineHash === CLIENT_ENGINE_HASH && complexityIssues.length === 0,
+    compatibilityReason: legacy
+      ? "Legacy V5 challenge — read-only"
+      : release?.engineHash !== CLIENT_ENGINE_HASH
       ? "New entry requires the current engine; existing attempts retain their committed version."
       : complexityIssues[0] || null,
     activeAttempt: row.active_attempt,
@@ -3534,6 +3531,11 @@ export async function mppEnterBounty(db, config, request, bountyId, body, key, i
   validKey(key);
   const identity = participantIdentity(body),
     initialRow = await bountyRow(db, bountyId);
+  check(
+    config.escrowVersion !== "6" || initialRow.fee_policy_version === escrowPolicy("6"),
+    "This is a legacy V5 challenge. It remains visible for history and recovery, but new V6 entries are closed.",
+    409,
+  );
   check(initialRow.escrow_bounty_id, "This legacy bounty is not backed by the direct escrow.", 409);
   const entry = BigInt(initialRow.entry_units),
     maximum = boundedUnits(body.maxEntry);
@@ -3569,8 +3571,8 @@ export async function mppEnterBounty(db, config, request, bountyId, body, key, i
       receipt: state.receipt,
       escrowHash: state.escrowHash,
     };
-  if (config.escrowVersion === "6" && initialRow.fee_policy_version !== escrowPolicy(config.escrowVersion) && state?.phase !== "quoted")
-    fail(503, "This paid V5 entry cannot be replayed against the V6 escrow. Recover the original V5 operation before changing deployment configuration.");
+  if (config.escrowVersion === "6" && initialRow.fee_policy_version !== escrowPolicy(config.escrowVersion))
+    fail(409, "Legacy V5/V4 challenges are read-only while V6 is active; use the original V5 deployment to recover this entry.");
   check(
     state?.phase !== "refunded",
     "This paid entry request was refunded. Use a new idempotency key.",
@@ -4149,6 +4151,11 @@ async function directEntryIntent(db, auth, bountyId, body, key, config) {
   validKey(key);
   const identity = participantIdentity(body);
   const row = await bountyRow(db, bountyId);
+  check(
+    config.escrowVersion !== "6" || row.fee_policy_version === escrowPolicy("6"),
+    "This is a legacy V5 challenge. It remains visible for history and recovery, but new V6 entries are closed.",
+    409,
+  );
   check(
     row.status === "open",
     "This bounty is busy or closed. No wallet transaction was prepared.",
@@ -6380,16 +6387,24 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     }
     if (path === "/api/bounties" && method === "GET") {
       const completedAfter = now() - COMPLETED_BOUNTY_BOARD_MS,
-        account = auth?.account || "";
+        account = auth?.account || "",
+        currentPolicy = escrowPolicy(config.escrowVersion),
+        legacyPolicy = config.escrowVersion === "6" ? escrowPolicy("5") : currentPolicy;
       const rows = await db
         .prepare(
-          "SELECT * FROM bounties WHERE entry_units IS NOT NULL AND fee_policy_version=? AND (owner=? OR (listed=1 AND (status IN ('open','busy') OR (status IN ('completed','claimed') AND updated>=?)))) ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'busy' THEN 1 WHEN 'completed' THEN 2 WHEN 'claimed' THEN 2 ELSE 3 END, updated DESC LIMIT 100",
+          config.escrowVersion === "6"
+            ? "SELECT * FROM bounties WHERE entry_units IS NOT NULL AND ((fee_policy_version=? AND (owner=? OR (listed=1 AND (status IN ('open','busy') OR (status IN ('completed','claimed') AND updated>=?))))) OR (fee_policy_version IN (?,?) AND escrow_bounty_id IS NOT NULL)) ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'busy' THEN 1 WHEN 'completed' THEN 2 WHEN 'claimed' THEN 2 ELSE 3 END, updated DESC LIMIT 100"
+            : "SELECT * FROM bounties WHERE entry_units IS NOT NULL AND fee_policy_version=? AND (owner=? OR (listed=1 AND (status IN ('open','busy') OR (status IN ('completed','claimed') AND updated>=?)))) ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'busy' THEN 1 WHEN 'completed' THEN 2 WHEN 'claimed' THEN 2 ELSE 3 END, updated DESC LIMIT 100",
         )
-        .bind(escrowPolicy(config.escrowVersion), account, completedAfter)
+        .bind(
+          ...(config.escrowVersion === "6"
+            ? [currentPolicy, account, completedAfter, escrowPolicy("4"), legacyPolicy]
+            : [currentPolicy, account, completedAfter]),
+        )
         .all();
       return response(
         await Promise.all(
-          rows.results.map((row) => bountyView(db, row, auth?.account, false)),
+          rows.results.map((row) => bountyView(db, row, auth?.account, false, config)),
         ),
       );
     }
@@ -6484,6 +6499,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
             await bountyRow(db, bountyId),
             auth?.account,
             true,
+            config,
           ),
         );
       if (action === "cancel" && method === "POST") {
