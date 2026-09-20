@@ -1,6 +1,6 @@
 # Tempo mainnet operations
 
-War Machines uses a non-upgradeable pathUSD bounty escrow on Tempo Mainnet. V3 and V4 are historical deployments; V5 is the current direct-wallet and native-MPP release. It adds a bounded relayer and a two-minute settlement grace so an on-time result is not turned into a player loss by a short relay outage. The Worker verifies the resulting contract event and stores immutable game terms.
+War Machines uses a non-upgradeable pathUSD bounty escrow on Tempo Mainnet. V3 and V4 are historical deployments; V5 is the current direct-wallet and native-MPP release. It adds a bounded relayer and a two-minute settlement grace so an on-time result is not turned into a player loss by a short relay outage. Active V5 intentionally has one trusted settlement signer; it does not provide independent two-signer protection. The Worker verifies the resulting contract event and stores immutable game terms.
 
 | Item         | Value                                                                          |
 | ------------ | ------------------------------------------------------------------------------ |
@@ -19,21 +19,21 @@ The table retains the historical deployed escrow reference. The current Worker c
 2. In direct mode, a challenger approves the exact entry and calls `enterBounty` directly from their wallet. In V5 native MPP mode, the agent pays the exact entry and the relayer calls `enterBountyFor` with the payer address. That confirmed entry reveals the defender only to the challenger; public routes retain a cost, mass, part-count, weapon-count, terrain and limit summary.
 3. The challenger gets the current construction window, then deploys one counter before the deadline. The worker records the deterministic replay and its hash.
 4. The configured result signer signs the escrow's exact EIP-712 settlement payload. Anyone can relay `settleAttempt`; V5 accepts a bounded result during its two-minute relay grace and the escrow sends the winner payout and platform fee itself.
-5. A creator can cancel an idle bounty. A loss or draw reopens the bounty and leaves the already-paid entry with the creator. A missed build deadline is a real loss and is finalized with `forfeitTimedOutAttempt`. If an on-time result misses the V5 settlement grace for infrastructure reasons, the Worker calls `reopenTimedOutAttempt`, marks the attempt technical rather than lost, and gives that challenger one sponsored retry without another entry payment. Only idle bounties can expire and return their unused reward.
+5. A creator can cancel an idle bounty. A loss or draw reopens the bounty and leaves the already-paid entry with the creator. A missed build deadline is a real loss and is finalized with `forfeitTimedOutAttempt`. If an on-time result misses the V5 settlement grace for infrastructure reasons, the Worker calls `reopenTimedOutAttempt`, marks the attempt technical rather than lost, and gives that challenger one sponsored retry without another entry payment. This technical path is a retry credit, not a refund of the original entry. Only idle bounties can expire and return their unused reward.
 
 ## Local result signing
 
-For the current small private trial, result keystores remain only in local encrypted Foundry keystores. The Site, D1 database, Git repository, browser bundle, and environment settings contain no signer password or private key.
+The active ChatGPT Sites deployment keeps the one V5 settlement signing secret in a protected server-side Worker secret binding. It is never sent to the browser or stored in D1, Git, public configuration, or logs. An offline encrypted Foundry keystore remains an optional local or recovery path; it is not the active two-signer model.
 
-After an attempt reaches **awaiting signatures**, run this from the desktop repository. Foundry asks locally for each keystore password; the script only sends two completed signatures back to the API and never broadcasts a transaction.
+After an attempt reaches **awaiting signatures**, the trusted Worker signs and submits the exact settlement transaction using that configured signer. An operator may run the desktop script for a local or recovery operation; it must use one approved signer and must not be described as independent multi-signer protection.
 
 ```powershell
 .\scripts\attest-escrow-result.ps1 -AttemptId <attempt UUID> -Origin https://your-site.example
 ```
 
-Then the browser shows the settlement state. The signer service should attest before the escrow deadline; V5 still accepts the verified result during its two-minute grace. When a committed result cannot be relayed after grace, the Worker uses `reopenTimedOutAttempt` and issues the one-time free retry. Only a missing build uses `forfeitTimedOutAttempt` and records a user loss.
+The Worker updates the settlement state after the signer submission and finalized receipt. V5 still accepts the verified result during its two-minute grace. When a committed result cannot be relayed after grace, the Worker uses `reopenTimedOutAttempt` and issues the one-time free retry. Only a missing build uses `forfeitTimedOutAttempt` and records a user loss.
 
-This manual operation is acceptable only for an extremely small private rehearsal. A public release needs separate signer operators, a reviewed replay/attestation service, monitoring, and an independent Solidity/security review.
+This manual operation is an optional local or recovery rehearsal. The active V5 release uses one trusted Worker signer; keep the trial amount bounded, monitor settlement, and obtain an independent Solidity/security review before increasing exposure.
 
 ## Native MPP bounty mode
 
@@ -50,7 +50,7 @@ WM_AGENT_BOUNTY_MPP_MAX=1.00
 MPP_SECRET_KEY=<32+ character server secret>
 ```
 
-The relayer must hold enough pathUSD for reward/entry forwarding and fee payment, and must approve the deployed V5 escrow for the configured maximum relay amount. The Worker secret is the only private value in this list; never put it in Git, D1 or the browser. Native MPP is used for paid bounty creation and entry; browser sessions continue to use the Tempo Wallet path for the same operations.
+The relayer must hold enough pathUSD for reward/entry forwarding and fee payment, and must approve the deployed V5 escrow for the configured maximum relay amount. Native MPP temporarily places the payer's pathUSD under the bounded relayer's control before the matching escrow call; reconcile failed forwards and keep the exposure bounded. The Worker secret is the only private value in this list; never put it in Git, D1 or the browser. Native MPP is used for paid bounty creation and entry; browser sessions continue to use the Tempo Wallet path for the same operations.
 
 
 ### Allowlisted stablecoin inputs

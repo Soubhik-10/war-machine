@@ -105,6 +105,13 @@ class D1Mock {
     this.sqlite.close();
   }
 }
+function seedHealthyPayment(DB, env) {
+  DB.sqlite.prepare("INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .run(
+      `payment-health:4217:${env.WM_BOUNTY_ESCROW_ADDRESS}:v${env.WM_BOUNTY_ESCROW_VERSION}:s${env.WM_ESCROW_SETTLEMENT_SIGNER}:r${env.WM_BOUNTY_RELAYER_ADDRESS}`,
+      JSON.stringify({ ready: true, checkedAt: Date.now(), reason: null, signerBalanceUnits: "1000000", relayerBalanceUnits: "1000000", overdueAttempts: 0 }),
+    );
+}
 const json = (url, method = "GET", body, token, key) =>
   new Request("https://foundry.example" + url, {
     method,
@@ -256,6 +263,7 @@ test("native MPP exposes only paid bounty routes and uses the standard Authoriza
       MPP_SECRET_KEY: "m".repeat(32),
     };
   const config = runtimeConfig(env, "https://foundry.example");
+  seedHealthyPayment(DB, env);
   assert.equal(config.agentBountyMppEnabled, true);
   assert.equal(config.agentMppEnabled, undefined);
   const ctx = { waitUntil() {} };
@@ -420,6 +428,7 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
       WM_AGENT_BOUNTY_MPP_MAX: "1.00",
       MPP_SECRET_KEY: "m".repeat(32),
   };
+  seedHealthyPayment(DB, env);
   const ctx = { waitUntil() {} };
   const init = await worker.fetch(
     new Request("https://foundry.example/mcp", {

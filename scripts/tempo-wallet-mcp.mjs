@@ -7,7 +7,7 @@
 
 import { createInterface } from "node:readline";
 import { Provider, Storage } from "accounts/cli";
-import { keccak256, toBytes } from "viem";
+import { decodeFunctionData, keccak256, parseAbi, toBytes } from "viem";
 
 const CHAIN_ID = 4217;
 const PATHUSD = "0x20c0000000000000000000000000000000000000";
@@ -38,6 +38,15 @@ const SELECTORS = {
     "settleAttempt((uint256,uint64,uint8,bytes32,uint64),bytes[])",
   ),
 };
+const ESCROW_ABI = parseAbi([
+  "function createBounty(bytes32 termsHash,uint128 reward,uint128 entry,uint64 expiresAt) returns (uint256)",
+  "function enterBounty(uint256 bountyId)",
+  "function cancelBounty(uint256 bountyId)",
+  "function expireBounty(uint256 bountyId)",
+  "function forfeitTimedOutAttempt(uint256 bountyId)",
+  "function reopenTimedOutAttempt(uint256 bountyId)",
+  "function settleAttempt((uint256 bountyId,uint64 attemptNonce,uint8 outcome,bytes32 resultHash,uint64 validUntil) settlement,bytes[] signatures)",
+]);
 const ESCROW_SELECTORS = new Set([
   SELECTORS.create,
   SELECTORS.enter,
@@ -67,6 +76,36 @@ const normalizedCall = (call, label) => {
   return { to, data };
 };
 
+function decodeEscrowCall(data) {
+  try {
+    return decodeFunctionData({ abi: ESCROW_ABI, data });
+  } catch {
+    throw new Error("The plan escrow calldata is malformed or not a supported V5/V6 method.");
+  }
+}
+
+function spendForEscrowCall(decoded, approvalAmount) {
+  switch (decoded.functionName) {
+    case "createBounty":
+      return BigInt(decoded.args[1]);
+    case "enterBounty":
+      // The bounty amount is intentionally not trusted from the calldata: the
+      // ID alone does not contain it. An approval is therefore required for
+      // entry plans, and its amount is an upper bound enforced by ERC-20.
+      if (approvalAmount === null)
+        throw new Error("An approval-free entry plan has no bounded spend amount.");
+      return approvalAmount;
+    case "cancelBounty":
+    case "expireBounty":
+    case "forfeitTimedOutAttempt":
+    case "reopenTimedOutAttempt":
+    case "settleAttempt":
+      return 0n;
+    default:
+      throw new Error(`The plan method ${decoded.functionName} is not allowed.`);
+  }
+}
+
 export function validateEscrowPlan(plan, options = {}) {
   if (!plan || typeof plan !== "object") throw new Error("plan is required.");
   if (Number(plan.chainId) !== CHAIN_ID)
@@ -84,6 +123,7 @@ export function validateEscrowPlan(plan, options = {}) {
   const call = normalizedCall(plan.call, "plan.call");
   if (call.to !== escrow || !ESCROW_SELECTORS.has(call.data.slice(0, 10)))
     throw new Error("The plan call is not an allowed War Machines escrow method.");
+  const decoded = decodeEscrowCall(call.data);
 
   const approval = plan.approval
     ? normalizedCall(plan.approval, "plan.approval")
@@ -103,11 +143,33 @@ export function validateEscrowPlan(plan, options = {}) {
       BigInt(String(plan.approval.amount)) !== BigInt(`0x${approval.data.slice(74)}`)
     )
       throw new Error("The plan approval amount does not match its calldata.");
-    if (options.maxSpend !== undefined) {
-      const maxSpend = BigInt(String(options.maxSpend));
-      const amount = BigInt(`0x${approval.data.slice(74)}`);
-      if (amount > maxSpend) throw new Error("The plan exceeds maxSpend.");
-    }
+    if (BigInt(`0x${approval.data.slice(74)}`) === 0n)
+      throw new Error("The pathUSD approval amount must be positive.");
+  }
+
+  const approvalAmount = approval ? BigInt(`0x${approval.data.slice(74)}`) : null;
+  if (
+    approval &&
+    ["cancelBounty", "expireBounty", "forfeitTimedOutAttempt", "reopenTimedOutAttempt", "settleAttempt"].includes(decoded.functionName)
+  )
+    throw new Error(`The ${decoded.functionName} plan must not include a token approval.`);
+  const spendUnits = spendForEscrowCall(decoded, approvalAmount);
+  if (plan.spendUnits !== undefined) {
+    if (!/^\d+$/.test(String(plan.spendUnits)))
+      throw new Error("plan.spendUnits must be integer token units.");
+    if (BigInt(String(plan.spendUnits)) !== spendUnits)
+      throw new Error("plan.spendUnits does not match the decoded escrow call.");
+  }
+  if (decoded.functionName === "createBounty" && approvalAmount !== null && approvalAmount !== spendUnits)
+    throw new Error("The create plan approval must equal the decoded reward.");
+  if (options.maxSpend !== undefined) {
+    if (!/^\d+$/.test(String(options.maxSpend)))
+      throw new Error("maxSpend must be integer token units.");
+    const maxSpend = BigInt(String(options.maxSpend));
+    // Compare the decoded economic operation, never merely the presence of
+    // an approve call. For entries approvalAmount is a conservative upper
+    // bound on the eventual transferFrom amount.
+    if (spendUnits > maxSpend) throw new Error("The plan exceeds maxSpend.");
   }
 
   const expectedCalls = approval ? [approval, call] : [call];
@@ -119,7 +181,14 @@ export function validateEscrowPlan(plan, options = {}) {
         throw new Error("The plan calls batch does not match the signed plan.");
     });
   }
-  return { chainId: CHAIN_ID, token, escrow, calls: expectedCalls };
+  return {
+    chainId: CHAIN_ID,
+    token,
+    escrow,
+    calls: expectedCalls,
+    method: decoded.functionName,
+    spendUnits,
+  };
 }
 
 const wallet = Provider.create({
@@ -160,7 +229,7 @@ const TOOLS = [
       properties: {
         plan: { type: "object", description: "Exact plan returned by War Machines MCP." },
         from: { type: "string", description: "Optional connected wallet address." },
-        maxSpend: { type: "string", description: "Optional maximum approval amount in base units." },
+        maxSpend: { type: "string", description: "Optional maximum decoded escrow spend in base units." },
       },
       required: ["plan"],
       additionalProperties: false,

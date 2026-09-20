@@ -1,7 +1,17 @@
 import { sha256, stringToHex, parseAbi, recoverTypedDataAddress } from 'viem';
 import { Battle } from '../dist/engine.mjs';
-import { unpackChallenge } from '../dist/data.mjs';
+import { unpackChallenge as unpackCurrentChallenge } from '../dist/data.mjs';
 import { CLIENT_ENGINE_HASH } from '../dist/release.mjs';
+import { Battle as LegacyBattle } from './engines/4b762a9b76ba071b27799113a0aafb5b8a04a7a02e21a445e60295f3c82ca365.mjs';
+import { unpackChallenge as unpackLegacyChallenge } from './engines/data.mjs';
+
+export const LEGACY_ENGINE_HASH = '4b762a9b76ba071b27799113a0aafb5b8a04a7a02e21a445e60295f3c82ca365';
+export const ENGINE_EVALUATORS = Object.freeze({
+  [CLIENT_ENGINE_HASH]: Object.freeze({ Battle, unpackChallenge: unpackCurrentChallenge }),
+  // Keep the audited evaluator authoritative while the generated release stamp
+  // still carries the same hash during a local build transition.
+  [LEGACY_ENGINE_HASH]: Object.freeze({ Battle: LegacyBattle, unpackChallenge: unpackLegacyChallenge }),
+});
 
 export const CHAIN_ID = 4217;
 export const ESCROW = '0xb14a3aA99C9349094612143089F55aE5372DeB24';
@@ -30,14 +40,15 @@ export function typedData(payload) {
     ] }, message: { bountyId: BigInt(payload.bountyId), attemptNonce: BigInt(payload.attemptNonce), outcome: payload.outcome, resultHash: payload.resultHash, validUntil: BigInt(payload.validUntil) } };
 }
 export function evaluate(record, time = Date.now(), expectedEscrow = ESCROW) {
-  ensure(record.version === 1 && record.engineHash === CLIENT_ENGINE_HASH, 'ENGINE_MISMATCH');
+  ensure(record.version === 1 && typeof record.engineHash === 'string' && ENGINE_EVALUATORS[record.engineHash], 'ENGINE_MISMATCH');
   ensure(record.chainId === CHAIN_ID && typeof record.escrow === 'string' && record.escrow.toLowerCase() === expectedEscrow.toLowerCase());
   ensure(Number.isSafeInteger(record.seed) && record.seed >= 0);
   ensure(Number.isSafeInteger(record.deadline) && record.deadline > 0);
   for (const amount of [record.reward, record.entry]) ensure(typeof amount === 'string' && /^(0|[1-9][0-9]*)$/.test(amount) && BigInt(amount) < 2n ** 128n);
   ensure(record.feeBps === 250 && BigInt(record.reward) > 0n);
   ensure(time < record.deadline * 1000, 'EXPIRED');
-  const defender = unpackChallenge(record.defender);
+  const evaluator = ENGINE_EVALUATORS[record.engineHash];
+  const defender = evaluator.unpackChallenge(record.defender);
   let result;
   if (record.reason === 'counter-build-timeout') {
     ensure(record.challenger === null && record.buildDeadline <= time && record.committedAt >= record.buildDeadline);
@@ -45,13 +56,24 @@ export function evaluate(record, time = Date.now(), expectedEscrow = ESCROW) {
   } else {
     ensure(record.reason === 'battle' && record.committedAt < record.buildDeadline);
     ensure(record.challenger.a === record.defender.a && canonical(record.challenger.q) === canonical(record.defender.q));
-    result = { ...new Battle(unpackChallenge(record.challenger).machine, defender.machine, defender.arena, record.seed, {mode:'auto',swapSpawns:!!(record.seed & 1)}).run(), seed: record.seed };
+    ensure((record.challenger.o || 'reactor') === (record.defender.o || 'reactor'), 'OBJECTIVE_MISMATCH');
+    const challenger = evaluator.unpackChallenge(record.challenger);
+    result = { ...new evaluator.Battle(challenger.machine, defender.machine, defender.arena, record.seed, {
+      mode:'auto',
+      swapSpawns:!!(record.seed & 1),
+      objective:defender.objective||challenger.objective||'reactor',
+      headless:true,
+    }).run(), seed: record.seed };
   }
   const outcome = result.winner === 0 ? 0 : 1;
   const fee = outcome === 0 ? BigInt(record.reward) * 250n / 10000n : 0n;
-  // V3 transfers entry directly from challenger to creator at entry time. Its
-  // settlement holds and distributes only the reward reserve.
-  const amounts = { winnerPayout: outcome === 0 ? (BigInt(record.reward)-fee).toString() : '0', platformFee: fee.toString(), creatorEntry: '0' };
+  // V3-V5 transfer entry directly from challenger to creator at entry time.
+  // V6 keeps it in escrow and releases it to the creator with a signed result.
+  const amounts = {
+    winnerPayout: outcome === 0 ? (BigInt(record.reward)-fee).toString() : '0',
+    platformFee: fee.toString(),
+    creatorEntry: record.escrowVersion === '6' ? record.entry : '0',
+  };
   const payload = { bountyId: record.bountyId, attemptNonce: record.attemptNonce, outcome,
     resultHash: digest({ protocol:'war-machines-auto-v1', record, result, amounts }), validUntil: record.deadline - 1 };
   // Recovery only for results committed before migration 0005. The on-chain

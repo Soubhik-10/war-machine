@@ -79,7 +79,7 @@ test('timeout never invents a refund and a late receipt can still reconcile an e
   await processJob(f.env,f.job(),adapters,f.r.deadline*1000+1);assert.equal(f.job().state,'timeout');assert.equal(confirmed,0);
   f.DB.sqlite.prepare('UPDATE settlement_jobs SET tx_hash=?').run(txHash);
   await processJob(f.env,f.job(),adapters,f.r.deadline*1000+61000);assert.equal(f.job().state,'complete');assert.equal(confirmed,1);
-  const status=paymentStatus({payment:{state:'timeout'},result:{outcome:'win'}});assert.equal(status.label,'Settlement recovery in progress');assert.match(status.detail,/not being recorded as a player loss/);
+  const status=paymentStatus({status:'technical-retry',payment:{state:'timeout'},result:{outcome:'technical-failure',payoutStatus:'technical-retry'}});assert.equal(status.label,'Technical recovery in progress');assert.match(status.detail,/not recorded as a combat loss/);
 });
 test('global pause blocks new signatures but permits receipt reconciliation',async t=>{
   const f=fixture(t);f.DB.sqlite.prepare('UPDATE settlement_control SET paused=1').run();let calls=0;
@@ -112,7 +112,7 @@ test('service requests bind body, audience, expiry and nonce; replay is rejected
 });
 test('frontend only displays Paid after finality and escapes transaction links',()=>{
   assert.notEqual(paymentStatus({result:{outcome:'win'},payment:{transactionHash:txHash}}).label,'Paid');
-  for(const [outcome,label] of [['win','Paid'],['loss','Lost'],['draw','Draw']])assert.equal(paymentStatus({result:{outcome},payment:{finalized:true}}).label,label);
+  for(const [outcome,label] of [['win','Paid'],['loss','Loss settled'],['draw','Draw settled']])assert.equal(paymentStatus({result:{outcome},payment:{finalized:true}}).label,label);
   assert.match(paymentPanel({payment:{transactionHash:txHash}}),/explore.tempo.xyz\/tx\//);
   assert.doesNotMatch(paymentPanel({payment:{transactionHash:'javascript:alert(1)'}}),/javascript:/);
 });

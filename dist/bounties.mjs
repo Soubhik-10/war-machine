@@ -1,5 +1,8 @@
 import {
   paymentPanel,
+  paymentBreakdown,
+  paymentIsRefunded,
+  paymentIsV6,
   paymentStatus,
   transactionLink,
 } from "./payment-status.mjs";
@@ -368,6 +371,32 @@ export function createBountyUI(adapter) {
       }[s] || s.toUpperCase();
     return `<span class="contract-status ${s}">${esc(label)}</span>`;
   }
+  const paymentUnit = () => (runtime.paid ? "pathUSD" : runtime.currency);
+  const constructionUnit = () =>
+    runtime.paid ? "construction credits" : "build credits";
+  const bountyExpired = (b) =>
+    !!b.expires && Number(b.expires) <= Date.now() && b.status === "open";
+  const bountyCardState = (b) => {
+    if (bountyExpired(b)) return "expired";
+    return b.status;
+  };
+  const bountyAvailabilityLabel = (b, complete) => {
+    if (complete) return "RESULT · 10 MINUTES";
+    if (bountyExpired(b)) return "ENTRY CLOSED · EXPIRED";
+    if (b.status === "busy")
+      return b.activeResult || b.result || b.settlement
+        ? "RESULT PENDING · SETTLEMENT"
+        : "IN PROGRESS · ENTRY CLOSED";
+    return b.listed ? "AVAILABLE CHALLENGE" : "LINK ONLY";
+  };
+  const hasPendingBountyResult = (b) =>
+    !!(
+      b.activeResult ||
+      b.result ||
+      b.settlement ||
+      b.payment?.state === "awaiting-signatures" ||
+      b.payment?.state === "ready-to-settle"
+    );
   function header(title, subtitle) {
     const walletTitle =
         runtime.paid && me?.payoutAddress ? me.payoutAddress : "",
@@ -501,16 +530,17 @@ export function createBountyUI(adapter) {
     return `<div class="terrain-tags">${arena.climate ? `<span class="terrain-tag climate" title="${esc(arena.desc)}">${esc(arena.climate.name)}</span>` : ""}${types.map((t) => `<span class="terrain-tag ${t}" title="${esc(TERRAIN_INFO[t]?.effect || "")}">${esc(TERRAIN_INFO[t]?.name || t)}</span>`).join("")}</div>`;
   }
   function feeNotice(b) {
-    return `<div class="notice fee-disclosure"><strong>${b.platformFeeBps ? money(b.platformFeeBps / 100) + "% platform fee on a win" : "No platform fee · original bounty terms"}</strong><br>Gross reward ${money(b.reward)} − platform fee ${money(b.platformFee)} = <strong>${money(b.payout)} paid to the winner</strong>. Entry costs ${money(b.entry)} separately. On a loss, draw, or missed build deadline, that entry is paid to the <strong>bounty creator</strong>. Net if you win: ${signed(b.netIfWin)} ${esc(runtime.currency)}.</div>`;
+    return `<div class="notice fee-disclosure"><strong>${b.platformFeeBps ? money(b.platformFeeBps / 100) + "% platform fee on a win" : "No platform fee · original bounty terms"}</strong><br>Gross reward ${money(b.reward)} ${paymentUnit()} − platform fee ${money(b.platformFee)} ${paymentUnit()} = <strong>${money(b.payout)} ${paymentUnit()} paid to the winner</strong>. Entry costs ${money(b.entry)} ${paymentUnit()} separately. On a loss, draw, or missed build deadline, that entry is paid to the <strong>bounty creator</strong>. Net before network/swap fees if you win: ${signed(b.netIfWin)} ${paymentUnit()}. Wallet network fees and any input-token swap costs are separate estimates.</div>`;
   }
   function card(b) {
     const s = scout(b),
       a = bountyArena(b),
       complete = ["completed", "claimed"].includes(b.status),
+      cardState = bountyCardState(b),
       fee = b.platformFeeBps
-        ? `${money(b.payout)} winner payout · ${money(b.platformFeeBps / 100)}% platform fee`
-        : `${money(b.payout)} winner payout · legacy terms / no platform fee`;
-    return `<article class="contract-card"><div class="contract-card-top">${status(b.status)}<small>${complete ? "RESULT · 10 MINUTES" : b.listed ? "AVAILABLE CHALLENGE" : "LINK ONLY"}</small></div><div class="contract-preview">${b.blueprint ? `<canvas data-contract-thumb="${b.id}" width="300" height="260" aria-label="Opponent machine"></canvas>` : sealedPreview(b)}<span class="contract-reward"><b>${money(b.reward)}</b><small>GROSS REWARD</small></span></div><div class="contract-content"><h2>${esc(b.title)}</h2><p>${esc(a.name)} · ${s.cost} build credits · ${s.mass} t · ${s.parts} fitted parts</p>${terrain(a)}<div class="contract-class">${esc(rulesLabel(bountyRules(b)))}</div><p class="card-fee">${fee}</p><div class="contract-footer"><span><b>${b.entry}</b> entry · ${b.attempts} runs</span><button data-contract="${b.id}">${complete ? "Watch result" : b.blueprint ? "View challenge" : "View challenge"} ↗</button></div></div></article>`;
+        ? `${money(b.payout)} ${paymentUnit()} winner payout · ${money(b.platformFeeBps / 100)}% platform fee`
+        : `${money(b.payout)} ${paymentUnit()} winner payout · legacy terms / no platform fee`;
+    return `<article class="contract-card"><div class="contract-card-top">${status(cardState)}<small>${bountyAvailabilityLabel(b, complete)}</small></div><div class="contract-preview">${b.blueprint ? `<canvas data-contract-thumb="${b.id}" width="300" height="260" aria-label="Opponent machine"></canvas>` : sealedPreview(b)}<span class="contract-reward"><b>${money(b.reward)}</b><small>GROSS REWARD · ${esc(paymentUnit())}</small></span></div><div class="contract-content"><h2>${esc(b.title)}</h2><p>${esc(a.name)} · ${s.cost} ${constructionUnit()} · ${s.mass} t · ${s.parts} fitted parts</p>${terrain(a)}<div class="contract-class">${esc(rulesLabel(bountyRules(b)))}</div><p class="card-fee">${fee}</p><div class="contract-footer"><span><b>${b.entry} ${paymentUnit()}</b> entry · ${b.attempts} runs</span><button data-contract="${b.id}">${complete ? "Watch result" : "View challenge"} ↗</button></div></div></article>`;
   }
   function refreshHeaderAccount() {
     const node = $(".bounty-heading"),
@@ -713,7 +743,8 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
       issues = validate(draft.machine, lockedRules),
       own = b.owner === me?.id,
       m = revealed ? unpackChallenge(b.blueprint, true).machine : null;
-    const isExpired = !!b.expires && b.expires <= Date.now(),
+    const isExpired = !!b.expires && Number(b.expires) <= Date.now(),
+      canEnter = b.status === "open" && !isExpired && !own,
       counterStatus = revealed
         ? issues.length
           ? esc(issues[0])
@@ -730,13 +761,15 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         ? `<button id="inspect-defender" ${!b.compatible ? "disabled" : ""}>◎ View machine in 3D</button><button id="export-defender">↓ Blueprint JSON</button>`
         : '<span class="sealed-note">PAY TO REVEAL · MACHINE HIDDEN</span>',
       entryAction =
-        b.status === "open" && !own
-          ? `<button id="official-entry" class="primary contract-enter" ${!b.compatible || (!runtime.paid && !me) || (runtime.paid && !runtime.acceptingNewBounties) ? "disabled" : ""}>${runtime.paid && !runtime.acceptingNewBounties ? "Paid entries paused" : `Pay entry & reveal opponent · ${b.entry} ${runtime.currency}`}</button>`
+        canEnter
+          ? `<button id="official-entry" class="primary contract-enter" ${!b.compatible || (!runtime.paid && !me) || (runtime.paid && !runtime.acceptingNewBounties) ? "disabled" : ""}>${runtime.paid && !runtime.acceptingNewBounties ? "Paid entries paused" : `Pay entry & reveal opponent · ${b.entry} ${paymentUnit()}`}</button>`
+          : isExpired && b.status === "open"
+            ? '<div class="notice fee-disclosure"><strong>Entry closed.</strong> This bounty has expired and cannot accept a new payment.</div>'
           : b.status === "busy" && revealed && !own
             ? '<button id="resume-attempt" class="primary contract-enter">Resume paid challenge</button>'
             : "",
       participantPrompt =
-        b.status === "open" && !own
+        canEnter
           ? `<div class="participant-prompt"><div class="participant-prompt-heading"><strong>Add your name</strong><span>Optional</span></div><p>Add an optional name for the results board. Leave it blank to appear as Anonymous engineer.</p><label class="field"><span>Your name or machine name</span><input id="participant-name" maxlength="28" placeholder="e.g. Nova or ByteForge" autocomplete="nickname"></label>${runtime.paid ? '<label class="identity-check"><input id="participant-show-address" type="checkbox"><span>Show my shortened wallet address on this attempt</span></label><p class="hint">Your wallet still authorizes the payment. The address stays hidden unless you opt in.</p>' : '<p class="hint">This name appears on the local attempt board. Your profile remains private.</p>'}</div>`
           : "";
     const completionNotice =
@@ -754,7 +787,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         revealed ? "BUILD YOUR MACHINE." : "VIEW THE CHALLENGE.",
         esc(b.title),
       ) +
-      `<div class="contract-detail"><section class="panel defender-card"><div class="contract-card-top">${status(b.status)}<small>${b.status === "completed" ? "UNCLAIMED REWARD RESERVED" : b.funded ? "REWARD RESERVED" : "BOUNTY CLOSED"}</small></div>${preview}<div class="defender-caption">${defenderCaption}</div><div class="bounty-actions">${defenderActions}<button id="copy-contract">↗ Copy challenge link</button><button id="save-contract">${savedIds.has(b.id) ? "★ Saved challenge" : "☆ Save challenge"}</button>${navigator.share ? '<button id="native-share-contract">Share…</button>' : ""}</div></section><section class="panel contract-terms"><span class="eyebrow">${esc(b.ownerName)} / CHALLENGE TERMS</span><h2>${esc(b.title)}</h2><div class="contract-economy"><div><b>${money(b.reward)}</b><small>GROSS REWARD</small></div><div><b>${money(b.entry)}</b><small>ENTRY COST</small></div><div><b>${signed(b.netIfWin)}</b><small>NET AFTER ALL FEES</small></div></div>${feeNotice(b)}${completionNotice}<div class="contract-rule"><strong>${esc(a.name)}</strong><p>${esc(a.desc)}</p>${terrain(a)}</div><div class="contract-rule"><strong>${esc(rulesLabel(lockedRules))}</strong><p>Both machines use the same locked rules and fight automatically for up to 100 seconds.</p></div><div class="contract-rule"><strong>Your machine: ${esc(draft.machine.name)}</strong><p>${counterStatus}</p></div>${revealed ? `<div class="bounty-actions"><button id="refit-counter" ${!b.compatible ? "disabled" : ""}>Edit your machine</button>${runtime.paid ? "" : '<button id="local-simulation">Local simulation</button>'}</div>` : ""}${entryAction}${!runtime.paid && !me ? '<button id="join-profile">Sign in to enter this sandbox challenge</button>' : ""}<p class="hint">${revealed ? runtime.paid ? "Your entry is active. Submit a valid machine before the timer ends." : "This local challenge can be tested without transferring funds." : runtime.paid && !runtime.acceptingNewBounties ? runtime.settlementReason : runtime.paid ? "Pay the entry in Tempo Wallet. Once it confirms, the full opponent appears and the build timer starts." : "Your entry goes to the verified escrow. After confirmation, the full opponent appears and the build timer starts. If your machine loses, the entry goes to the challenge creator. Technical failures are refunded."} ${own ? "You cannot claim your own reward." : ""}</p><p class="error-message" id="bounty-error">${!b.compatible ? "This challenge uses an older engine version. Its result remains available, but you cannot submit a new machine." : ""}</p><p class="contract-expiry">${b.expires ? "Expires " + time(b.expires) : "No deadline · until claimed or closed"} · ${b.attempts} runs<br>${b.listed ? "Visible on the board" : "Unlisted: anyone with the link can view and pay the posted entry."}</p>${returnAction}${me && isExpired && ["open", "busy"].includes(b.status) ? '<button id="expire-contract">Settle expiry onchain</button>' : ""}</section></div><section class="panel contract-history"><h3>Past results</h3>${b.history.length ? b.history.map((a) => (revealed ? `<button data-attempt="${a.id}" class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : "REFUNDED"}</span><small>${time(a.created)}</small><strong>${a.result?.time ? Number(a.result.time).toFixed(1) + "s" : "Technical refund"} ↗</strong></button>` : `<div class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : "REFUNDED"}</span><small>${time(a.created)}</small><strong>Opponent replay sealed</strong></div>`)).join("") : "<p>No results yet. Be the first to try.</p>"}</section>`;
+      `<div class="contract-detail"><section class="panel defender-card"><div class="contract-card-top">${status(bountyCardState(b))}<small>${b.status === "completed" ? "UNCLAIMED REWARD RESERVED" : bountyExpired(b) ? "ENTRY CLOSED · EXPIRED" : b.status === "busy" ? (hasPendingBountyResult(b) ? "RESULT PENDING · SETTLEMENT" : "IN PROGRESS · ENTRY CLOSED") : b.funded ? "REWARD RESERVED" : "BOUNTY CLOSED"}</small></div>${preview}<div class="defender-caption">${defenderCaption}</div><div class="bounty-actions">${defenderActions}<button id="copy-contract">↗ Copy challenge link</button><button id="save-contract">${savedIds.has(b.id) ? "★ Saved challenge" : "☆ Save challenge"}</button>${navigator.share ? '<button id="native-share-contract">Share…</button>' : ""}</div></section><section class="panel contract-terms"><span class="eyebrow">${esc(b.ownerName)} / CHALLENGE TERMS</span><h2>${esc(b.title)}</h2><div class="contract-economy"><div><b>${money(b.reward)}</b><small>GROSS REWARD · ${esc(paymentUnit())}</small></div><div><b>${money(b.entry)}</b><small>ENTRY COST · ${esc(paymentUnit())}</small></div><div><b>${signed(b.netIfWin)}</b><small>NET BEFORE NETWORK/SWAP FEES · ${esc(paymentUnit())}</small></div></div>${feeNotice(b)}${completionNotice}<div class="contract-rule"><strong>${esc(a.name)}</strong><p>${esc(a.desc)}</p>${terrain(a)}</div><div class="contract-rule"><strong>${esc(rulesLabel(lockedRules))}</strong><p>Both machines use the same locked rules and fight automatically for up to 100 seconds.</p></div><div class="contract-rule"><strong>Your machine: ${esc(draft.machine.name)}</strong><p>${counterStatus}</p></div>${revealed ? `<div class="bounty-actions"><button id="refit-counter" ${!b.compatible ? "disabled" : ""}>Edit your machine</button>${runtime.paid ? "" : '<button id="local-simulation">Local simulation</button>'}</div>` : ""}${entryAction}${!runtime.paid && !me ? '<button id="join-profile">Sign in to enter this sandbox challenge</button>' : ""}<p class="hint">${revealed ? runtime.paid ? "Your entry is active. Submit a valid machine before the timer ends." : "This local challenge can be tested without transferring funds." : runtime.paid && !runtime.acceptingNewBounties ? runtime.settlementReason : runtime.paid ? `Pay the entry in Tempo Wallet. Once it confirms, the full opponent appears and the build timer starts. The entry is ${b.entry} ${paymentUnit()}; construction limits use ${constructionUnit()}.` : "Your entry uses sandbox credits. Construction credits are separate from any live pathUSD payment."} ${own ? "You cannot claim your own reward." : ""}</p><p class="error-message" id="bounty-error">${!b.compatible ? "This challenge uses an older engine version. Its result remains available, but you cannot submit a new machine." : ""}</p><p class="contract-expiry">${b.expires ? (isExpired ? "Expired " : "Expires ") + time(b.expires) : "No deadline · until claimed or closed"} · ${b.attempts} runs<br>${b.listed ? "Visible on the board" : "Unlisted: anyone with the link can view and pay the posted entry."}</p>${returnAction}${me && isExpired && ["open", "busy"].includes(b.status) ? '<button id="expire-contract">Settle expiry onchain</button>' : ""}</section></div><section class="panel contract-history"><h3>Past results</h3>${b.history.length ? b.history.map((a) => (revealed ? `<button data-attempt="${a.id}" class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : a.status === "technical-retry" ? "TECHNICAL RECOVERY" : "RESULT PENDING"}</span><small>${time(a.created)}</small><strong>${a.result?.time ? Number(a.result.time).toFixed(1) + "s" : a.status === "technical-retry" ? "Sponsored retry available" : "Settlement pending"} ↗</strong></button>` : `<div class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : a.status === "technical-retry" ? "TECHNICAL RECOVERY" : "RESULT PENDING"}</span><small>${time(a.created)}</small><strong>Opponent replay sealed</strong></div>`)).join("") : hasPendingBountyResult(b) ? "<p>Result recorded. Settlement confirmation is still pending.</p>" : b.status === "busy" ? "<p>An attempt is in progress. Its signed result will appear here after settlement verification.</p>" : "<p>No results yet. Be the first to try.</p>"}</section>`;
     if (participantPrompt) {
       const template = document.createElement("template");
       template.innerHTML = participantPrompt;
@@ -965,7 +998,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
             ? "One Tempo Wallet confirmation atomically approves pathUSD and funds the exact gross reward."
             : `${money(me.balance - reward)} sandbox credits available afterward.`;
         $("#reserve-note").textContent =
-          `${money(reward)} ${runtime.currency} gross reward. ${available} Platform fee: ${money(currentFeeBps / 100)}% of a winning reward (${money(quote.platformFee)} ${runtime.currency}). Winner receives ${money(quote.payout)} ${runtime.currency}; net after entry: ${signed(quote.netIfWin)}. Fee comes from this reward, with no extra charge to the creator. You choose entry and gross reward; no required ratio.`;
+          `${money(reward)} ${paymentUnit()} gross reward. ${available} Platform fee: ${money(currentFeeBps / 100)}% of a winning reward (${money(quote.platformFee)} ${paymentUnit()}). Winner receives ${money(quote.payout)} ${paymentUnit()}; net before network/swap fees after entry: ${signed(quote.netIfWin)} ${paymentUnit()}. Wallet network fees and any input-token swap costs are separate. Construction credits only set the machine budget.`;
         $("#contract-terrain").innerHTML = esc(a.desc) + terrain(a);
         if (!runtime.paid && reward > me.balance)
           issues.push(
@@ -1226,20 +1259,31 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         if (await autoplayOfficialReplay(a)) return;
         const r = a.result,
           won = r?.outcome === "win",
-          technical = r?.outcome === "technical-refund",
-          infrastructure = r?.outcome === "technical-failure",
-          reopened = !!r && !won && !technical && !infrastructure;
+          refunded = paymentIsRefunded(a),
+          technical =
+            r?.outcome === "technical-refund" ||
+            r?.outcome === "technical-failure" ||
+            r?.payoutStatus === "technical-retry" ||
+            a.status === "technical-retry" ||
+            a.status === "technical-refund" ||
+            a.payment?.technicalFailure === true,
+          infrastructure = technical,
+          reopened = !!r && !won && !technical && !infrastructure && !refunded;
         app.innerHTML =
           header(
             "THE VERDICT.",
             r?.payoutStatus === "settled-onchain"
               ? "The Tempo escrow settled this result onchain."
               : r
-                ? "Recorded paid result."
-                : "Your entry was returned onchain.",
+                ? refunded
+                  ? "The V6 escrow finalized the entry refund."
+                  : technical
+                  ? "The result needs technical recovery before another sponsored retry."
+                  : "Recorded paid result."
+                : "Payment status is still being reconciled.",
           ) +
           paymentPanel(a) +
-          `<section class="panel official-result ${won ? "won" : ""}"><span class="eyebrow">${r?.payoutStatus === "settled-onchain" ? "ESCROW SETTLED" : infrastructure ? "TECHNICAL FAILURE" : technical ? "TECHNICAL REFUND" : "ON-CHAIN RESULT"}</span><h2>${won ? "REWARD PAID." : infrastructure ? "RETRY AVAILABLE." : technical ? "ENTRY RETURNED." : reopened ? "OPPONENT SURVIVED — CHALLENGE OPEN." : "ENTRY RETURNED."}</h2><div class="contract-economy"><div><b>${r ? (Number(r.net) > 0 ? "+" : "") + r.net : "REFUND"}</b><small>${esc(runtime.currency).toUpperCase()} CHANGE</small></div><div><b>${r?.time ? Number(r.time).toFixed(1) + "s" : "—"}</b><small>TRIAL DURATION</small></div><div><b>${r?.payoutStatus === "settled-onchain" ? "✓" : "—"}</b><small>ESCROW</small></div></div><p>${infrastructure ? "The result was not settled because the settlement infrastructure timed out. Your entry was not treated as a loss; the bounty has reopened and the next entry is sponsored." : r?.integrity ? `Your machine: ${(r.integrity[0] * 100).toFixed(1)}% · Opponent: ${(r.integrity[1] * 100).toFixed(1)}%. ${won ? "The payout was sent by the escrow after the 2.5% platform fee." : reopened ? "Your entry was paid to the creator. The reward stays funded and the challenge is open for another player." : "The escrow processed this result."}` : esc(a.error || "No server-side balance was held.")}</p>${r ? `<div class="notice fee-disclosure">Gross reward: ${money(r.grossReward ?? r.reward ?? 0)} · Platform fee: ${money(r.platformFee ?? 0)} (${money((r.platformFeeBps ?? 0) / 100)}% on wins) · Paid to winner: ${money(r.payout ?? 0)} · Separate entry: ${money(r.entry ?? 0)} ${esc(runtime.currency)}.</div>` : ""}<div class="bounty-actions">${a.payment?.retryAvailable ? '<button id="retry-free" class="primary">Retry free</button>' : ""}${a.replay ? '<button id="verified-replay" class="primary">▶ Watch exact replay</button>' : ""}<button id="result-contract">${reopened ? "View reopened bounty" : "Back to challenge"}</button><button id="result-refit">Edit your machine</button></div><p class="hint">Attempt ${esc(a.id)} · ${time(a.updated)}<br>The replay reconstructs the committed machine pair, arena, terrain, seed and engine release.</p><p id="bounty-error" class="error-message"></p></section>`;
+          `<section class="panel official-result ${won ? "won" : ""}"><span class="eyebrow">${refunded ? "ENTRY REFUNDED" : r?.payoutStatus === "settled-onchain" ? "ESCROW SETTLED" : infrastructure ? "TECHNICAL RECOVERY" : "ON-CHAIN RESULT"}</span><h2>${won ? "REWARD PAID." : refunded ? "ENTRY REFUNDED." : infrastructure ? paymentIsV6(a) ? "V6 REFUND PENDING." : a.payment?.retryAvailable ? "SPONSORED RETRY AVAILABLE." : "RECOVERY IN PROGRESS." : reopened ? "OPPONENT SURVIVED — CHALLENGE OPEN." : "RESULT RECORDED."}</h2><div class="contract-economy"><div><b>${refunded ? "0" : technical ? "Pending" : r ? (Number(r.net) > 0 ? "+" : "") + r.net : "—"}</b><small>WALLET CASH DELTA · BEFORE FEES</small></div><div><b>${r?.time ? Number(r.time).toFixed(1) + "s" : "—"}</b><small>TRIAL DURATION</small></div><div><b>${refunded || r?.payoutStatus === "settled-onchain" ? "✓" : "—"}</b><small>ESCROW FINALITY</small></div></div><p>${refunded ? "The V6 escrow verified and finalized the entry refund. The returned entry is shown separately from network or swap fees." : infrastructure ? paymentIsV6(a) ? "The V6 technical refund is not finalized yet. Do not pay again; this path does not offer a sponsored retry." : "The signed result missed the settlement window. Your original entry was not returned by this technical recovery path; the bounty reopened for one sponsored retry. Do not pay the entry again." : r?.integrity ? `Your machine: ${(r.integrity[0] * 100).toFixed(1)}% · Opponent: ${(r.integrity[1] * 100).toFixed(1)}%. ${won ? "The payout was sent by the escrow after the 2.5% platform fee." : reopened ? "Your entry was paid to the creator. The reward stays funded and the challenge is open for another player." : "The escrow processed this result."}` : esc(a.error || "Payment status is still being reconciled.")}</p>${r ? paymentBreakdown(a, paymentUnit()) : ""}<div class="bounty-actions">${!refunded && !paymentIsV6(a) && a.payment?.retryAvailable ? '<button id="retry-free" class="primary">Start sponsored retry</button>' : ""}${a.replay ? '<button id="verified-replay" class="primary">▶ Watch exact replay</button>' : ""}<button id="result-contract">${reopened ? "View reopened bounty" : "Back to challenge"}</button><button id="result-refit">Edit your machine</button></div><p class="hint">Attempt ${esc(a.id)} · ${time(a.updated)}<br>The replay reconstructs the committed machine pair, arena, terrain, seed and engine release. Network fees and swap costs are separate from the wallet cash delta.</p><p id="bounty-error" class="error-message"></p></section>`;
         const identityNotice = document.createElement("div");
         identityNotice.className = "result-identity";
         identityNotice.innerHTML = `This run appears as ${attemptIdentity(a)}`;

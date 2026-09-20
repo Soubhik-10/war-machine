@@ -563,6 +563,45 @@
   text-align: center;
   padding: 50px 35px;
 }
+.payment-timeline {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 2px;
+  padding: 0;
+  list-style: none;
+}
+.payment-timeline li {
+  display: grid;
+  grid-template-columns: 10px 1fr;
+  gap: 9px;
+  align-items: start;
+  color: var(--muted);
+  font-size: 12px;
+}
+.payment-timeline li > span {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+.payment-timeline li.complete,
+.payment-timeline li.current { color: var(--text); }
+.payment-timeline li.complete > span { background: var(--green); border-color: var(--green); }
+.payment-timeline li.current > span { background: var(--gold); border-color: var(--gold); }
+.payment-timeline strong { display: block; font-weight: 600; }
+.payment-timeline small { display: block; margin-top: 2px; letter-spacing: 0; }
+.payment-breakdown {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.payment-breakdown b { display: block; overflow-wrap: anywhere; color: var(--gold); }
+.payment-breakdown small { display: block; margin-top: 4px; letter-spacing: .4px; }
 .trial-wait h2,
 .official-result h2 {
   font-size: 39px;
@@ -860,6 +899,7 @@
   .contract-filter button {
     font-size: 12px;
   }
+  .payment-breakdown { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 430px) {
   .contract-grid {

@@ -1,14 +1,19 @@
 import {
   evaluate,
+  ENGINE_EVALUATORS,
+  LEGACY_ENGINE_HASH,
   canonical as canonicalSettlement,
 } from "../../settlement/protocol.mjs";
 import * as Mppx from "../../node_modules/mppx/dist/server/Mppx.js";
 import * as MppCredential from "../../node_modules/mppx/dist/Credential.js";
+import * as MppReceipt from "../../node_modules/mppx/dist/Receipt.js";
+import { journaledCharge, recoverCharge, readJournal, writeJournal, paymentJournalKey, withOperationLease } from "./payment-journal.mjs";
 import * as MppProof from "../../node_modules/mppx/dist/tempo/Proof.js";
 import { tempo as tempoMpp } from "../../node_modules/mppx/dist/tempo/server/Methods.js";
 import { createClient, http } from "viem/tempo";
 import {
   createWalletClient,
+  encodeAbiParameters,
   encodeFunctionData,
   getAddress,
   keccak256,
@@ -49,10 +54,15 @@ import {
   payoutQuote,
   unitsToPathUsd,
 } from "./pathusd.mjs";
+import { paymentHealth } from "./payment-health.mjs";
+import { repairMislabeledBounties } from "./payment-migrations.mjs";
+import { mainnetOpenApi } from "./openapi.mjs";
 import { handleMcpRequest } from "../../server/mcp.mjs";
 
 const now = () => Date.now(),
   COMPLETED_BOUNTY_BOARD_MS = 10 * 60 * 1000,
+  PAID_SIMULATION_MAX_MODULES = 128,
+  PAID_SIMULATION_MAX_WEAPONS = 24,
   id = () => crypto.randomUUID(),
   json = (value) => JSON.stringify(value);
 const fail = (status, message) => {
@@ -64,6 +74,19 @@ const check = (value, message, status = 400) => {
   if (!value) fail(status, message);
   return value;
 };
+function paidComplexityIssues(machine) {
+  const summary = stats(machine), issues = [];
+  if (machine.modules.length > PAID_SIMULATION_MAX_MODULES)
+    issues.push(`Paid simulations support at most ${PAID_SIMULATION_MAX_MODULES} modules.`);
+  if (summary.weapons > PAID_SIMULATION_MAX_WEAPONS)
+    issues.push(`Paid simulations support at most ${PAID_SIMULATION_MAX_WEAPONS} weapons.`);
+  return { summary, issues };
+}
+function enforcePaidComplexity(machine) {
+  const { summary, issues } = paidComplexityIssues(machine);
+  check(!issues.length, issues.join(' '), 409);
+  return summary;
+}
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const fields = (value, allowed) => {
   check(
@@ -175,11 +198,25 @@ const MIN_BUILD_SECONDS = 180;
 const MAX_BUILD_SECONDS = 300;
 const SETTLEMENT_RESERVE_SECONDS = 120;
 const ESCROW_SETTLEMENT_GRACE_SECONDS = 120;
-const CURRENT_ESCROW_POLICY = "pathusd-direct-escrow-v5";
+const escrowPolicy = (version) => "pathusd-direct-escrow-v" + String(version);
+const CURRENT_ESCROW_POLICY = escrowPolicy("5");
 const LEGACY_BOUNTY_ARCHIVE_KEY = "migration:archive-pre-v5-bounties-v1";
 const SETTLEMENT_RUNNER_KEY = "system:settlement-runner";
+const expectedSettlementDomain = (version, chainId, verifyingContract) =>
+  keccak256(
+    encodeAbiParameters(
+      [{ type: "bytes32" }, { type: "bytes32" }, { type: "bytes32" }, { type: "uint256" }, { type: "address" }],
+      [
+        keccak256(stringToHex("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")),
+        keccak256(stringToHex("War Machines Bounty Escrow")),
+        keccak256(stringToHex(String(version))),
+        BigInt(chainId),
+        verifyingContract,
+      ],
+    ),
+  );
 
-export async function archivePreV5Bounties(db) {
+export async function archivePreV5Bounties(db, config = null) {
   // Keep the database records for audit and possible owner-led recovery, but
   // remove every pre-V5 bounty from the public board. Deleting a funded row
   // would strand its reward in an older immutable escrow contract.
@@ -194,9 +231,11 @@ export async function archivePreV5Bounties(db) {
   const rows = (
     await db
       .prepare(
-        "SELECT id,status,listed,fee_policy_version FROM bounties WHERE COALESCE(fee_policy_version,'')<>? AND listed=1",
+        config?.escrowVersion === "6"
+          ? "SELECT id,status,listed,fee_policy_version FROM bounties WHERE COALESCE(fee_policy_version,'')<>? AND listed=1 AND NOT (escrow_bounty_id IS NOT NULL AND (CAST(COALESCE(reserve_units,reward_units,'0') AS INTEGER)>0 OR status IN ('open','busy')))"
+          : "SELECT id,status,listed,fee_policy_version FROM bounties WHERE COALESCE(fee_policy_version,'')<>? AND listed=1",
       )
-      .bind(CURRENT_ESCROW_POLICY)
+      .bind(escrowPolicy(config?.escrowVersion || "5"))
       .all()
   ).results;
   if (!rows.length) return;
@@ -208,6 +247,74 @@ export async function archivePreV5Bounties(db) {
         .bind(updated, row.id),
     ),
   );
+}
+
+export async function assertV6MigrationReady(db, config) {
+  if (config?.escrowVersion !== "6") return;
+  const rows = (
+    await db
+      .prepare(
+        "SELECT id,status,fee_policy_version FROM bounties WHERE COALESCE(fee_policy_version,'')<>? AND escrow_bounty_id IS NOT NULL AND (CAST(COALESCE(reserve_units,reward_units,'0') AS INTEGER)>0 OR status IN ('open','busy')) LIMIT 1",
+      )
+      .bind(escrowPolicy(config.escrowVersion))
+      .all()
+  ).results;
+  check(
+    rows.length === 0,
+    "V6 admission is paused while funded or active V5 bounties remain. Reconcile every V5 reward and entry before enabling new V6 funds.",
+    503,
+  );
+  // A config flip must not strand a paid V5 request that has not reached the
+  // escrow row yet.  Current V6 holds carry their version in the body; old
+  // holds have no version and therefore fail closed until reconciled.
+  const pendingHolds = (
+    await db
+      .prepare(
+        "SELECT h.id,h.purpose,h.status,b.id AS bounty_id,b.fee_policy_version FROM payment_holds h LEFT JOIN bounties b ON b.id=h.bounty WHERE h.purpose IN ('mpp-create','mpp-entry','direct-create','direct-entry') AND h.status IN ('awaiting-relay','relay-prepared','awaiting-onchain','held') AND (b.id IS NULL OR COALESCE(b.fee_policy_version,'')<>? OR COALESCE(json_extract(h.body,'$.escrowVersion'),'')<>?) LIMIT 1",
+      )
+      .bind(escrowPolicy(config.escrowVersion), config.escrowVersion)
+      .all()
+  ).results;
+  check(
+    pendingHolds.length === 0,
+    "V6 admission is paused while a pending legacy payment hold has no reconciled V5 bounty. Recover or refund the original payment before enabling V6 funds.",
+    503,
+  );
+  const pendingStates = (
+    await db
+      .prepare(
+        "SELECT key FROM payment_kv WHERE key LIKE 'mpp-bounty-state:%' AND json_extract(value,'$.phase')='paid' AND COALESCE(json_extract(value,'$.recoveryRequired'),0)=0 AND (json_extract(value,'$.bounty') IS NULL OR NOT EXISTS (SELECT 1 FROM bounties b WHERE b.id=json_extract(value,'$.bounty') AND b.fee_policy_version=?)) LIMIT 1",
+      )
+      .bind(escrowPolicy(config.escrowVersion))
+      .all()
+  ).results;
+  check(
+    pendingStates.length === 0,
+    "V6 admission is paused while a pending paid MPP operation has no reconciled V5 bounty. Recover or refund the original payment before enabling V6 funds.",
+    503,
+  );
+}
+
+function requireV6PaymentAdmission(config) {
+  if (config?.escrowVersion !== "6" || !config.paymentHealth) return;
+  check(
+    config.paymentHealth.ready,
+    config.paymentHealth.reason || "V6 payment admission is unavailable until the configured escrow domain is verified.",
+    503,
+  );
+}
+
+function assertSavedRelayScope(saved, config, source) {
+  if (!saved) return;
+  if (saved.chainId != null)
+    check(String(saved.chainId) === String(config.chainId), "Saved relay transaction targets a different chain.", 409);
+  if (saved.escrowAddress != null)
+    check(getAddress(saved.escrowAddress) === getAddress(config.escrowAddress), "Saved relay transaction targets a different escrow.", 409);
+  if (saved.escrowVersion != null)
+    check(String(saved.escrowVersion) === String(config.escrowVersion), "Saved relay transaction uses a different escrow version.", 409);
+  const payer = saved.creator || saved.source;
+  if (payer)
+    check(getAddress(payer) === getAddress(source), "Saved relay transaction is bound to a different payer.", 409);
 }
 
 function scoutBlueprint(blueprint) {
@@ -267,12 +374,13 @@ function canonicalBlueprint(input, locked) {
     "no",
     "f",
     "m",
+    "o",
   ]);
   if (input.q)
     fields(input.q, ["mode", "combat", "credits", "parts", "mass", "weapons"]);
   try {
     const packed = locked
-      ? { ...input, a: locked.a, e: 0, q: locked.q, b: locked.b }
+      ? { ...input, a: locked.a, e: 0, q: locked.q, b: locked.b, o: locked.o }
       : input;
     const challenge = unpackChallenge(packed);
     return packChallenge(
@@ -280,6 +388,7 @@ function canonicalBlueprint(input, locked) {
       challenge.arena,
       0,
       challenge.rules,
+      challenge.objective,
     );
   } catch (error) {
     fail(400, error.message || "Invalid blueprint.");
@@ -289,6 +398,7 @@ function canonicalBlueprint(input, locked) {
 export function runtimeConfig(env, origin) {
   if (env.WM_MODE !== "tempo-mainnet") return { mode: "demo", enabled: false };
   const v3Escrow = "0xb14a3aA99C9349094612143089F55aE5372DeB24",
+    deployedV5Escrow = "0x399A5BB89E814Cc3d7232f428796C56003D78983",
     escrowVersion = String(env.WM_BOUNTY_ESCROW_VERSION || "3"),
     configuredEscrow = String(env.WM_BOUNTY_ESCROW_ADDRESS || "");
   let escrow = v3Escrow;
@@ -300,7 +410,19 @@ export function runtimeConfig(env, origin) {
         reason:
           "Set WM_BOUNTY_ESCROW_ADDRESS to the verified War Machines V3 escrow before enabling direct bounty transactions.",
       };
-  } else if (escrowVersion === "4" || escrowVersion === "5") {
+  } else if (escrowVersion === "4" || escrowVersion === "5" || escrowVersion === "6") {
+    if (escrowVersion === "6" && env.WM_ALLOW_ESCROW_V6 !== "true" && env.WM_ENABLE_ESCROW_V6 !== "true")
+      return {
+        mode: "tempo-mainnet",
+        enabled: false,
+        reason: "V6 escrow is disabled until WM_ALLOW_ESCROW_V6=true is explicitly configured.",
+      };
+    if (escrowVersion === "6" && configuredEscrow.toLowerCase() === deployedV5Escrow.toLowerCase())
+      return {
+        mode: "tempo-mainnet",
+        enabled: false,
+        reason: "The configured V6 escrow address is the deployed V5 escrow. Configure the separately deployed V6 address before enabling paid funds.",
+      };
     if (!/^0x[0-9a-fA-F]{40}$/.test(configuredEscrow))
       return {
         mode: "tempo-mainnet",
@@ -314,7 +436,7 @@ export function runtimeConfig(env, origin) {
       mode: "tempo-mainnet",
       enabled: false,
       reason:
-        "WM_BOUNTY_ESCROW_VERSION must be 3, 4, or 5.",
+        "WM_BOUNTY_ESCROW_VERSION must be 3, 4, 5, or 6.",
     };
   let supportedInputTokens;
   try {
@@ -351,7 +473,7 @@ export function runtimeConfig(env, origin) {
   let settlementSigner = null;
   if (!/^0x[0-9a-fA-F]{40}$/.test(configuredSettlementSigner)) {
     settlementReason =
-      escrowVersion === "4" || escrowVersion === "5"
+      escrowVersion === "4" || escrowVersion === "5" || escrowVersion === "6"
         ? `WM_ESCROW_SETTLEMENT_SIGNER must be the public settlement signer configured in the deployed V${escrowVersion} escrow.`
         : "The deployed V3 settlement signer is not configured.";
   } else {
@@ -402,7 +524,7 @@ export function runtimeConfig(env, origin) {
     typeof env.MPP_SECRET_KEY === "string" &&
     new TextEncoder().encode(env.MPP_SECRET_KEY).length >= 32;
   const agentBountyMppEnabled =
-    (escrowVersion === "4" || escrowVersion === "5") &&
+    (escrowVersion === "4" || escrowVersion === "5" || escrowVersion === "6") &&
     env.WM_AGENT_BOUNTY_MPP_ENABLED === "true" &&
     relayerMatches &&
     validMppSecret &&
@@ -418,6 +540,9 @@ export function runtimeConfig(env, origin) {
     directEscrow: true,
     escrowVersion,
     escrowAddress: getAddress(escrow),
+    v6DomainSeparator: escrowVersion === "6"
+      ? expectedSettlementDomain("6", TEMPO_MAINNET_CHAIN_ID, getAddress(escrow))
+      : null,
     token: PATH_USD_TOKEN,
     supportedInputTokens,
     swapSlippageBps,
@@ -436,10 +561,11 @@ export function runtimeConfig(env, origin) {
     relayerKey:
       agentBountyMppEnabled || technicalRetryEnabled ? relayerKey : null,
     technicalRetryEnabled,
-    settlementGraceSeconds: escrowVersion === "5" ? ESCROW_SETTLEMENT_GRACE_SECONDS : 0,
-    // V3/V4 remain readable for reconciliation, but new funds must use V5 so
+    settlementGraceSeconds: escrowVersion === "5" || escrowVersion === "6" ? ESCROW_SETTLEMENT_GRACE_SECONDS : 0,
+    // V3/V4 remain readable for reconciliation, while V5 and explicitly
+    // enabled V6 accept new funds after their own readiness checks.
     // a short relay outage cannot turn a valid result into a user loss.
-    acceptingNewBounties: automaticSettlementReady && escrowVersion === "5",
+    acceptingNewBounties: automaticSettlementReady && (escrowVersion === "5" || escrowVersion === "6"),
     automaticSettlementReady,
     settlementReason,
     reason: null,
@@ -451,8 +577,10 @@ function catalog(config) {
     acceptingNewBounties = paid && config.acceptingNewBounties;
   return {
     mode: "tempo-mainnet",
-    apiVersion: config.escrowVersion === "5"
-      ? "5.0-mpp-relayed-escrow"
+    apiVersion: config.escrowVersion === "6"
+      ? "6.0-held-entry-escrow"
+      : config.escrowVersion === "5"
+        ? "5.0-mpp-relayed-escrow"
       : config.agentBountyMppEnabled
         ? "4.0-mpp-relayed-escrow"
       : "3.2-direct-escrow",
@@ -597,6 +725,12 @@ function catalog(config) {
         : { ready: false, reason: config.settlementReason }
       : { ready: false, reason: config.reason },
     versions: { hash: CLIENT_ENGINE_HASH },
+    paidSimulation: {
+      maxModules: PAID_SIMULATION_MAX_MODULES,
+      maxWeapons: PAID_SIMULATION_MAX_WEAPONS,
+      headless: true,
+      description: "Official paid matches use a bounded headless simulation budget; unrestricted builds remain available in the free sandbox.",
+    },
     startingCredits: 0,
     parts: PARTS.map((part) => ({ ...part, ...PART_GUIDANCE[part.id] })),
     arenas: ARENAS,
@@ -614,7 +748,9 @@ function catalog(config) {
       paidReveal:
         "Public scouts expose only cost, mass, part count, weapon count, arena and limits. A confirmed entry reveals the exact defender to that challenger only.",
       timeout:
-        "Missing the counter-build deadline is a loss. The entry was paid to the bounty creator when you entered and the bounty reopens after timeout. An unresolved settlement infrastructure timeout is technical and unlocks one sponsored retry instead.",
+        config.escrowVersion === "6"
+          ? "Missing settlement finality after the two-minute grace is a technical refund: V6 returns the held entry to the challenger and reopens the bounty. No sponsored retry is available on V6."
+          : "Missing the counter-build deadline is a loss. The entry was paid to the bounty creator when you entered and the bounty reopens after timeout. An unresolved settlement infrastructure timeout is technical and unlocks one sponsored retry instead.",
       payments: paid
         ? acceptingNewBounties
           ? config.agentBountyMppEnabled
@@ -628,7 +764,7 @@ function catalog(config) {
 
 const discovery = (config) => ({
   name: "War Machines",
-  version: config.escrowVersion === "5" ? "5.0" : config.agentBountyMppEnabled ? "4.0" : "3.2",
+  version: config.escrowVersion === "6" ? "6.0" : config.escrowVersion === "5" ? "5.0" : config.agentBountyMppEnabled ? "4.0" : "3.2",
   mode: "tempo-mainnet",
   description:
     "Engineer autonomous machines with your own code or model. Same deterministic game engine as browser players.",
@@ -670,6 +806,8 @@ const discovery = (config) => ({
               signers: config.settlementSigners,
             },
         mpp: !!(config.agentBountyMppEnabled && config.acceptingNewBounties),
+        mppRecipient: config.agentBountyMppRecipient || config.relayerAddress || null,
+        identityProofAvailable: !!config.agentBountyMppEnabled,
         mppScope: config.agentBountyMppEnabled && config.acceptingNewBounties
           ? "Paid MPP payments fund and enter bounties through the configured bounded relayer."
           : config.agentBountyMppEnabled
@@ -734,94 +872,12 @@ const discovery = (config) => ({
     creatorSetsEconomics: true,
     paidReveal:
       "The defender blueprint is not served until this account has a confirmed escrow entry.",
-    results: "deterministic replay; two escrow signer attestations required",
+    results: "deterministic replay; one trusted escrow signer attestation required",
     timeout:
       "counter-build expiry settles as a loss; entry goes to bounty creator",
     officialSeed: "server chosen",
   },
 });
-
-const openapi = {
-  openapi: "3.1.0",
-  info: {
-    title: "War Machines Tempo mainnet API",
-    version: "3.3",
-    description:
-      "Public bounty responses expose scouts only. A confirmed direct escrow entry reveals the defender to that challenger and unlocks one timed counter deployment.",
-  },
-  components: {
-    securitySchemes: {
-      bearerAuth: { type: "http", scheme: "bearer" },
-      mppProof: {
-        type: "apiKey",
-        in: "header",
-        name: "Authorization",
-        description:
-          "MPP Tempo credential. Send the exact Payment credential returned for the route challenge in the standard Authorization header. Payment-Authorization is accepted as a compatibility alias.",
-      },
-    },
-  },
-  paths: {
-    "/mcp": {
-      post: {
-        summary: "Stateless MCP Streamable HTTP endpoint",
-        description:
-          "Connect an MCP client to this endpoint. Read and validation tools are public. On a V5 deployment, create and enter tools advertise native MPP charges and the MPP client retries the exact request to complete the relayed escrow action; otherwise the returned direct escrow plan must be signed by the caller's own Tempo wallet/access key.",
-      },
-    },
-    "/rules": { get: {} },
-    "/auth/challenge": { post: {} },
-    "/auth/verify": { post: {} },
-    "/bounties": {
-      get: {},
-      post: {
-        description:
-          "On V5 deployments with native MPP enabled, this route returns a 402 challenge for the exact reward and then creates the bounty through the bounded relayer after the MPP client retries. Other deployments prepare a direct createBounty funding plan for the caller's Tempo wallet.",
-        security: [{ bearerAuth: [] }, { mppProof: [] }],
-      },
-    },
-    "/bounties/{id}": {
-      get: {
-        description:
-          "Returns a scout unless this wallet created or entered the bounty.",
-      },
-    },
-    "/bounties/{id}/attempts": {
-      post: {
-        description:
-          "On V5 deployments with native MPP enabled, this route returns a 402 challenge for the exact entry and then enters through the bounded relayer after the MPP client retries. Other deployments prepare a direct enterBounty plan for the caller's Tempo wallet. Body: maxEntry, maxPlatformFeeBps, participantName and showAddress.",
-        security: [{ bearerAuth: [] }, { mppProof: [] }],
-      },
-    },
-    "/attempts/{id}": {
-      get: {
-        description:
-          "Creator and paid challenger only. Engineering status includes the private defender and build deadline for the challenger.",
-      },
-    },
-    "/attempts/{id}/retry": {
-      post: {
-        description:
-          "Use the one-time sponsored retry issued for an infrastructure settlement timeout. It never charges a second entry. It is unavailable for a missed build deadline or a verified loss/draw.",
-        security: [{ bearerAuth: [] }, { mppProof: [] }],
-      },
-    },
-    "/attempts/{id}/deploy": {
-      post: {
-        description:
-          "Paid challenger submits one validated counter blueprint before the reported build deadline. A wallet session or MPP zero-value Tempo proof may authorize this request; the proof wallet must match the entry wallet.",
-        security: [{ bearerAuth: [] }, { mppProof: [] }],
-      },
-    },
-    "/me/wallet": {
-      get: {
-        description:
-          "Returns the signed-in wallet address and its live pathUSD token balance.",
-      },
-    },
-    "/me/builds": { get: {}, post: {} },
-  },
-};
 
 async function bodyOf(request) {
   const length = Number(request.headers.get("content-length") || 0);
@@ -838,7 +894,8 @@ async function bodyOf(request) {
   }
 }
 async function dbAuth(db, request) {
-  const value = cookie(request, "wm_session");
+  const authorization = request.headers.get("authorization") || "";
+  const value = /^Bearer /i.test(authorization) ? authorization.slice(7).trim() : cookie(request, "wm_session");
   if (!value) return null;
   const token = await hex(value),
     session = await db
@@ -913,7 +970,7 @@ async function amount(value, label, config, { allowZero = false } = {}) {
 }
 const display = (value) => unitsToPathUsd(value);
 
-async function account(db, accountId) {
+async function account(db, accountId, config = null) {
   const row = await db
     .prepare(
       "SELECT id,name,payout_address,entry_cap_units,daily_cap_units FROM accounts WHERE id=?",
@@ -925,7 +982,7 @@ async function account(db, accountId) {
     .prepare(
       "SELECT reward_units FROM bounties WHERE owner=? AND fee_policy_version=? AND status IN ('open','busy') AND reward_units IS NOT NULL",
     )
-    .bind(accountId, CURRENT_ESCROW_POLICY)
+    .bind(accountId, escrowPolicy(config?.escrowVersion || "5"))
     .all();
   const day = new Date(now()).setUTCHours(0, 0, 0, 0),
     spentRows = await db
@@ -987,6 +1044,7 @@ const activityState = (status) => {
       "expired",
       "refunded",
       "settled",
+      "technical-refund",
     ].includes(status)
   )
     return "complete";
@@ -1086,6 +1144,7 @@ async function activity(db, accountId) {
         "ready-to-settle": "Settlement is ready to relay",
         settled: "Attempt settled on Tempo",
         refunded: "Entry refunded",
+        "technical-refund": "V6 entry refunded after timeout",
       }[row.status] || `Attempt: ${activityWords(row.status)}`;
     add({
       id: `attempt:${row.id}`,
@@ -1154,6 +1213,41 @@ async function bountyRow(db, bountyId) {
     .first();
   return check(row, "Bounty not found.", 404);
 }
+export async function bountyRelease(db, row) {
+  const saved = await readJournal(db, "bounty-release:" + row.id);
+  if (saved?.engineHash) return saved;
+  if (!row.terms_hash) return null;
+  // Recover a historical engine only by matching the terms commitment. Never
+  // relabel an old funded bounty with whichever engine happens to be running.
+  const creator = await payoutAddress(db, row.owner);
+  for (const engineHash of [...new Set(Object.keys(ENGINE_EVALUATORS))]) {
+    for (const version of ["6", "5", "4", "3", "2"]) {
+      for (const listed of [true, false]) {
+        const terms = { version: "war-machines-direct-escrow-v" + version, engineHash, creator,
+          title: row.title, defender: parse(row.blueprint), entry: row.entry_units, reward: row.reward_units,
+          expiresAt: Math.floor(Number(row.expires || 0) / 1000), listed, platformFeeBps: row.platform_fee_bps ?? PLATFORM_FEE_BPS };
+        if (("0x" + await hex(json(terms))).toLowerCase() === row.terms_hash.toLowerCase())
+          return { engineHash, termsVersion: version, verifiedTerms: true };
+      }
+    }
+  }
+  return null;
+}
+
+async function requireCurrentBounty(db, row, config) {
+  const release = await bountyRelease(db, row);
+  check(release?.engineHash === CLIENT_ENGINE_HASH, "This bounty uses an older or unknown engine. New entries are closed; its owner can cancel and recreate it.", 409);
+  check(!release.escrowAddress || (release.escrowAddress.toLowerCase() === config.escrowAddress.toLowerCase() && release.chainId === config.chainId), "This bounty belongs to a different escrow deployment.", 409);
+  enforcePaidComplexity(unpackChallenge(parse(row.blueprint)).machine);
+  return release;
+}
+
+function releaseStatement(db, bountyId, saved, config) {
+  if (!saved?.engineHash) return db.prepare("SELECT 1");
+  return db.prepare("INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING")
+    .bind("bounty-release:" + bountyId, json({ engineHash: saved.engineHash, chainId: saved.chainId || config.chainId, escrowAddress: saved.escrowAddress || config.escrowAddress, escrowVersion: saved.escrowVersion || config.escrowVersion }));
+}
+
 async function bountyView(db, row, viewer = null, history = false) {
   const owner = await db
       .prepare("SELECT name FROM accounts WHERE id=?")
@@ -1169,6 +1263,9 @@ async function bountyView(db, row, viewer = null, history = false) {
       .bind(row.id)
       .first();
   const blueprint = parse(row.blueprint);
+  const release = await bountyRelease(db, row);
+  let complexityIssues = [];
+  try { complexityIssues = paidComplexityIssues(unpackChallenge(blueprint).machine).issues; } catch { complexityIssues = ["The paid blueprint could not be replayed under the current catalog."]; }
   const revealed = await canRevealDefender(db, row, viewer);
   const value = {
     id: row.id,
@@ -1193,8 +1290,11 @@ async function bountyView(db, row, viewer = null, history = false) {
       self: "/api/bounties/" + row.id,
       attempts: "/api/bounties/" + row.id + "/attempts",
     },
-    versions: { hash: CLIENT_ENGINE_HASH },
-    compatible: true,
+    versions: { hash: release?.engineHash || null },
+    compatible: release?.engineHash === CLIENT_ENGINE_HASH && complexityIssues.length === 0,
+    compatibilityReason: release?.engineHash !== CLIENT_ENGINE_HASH
+      ? "New entry requires the current engine; existing attempts retain their committed version."
+      : complexityIssues[0] || null,
     activeAttempt: row.active_attempt,
     attempts: count.total,
     funded:
@@ -1205,7 +1305,7 @@ async function bountyView(db, row, viewer = null, history = false) {
   if (history) {
     const rows = await db
       .prepare(
-        "SELECT a.id,a.result,a.blueprint,a.participant_name,a.show_address,a.created,a.updated,ac.payout_address FROM attempts a LEFT JOIN accounts ac ON ac.id=a.account WHERE a.bounty=? AND a.status IN ('settled','refunded') ORDER BY a.created DESC LIMIT 20",
+        "SELECT a.id,a.status,a.result,a.blueprint,a.participant_name,a.show_address,a.created,a.updated,ac.payout_address FROM attempts a LEFT JOIN accounts ac ON ac.id=a.account WHERE a.bounty=? AND a.status IN ('queued','awaiting-signatures','ready-to-settle','settled','refunded','technical-refund','technical-retry') ORDER BY a.created DESC LIMIT 20",
       )
       .bind(row.id)
       .all();
@@ -1220,6 +1320,7 @@ async function bountyView(db, row, viewer = null, history = false) {
       }
       return {
         id: attempt.id,
+        status: attempt.status,
         participantName: attempt.participant_name || null,
         machineName,
         addressVisible: attempt.show_address === 1,
@@ -1342,7 +1443,7 @@ function gateway(db, config) {
   };
 }
 
-async function mppCharge(
+export async function mppCharge(
   db,
   config,
   request,
@@ -1361,7 +1462,24 @@ async function mppCharge(
           return new Request(request.clone(), { headers });
         })()
       : request;
-  const method = tempoMpp.charge({
+  const binding = { amount: String(amountUnits), recipient: recipient.toLowerCase(), token: config.token.toLowerCase(), chainId: config.chainId };
+  const monetary = amountUnits > 0n && operation.startsWith("agent-bounty-");
+  const authorization = mppRequest.headers.get("authorization") || "";
+  const credentialDigest = authorization ? await hex(authorization) : null;
+  const stored = monetary ? await readJournal(db, paymentJournalKey(operation)) : null;
+  if (stored) {
+    check(stored.credentialDigest === credentialDigest, "Use the original payment credential to resume this operation.", 401);
+    const recovered = await recoverCharge(db, operation, binding, { confirm: hash => receipt(config, hash), broadcast: raw => broadcastAgentRelayerTransaction(config, raw) });
+    return { paid: true, source: recovered.source, withReceipt: value => { value.headers.set("payment-receipt", MppReceipt.serialize(recovered.receipt)); return value; } };
+  }
+  // A malformed or stale Authorization header must not turn an unhealthy
+  // deployment into a fresh 402 challenge. Existing journals took the
+  // recovery path above and remain available for receipt reconciliation.
+  if (monetary) {
+    check(config.acceptingNewBounties, config.settlementReason || "Paid bounty admission is temporarily unavailable.", 503);
+    requireV6PaymentAdmission(config);
+  }
+  const baseMethod = tempoMpp.charge({
       currency: config.token,
       decimals: config.decimals,
       chainId: config.chainId,
@@ -1369,7 +1487,9 @@ async function mppCharge(
       store: mppStore(db),
       waitForConfirmation: true,
       sponsorBudget: false,
+      getClient: () => createClient({ chain: tempo, transport: http(config.rpcUrl) }),
     }),
+    method = monetary ? journaledCharge(baseMethod, { db, operation, credentialDigest, binding, confirm: hash => receipt(config, hash) }) : baseMethod,
     mppx = Mppx.create({
       methods: [method],
       secretKey: config.mppSecret,
@@ -1384,7 +1504,13 @@ async function mppCharge(
       expires: new Date(expires).toISOString(),
     })(mppRequest);
   if (result.status === 402) return { paid: false, response: result.challenge };
-  const source = mppCredentialSource(mppRequest);
+  const source = monetary
+    ? check(
+        (await readJournal(db, paymentJournalKey(operation)))?.source,
+        "The paid MPP journal did not retain the verified payer.",
+        503,
+      )
+    : mppCredentialSource(mppRequest);
   return {
     paid: true,
     source,
@@ -1811,7 +1937,7 @@ async function enterBounty(db, request, auth, bountyId, body, key, config) {
     409,
   );
   const blueprint = canonicalBlueprint(body.blueprint, parse(row.blueprint)),
-    me = await account(db, auth.account);
+    me = await account(db, auth.account, config);
   if (me.entryCap !== null)
     check(
       pathUsdToUnits(me.entryCap) >= entry,
@@ -1985,7 +2111,7 @@ async function attemptView(db, attemptId, viewer) {
   const bounty = await bountyRow(db, attempt.bounty),
     challenger = viewer === attempt.account,
     creator = viewer === bounty.owner,
-    done = ["settled", "refunded"].includes(attempt.status);
+    done = ["settled", "refunded", "technical-refund", "technical-retry"].includes(attempt.status);
   check(
     challenger || creator,
     "Only the bounty creator and paid challenger can inspect this attempt.",
@@ -2086,7 +2212,11 @@ async function attemptView(db, attemptId, viewer) {
       retryBody = parse(retry.body);
     } catch {}
   }
+  const escrowVersion = Number(String(bounty.fee_policy_version || "").split("v").pop()) || 0;
+  const storedResult = attempt.result ? parse(attempt.result) : null;
   value.payment = {
+    protocolVersion: escrowVersion,
+    escrowVersion,
     state: done
       ? "complete"
       : job?.state || "pending",
@@ -2096,10 +2226,12 @@ async function attemptView(db, attemptId, viewer) {
       record?.deadline ||
       Math.floor(Number(bounty.escrow_attempt_deadline || 0) / 1000),
     finalized: done && !!attempt.escrow_settlement_tx,
+    refundStatus: storedResult?.refundStatus || null,
+    refundStatusVerified: storedResult?.refundStatusVerified === true,
     technicalFailure: attempt.result
       ? parse(attempt.result)?.outcome === "technical-failure"
       : false,
-    retryAvailable: retry?.status === "available",
+    retryAvailable: escrowVersion === 5 && retry?.status === "available",
     retryExpires: retry?.expires || null,
     retryAttemptId: retryBody?.attempt || null,
   };
@@ -2414,7 +2546,8 @@ async function verifyWallet(db, body, config) {
     .bind(id(), await hex(token), accountId, expires, now())
     .run();
   return {
-    me: await account(db, accountId),
+    me: await account(db, accountId, config),
+    token,
     headers: {
       "set-cookie": `wm_session=${token}; Path=/api; HttpOnly; Secure; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`,
     },
@@ -2543,6 +2676,11 @@ const ESCROW_EVENTS = {
   expired: "0x273c6c1aa010a64004ccb6c3b3b61101d59f480e439e06b20d471260dc6071dd",
   timedOut:
     "0xb92806ef23ff7f73544c7018ae5c0c865c4103b6c6a9a497430e6e8961763298",
+  timedOutRefunded: keccak256(
+    stringToHex(
+      "TimedOutAttemptRefunded(uint256,uint64,address,address,uint128)",
+    ),
+  ),
   reopened: keccak256(
     stringToHex(
       "TimedOutAttemptReopened(uint256,uint64,address,address,uint128)",
@@ -2626,11 +2764,13 @@ const settlementTypedData = (config, payload) => ({
   domain: {
     name: "War Machines Bounty Escrow",
     version:
-      config.escrowVersion === "5"
-        ? "5"
-        : config.escrowVersion === "4"
-          ? "4"
-          : "3",
+      config.escrowVersion === "6"
+        ? "6"
+        : config.escrowVersion === "5"
+          ? "5"
+          : config.escrowVersion === "4"
+            ? "4"
+            : "3",
     chainId: config.chainId,
     verifyingContract: config.escrowAddress,
   },
@@ -2892,6 +3032,8 @@ async function refundAgentBountyPayment(
       status: "preparing",
     };
   }
+  if (saved.status === "recovery-required")
+    fail(503, `Refund recovery is required for transaction ${saved.recoveryHash || saved.transactionHash}; do not pay again.`);
   if (saved.status !== "refunded") {
     if (!saved.rawTransaction || !validHash(saved.transactionHash)) {
       const data = encodeFunctionData({
@@ -2918,10 +3060,19 @@ async function refundAgentBountyPayment(
         .bind(key, json(saved))
         .run();
     }
-    await broadcastAgentRelayerTransaction(config, saved.rawTransaction);
     try {
-      await receipt(config, saved.transactionHash);
+      await confirmOrBroadcast(config, saved.transactionHash, saved.rawTransaction, saved.validBefore);
     } catch (error) {
+      if (/expired before finality/i.test(String(error?.message || error))) {
+        saved = { ...saved, status: "recovery-required", recoveryRequired: true, recoveryHash: saved.transactionHash, recoveryError: String(error.message).slice(0, 160) };
+        await db.prepare("INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+          .bind(key, json(saved)).run();
+      } else if (/reverted|no bounty funds were accepted/i.test(String(error?.message || error))) {
+        saved = { ...saved, status: "recovery-required", recoveryRequired: true, recoveryHash: saved.transactionHash, recoveryError: "Refund transaction reverted; manual reconciliation is required." };
+        await db.prepare("INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+          .bind(key, json(saved)).run();
+        fail(503, `The refund transaction ${saved.transactionHash} reverted; manual reconciliation is required and the original payment remains recorded.`);
+      }
       fail(
         503,
         "The paid request was rejected, but its refund is still confirming. Retry the same request; do not send a new payment.",
@@ -2935,6 +3086,8 @@ async function refundAgentBountyPayment(
       .bind(key, json(saved))
       .run();
   }
+  const state = await readJournal(db, agentBountyStateKey(operation));
+  if (state) await writeAgentBountyState(db, operation, { ...state, phase: "refunded", refundHash: saved.transactionHash });
   fail(status, reason + " The MPP payment was returned to the payer.");
 }
 
@@ -2973,8 +3126,33 @@ async function agentBountyPayment(
   };
 }
 
-async function mppCreateBounty(db, config, request, body, key) {
-  check(config.acceptingNewBounties, config.settlementReason, 503);
+async function confirmOrBroadcast(config, hash, raw, validBefore = 0) {
+  try { return await receipt(config, hash); }
+  catch (error) { if (/reverted/i.test(error.message)) throw error; }
+  if (validBefore > 0 && validBefore <= Math.floor(now() / 1000))
+    fail(503, `Transaction ${hash} expired before finality; recovery is required and the raw transaction will not be replaced.`);
+  try { await broadcastAgentRelayerTransaction(config, raw); } catch { /* receipt decides, not an ambiguous send response */ }
+  return receipt(config, hash);
+}
+
+async function recoverSavedBountyPayment(db, config, operation, journal) {
+  const recovered = await recoverCharge(db, operation, journal.binding, { confirm: hash => receipt(config, hash), broadcast: raw => broadcastAgentRelayerTransaction(config, raw) });
+  return { paid: true, source: recovered.source, receipt: MppReceipt.serialize(recovered.receipt) };
+}
+
+export async function authorizeMppResume(db, config, request, operation, state, internal = false) {
+  if (internal) return null;
+  const journal = await readJournal(db, paymentJournalKey(operation));
+  const authorization = request.headers.get("payment-authorization") || request.headers.get("authorization");
+  if (journal && authorization && await hex(authorization) === journal.credentialDigest) return null;
+  const expected = state.source || (state.account ? await payoutAddress(db, state.account) : null);
+  const access = await ownerOrMppAgent(db, config, request, await dbAuth(db, request), "read", "resume:" + operation);
+  if (access.response) return { paid: false, response: access.response };
+  check(expected && access.auth.payout_address.toLowerCase() === expected.toLowerCase(), "Only the original payer can resume this operation.", 403);
+  return null;
+}
+
+export async function mppCreateBounty(db, config, request, body, key, internal = false) {
   fields(body, [
     "title",
     "blueprint",
@@ -3004,6 +3182,22 @@ async function mppCreateBounty(db, config, request, body, key) {
   const operation = "agent-bounty-create:" + key,
     digest = await hex(json(body));
   let state = await readAgentBountyState(db, operation, digest);
+  if (state && state.phase !== "quoted") {
+    const denied = await authorizeMppResume(db, config, request, operation, state, internal);
+    if (denied) return denied;
+  }
+  const existingJournal = await readJournal(db, paymentJournalKey(operation));
+  if (existingJournal && !internal) {
+    const denied = await authorizeMppResume(db, config, request, operation, { ...state, source: existingJournal.source }, internal);
+    if (denied) return denied;
+  }
+  if (!existingJournal && (!state || state.phase === "quoted")) {
+    await assertV6MigrationReady(db, config);
+    enforcePaidComplexity(unpackChallenge(blueprint).machine);
+    requireV6PaymentAdmission(config);
+  }
+  if (!existingJournal && (!state || state.phase === "quoted"))
+    check(config.acceptingNewBounties, config.settlementReason, 503);
   if (state?.phase === "accepted")
     return {
       value: await bountyView(
@@ -3029,6 +3223,7 @@ async function mppCreateBounty(db, config, request, body, key) {
       kind: "create",
       createdAt: now(),
       bounty: id(),
+      requestBody: body, requestKey: key, engineHash: CLIENT_ENGINE_HASH,
     };
     await writeAgentBountyState(db, operation, state);
   }
@@ -3040,6 +3235,11 @@ async function mppCreateBounty(db, config, request, body, key) {
         )
         .bind(key, digest)
         .first();
+  if (hold && !internal) {
+    const savedIdentity = parse(hold.body);
+    const denied = await authorizeMppResume(db, config, request, operation, { ...state, account: hold.account, source: state.source || savedIdentity.source || savedIdentity.creator }, internal);
+    if (denied) return denied;
+  }
   if (hold?.status === "accepted") {
     const saved = parse(hold.body);
     const account = state.account || (await accountForTempoAddress(db, saved.creator));
@@ -3073,13 +3273,15 @@ async function mppCreateBounty(db, config, request, body, key) {
     };
   } else if (state?.phase === "paid") {
     check(
-      hold && ["awaiting-relay", "relay-prepared"].includes(hold.status),
+      (!hold || ["awaiting-relay", "relay-prepared"].includes(hold.status)) && state.source,
       "The paid bounty request is awaiting recovery. Retry the same request; do not send another wallet payment.",
       503,
     );
     payment = { paid: true, source: state.source, receipt: state.receipt };
   } else {
-    payment = await agentBountyPayment(
+    payment = existingJournal
+      ? await recoverSavedBountyPayment(db, config, operation, existingJournal)
+      : await agentBountyPayment(
       db,
       config,
       request,
@@ -3090,6 +3292,8 @@ async function mppCreateBounty(db, config, request, body, key) {
     );
   }
   if (!payment.paid) return payment;
+  state = { ...state, phase: "paid", source: payment.source, receipt: payment.receipt };
+  await writeAgentBountyState(db, operation, state);
   const source = payment.source;
   if (state.source)
     check(
@@ -3104,8 +3308,8 @@ async function mppCreateBounty(db, config, request, body, key) {
       : 0,
     expires = expiresAt ? expiresAt * 1000 : null,
     terms = {
-      version: "war-machines-direct-escrow-v4",
-      engineHash: CLIENT_ENGINE_HASH,
+      version: "war-machines-direct-escrow-v" + config.escrowVersion,
+      engineHash: state.engineHash || CLIENT_ENGINE_HASH,
       creator: source,
       title,
       defender: blueprint,
@@ -3144,6 +3348,7 @@ async function mppCreateBounty(db, config, request, body, key) {
           expires,
           expiresAt,
           termsHash,
+          engineHash: terms.engineHash, chainId: config.chainId, escrowAddress: config.escrowAddress, escrowVersion: config.escrowVersion,
           creator: source,
           mppReceipt: payment.receipt,
         }),
@@ -3189,6 +3394,7 @@ async function mppCreateBounty(db, config, request, body, key) {
   }
   await writeAgentBountyState(db, operation, state);
   let saved = parse(hold.body);
+  assertSavedRelayScope(saved, config, source);
   let raw = typeof saved.rawTransaction === "string" ? saved.rawTransaction : null,
     escrowHash = validHash(hold.provider_ref) ? hold.provider_ref : null,
     validBefore = Number(saved.validBefore || 0);
@@ -3235,9 +3441,13 @@ async function mppCreateBounty(db, config, request, body, key) {
   }
   let receiptValue;
   try {
-    await broadcastAgentRelayerTransaction(config, raw);
-    receiptValue = await receipt(config, escrowHash);
+    receiptValue = await confirmOrBroadcast(config, escrowHash, raw, validBefore);
   } catch (error) {
+    if (/expired before finality/i.test(String(error?.message || error))) {
+      await db.prepare("UPDATE payment_holds SET status='recovery-required',body=?,updated=? WHERE id=? AND status IN ('awaiting-relay','relay-prepared')")
+        .bind(json({ ...saved, rawTransaction: raw, validBefore, recoveryRequired: true, recoveryHash: escrowHash }), now(), hold.id).run();
+      await writeAgentBountyState(db, operation, { ...state, recoveryRequired: true, recoveryHash: escrowHash, recoveryError: "Relayed escrow receipt did not match the paid bounty terms." });
+    }
     if (/reverted|no bounty funds were accepted/i.test(String(error?.message || error)))
       await refundAgentBountyPayment(db, config, operation, source, reward, "The escrow rejected the bounty terms.");
     throw error;
@@ -3264,6 +3474,7 @@ async function mppCreateBounty(db, config, request, body, key) {
     .first();
   if (!existing) {
     await db.batch([
+      releaseStatement(db, bounty, saved, config),
       db
         .prepare(
           "INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,expires,active_attempt,winner,created,updated,entry_units,reward_units,reserve_units,platform_fee_bps,fee_policy_version,platform_recipient,escrow_bounty_id,terms_hash,escrow_create_tx) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -3286,7 +3497,7 @@ async function mppCreateBounty(db, config, request, body, key) {
           saved.reward,
           saved.reward,
           PLATFORM_FEE_BPS,
-          "pathusd-direct-escrow-v4",
+          "pathusd-direct-escrow-v" + config.escrowVersion,
           PLATFORM_FEE_RECIPIENT,
           escrowBountyId,
           saved.termsHash,
@@ -3318,14 +3529,12 @@ async function mppCreateBounty(db, config, request, body, key) {
   };
 }
 
-async function mppEnterBounty(db, config, request, bountyId, body, key) {
-  check(config.acceptingNewBounties, config.settlementReason, 503);
+export async function mppEnterBounty(db, config, request, bountyId, body, key, internal = false) {
   fields(body, ["maxEntry", "maxPlatformFeeBps", "participantName", "showAddress"]);
   validKey(key);
   const identity = participantIdentity(body),
     initialRow = await bountyRow(db, bountyId);
   check(initialRow.escrow_bounty_id, "This legacy bounty is not backed by the direct escrow.", 409);
-  check(!initialRow.expires || initialRow.expires > now(), "This bounty has expired.", 409);
   const entry = BigInt(initialRow.entry_units),
     maximum = boundedUnits(body.maxEntry);
   check(maximum >= entry, "Entry exceeds your quoted maximum.", 409);
@@ -3338,6 +3547,21 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
   const operation = "agent-bounty-entry:" + bountyId + ":" + key,
     digest = await hex(json(body));
   let state = await readAgentBountyState(db, operation, digest);
+  if (state && state.phase !== "quoted") {
+    const denied = await authorizeMppResume(db, config, request, operation, state, internal);
+    if (denied) return denied;
+  }
+  const existingJournal = await readJournal(db, paymentJournalKey(operation));
+  if (existingJournal && !internal) {
+    const denied = await authorizeMppResume(db, config, request, operation, { ...state, source: existingJournal.source }, internal);
+    if (denied) return denied;
+  }
+  if (!existingJournal && (!state || state.phase === "quoted")) {
+    await assertV6MigrationReady(db, config);
+    requireV6PaymentAdmission(config);
+  }
+  if (!existingJournal && (!state || state.phase === "quoted"))
+    check(config.acceptingNewBounties, config.settlementReason, 503);
   if (state?.phase === "accepted")
     return {
       value: await attemptView(db, state.attempt, state.account),
@@ -3345,16 +3569,22 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
       receipt: state.receipt,
       escrowHash: state.escrowHash,
     };
+  if (config.escrowVersion === "6" && initialRow.fee_policy_version !== escrowPolicy(config.escrowVersion) && state?.phase !== "quoted")
+    fail(503, "This paid V5 entry cannot be replayed against the V6 escrow. Recover the original V5 operation before changing deployment configuration.");
   check(
     state?.phase !== "refunded",
     "This paid entry request was refunded. Use a new idempotency key.",
     409,
   );
   if (!state) {
-    state = { phase: "quoted", operation, digest, kind: "entry", created: now() };
+    state = { phase: "quoted", operation, digest, kind: "entry", created: now(), bounty: bountyId, requestBody: body, requestKey: key, engineHash: CLIENT_ENGINE_HASH };
     await writeAgentBountyState(db, operation, state);
   }
-  check(initialRow.status === "open", "This bounty is busy or closed. No payment was requested.", 409);
+  if (!existingJournal && state.phase === "quoted" && !request.headers.has("authorization") && !request.headers.has("payment-authorization")) {
+    check(!initialRow.expires || initialRow.expires > now(), "This bounty has expired.", 409);
+    check(initialRow.status === "open", "This bounty is busy or closed. No payment was requested.", 409);
+    await requireCurrentBounty(db, initialRow, config);
+  }
   let hold = state?.hold
     ? await db.prepare("SELECT * FROM payment_holds WHERE id=?").bind(state.hold).first()
     : await db
@@ -3363,6 +3593,11 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
         )
         .bind(bountyId, key, digest)
         .first();
+  if (hold && !internal) {
+    const savedIdentity = parse(hold.body);
+    const denied = await authorizeMppResume(db, config, request, operation, { ...state, account: hold.account, source: state.source || savedIdentity.source || savedIdentity.creator }, internal);
+    if (denied) return denied;
+  }
   if (hold?.status === "accepted") {
     const saved = parse(hold.body);
     const account = state.account || (await accountForTempoAddress(db, saved.source));
@@ -3396,13 +3631,15 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
     };
   } else if (state?.phase === "paid") {
     check(
-      hold && ["awaiting-relay", "relay-prepared"].includes(hold.status),
+      (!hold || ["awaiting-relay", "relay-prepared"].includes(hold.status)) && state.source,
       "The paid entry request is awaiting recovery. Retry the same request; do not send another wallet payment.",
       503,
     );
     payment = { paid: true, source: state.source, receipt: state.receipt };
   } else {
-    payment = await agentBountyPayment(
+    payment = existingJournal
+      ? await recoverSavedBountyPayment(db, config, operation, existingJournal)
+      : await agentBountyPayment(
       db,
       config,
       request,
@@ -3413,12 +3650,18 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
     );
   }
   if (!payment.paid) return payment;
+  state = { ...state, phase: "paid", source: payment.source, receipt: payment.receipt };
+  await writeAgentBountyState(db, operation, state);
   const source = payment.source,
     row = await bountyRow(db, bountyId),
     account = await accountForTempoAddress(db, source);
   if (source.toLowerCase() === (await payoutAddress(db, row.owner)).toLowerCase())
     return refundAgentBountyPayment(db, config, operation, source, entry, "You cannot enter your own bounty.");
-  if (row.status !== "open" || (row.expires && row.expires <= now()))
+  if (!hold?.provider_ref) {
+    try { await requireCurrentBounty(db, row, config); }
+    catch { return refundAgentBountyPayment(db, config, operation, source, entry, "This bounty's engine or escrow changed before entry."); }
+  }
+  if (!hold?.provider_ref && (row.status !== "open" || (row.expires && row.expires <= now())))
     return refundAgentBountyPayment(db, config, operation, source, entry, "This bounty became unavailable before the entry was relayed.");
   if (!hold)
     hold = await db
@@ -3489,6 +3732,7 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
   }
   await writeAgentBountyState(db, operation, state);
   let saved = parse(hold.body);
+  assertSavedRelayScope(saved, config, source);
   let raw = typeof saved.rawTransaction === "string" ? saved.rawTransaction : null,
     escrowHash = validHash(hold.provider_ref) ? hold.provider_ref : null,
     validBefore = Number(saved.validBefore || 0);
@@ -3520,9 +3764,13 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
   }
   let receiptValue;
   try {
-    await broadcastAgentRelayerTransaction(config, raw);
-    receiptValue = await receipt(config, escrowHash);
+    receiptValue = await confirmOrBroadcast(config, escrowHash, raw, validBefore);
   } catch (error) {
+    if (/expired before finality/i.test(String(error?.message || error))) {
+      await db.prepare("UPDATE payment_holds SET status='recovery-required',body=?,updated=? WHERE id=? AND status IN ('awaiting-relay','relay-prepared')")
+        .bind(json({ ...saved, rawTransaction: raw, validBefore, recoveryRequired: true, recoveryHash: escrowHash }), now(), hold.id).run();
+      await writeAgentBountyState(db, operation, { ...state, recoveryRequired: true, recoveryHash: escrowHash, recoveryError: "Relayed escrow receipt did not match the paid entry terms." });
+    }
     if (/reverted|no bounty funds were accepted/i.test(String(error?.message || error)))
       await refundAgentBountyPayment(db, config, operation, source, entry, "The escrow rejected the entry.");
     throw error;
@@ -3540,15 +3788,9 @@ async function mppEnterBounty(db, config, request, bountyId, body, key) {
     requestedSeconds = requestedBuildSeconds(parse(row.blueprint)),
     escrowDeadline = Number(deadline) * 1000,
     buildDeadline = Math.min(updated + requestedSeconds * 1000, escrowDeadline - SETTLEMENT_RESERVE_SECONDS * 1000);
-  if (buildDeadline < updated + 150 * 1000)
-    return refundAgentBountyPayment(
-      db,
-      config,
-      operation,
-      source,
-      entry,
-      "The escrow confirmation left too little build time.",
-    );
+  // The entry is already final on-chain. Persist the attempt even when the
+  // remaining build window is short so the immutable timeout path can settle
+  // it; never refund a payment after escrow has accepted the entry.
   await db.batch([
     db
       .prepare(
@@ -3631,8 +3873,9 @@ async function freeTechnicalRetry(db, auth, attemptId, body, key, config) {
   check(!row.expires || row.expires > now(), "This bounty has expired.", 409);
   const source = await payoutAddress(db, auth.account),
     entry = BigInt(row.entry_units);
-  let saved = parse(hold.body),
-    raw = typeof saved.rawTransaction === "string" ? saved.rawTransaction : null,
+  let saved = parse(hold.body);
+  assertSavedRelayScope(saved, config, source);
+  let raw = typeof saved.rawTransaction === "string" ? saved.rawTransaction : null,
     escrowHash = validHash(hold.provider_ref) ? hold.provider_ref : null,
     validBefore = Number(saved.validBefore || 0);
   if (!raw || !escrowHash || !Array.isArray(saved.relayerCalls)) {
@@ -3686,11 +3929,9 @@ async function freeTechnicalRetry(db, auth, attemptId, body, key, config) {
       updated + requestedSeconds * 1000,
       escrowDeadline - SETTLEMENT_RESERVE_SECONDS * 1000,
     );
-  check(
-    buildDeadline >= updated + 150 * 1000,
-    "The sponsored retry received too little build time. It remains available for recovery.",
-    409,
-  );
+  // The retry entry is already final on-chain. Persist the active attempt even
+  // when the remaining build window is short so timeout recovery can settle it
+  // instead of leaving an accepted entry without an attempt record.
   await db.batch([
     db
       .prepare(
@@ -3744,13 +3985,13 @@ async function freeTechnicalRetry(db, auth, attemptId, body, key, config) {
   ]);
   return attemptView(db, attempt, auth.account);
 }
-const MAX_ESCROW_TOKEN_UNITS = 2n ** 256n - 1n;
-function boundedUnits(value, allowZero = false) {
+export const MAX_ESCROW_TOKEN_UNITS = 2n ** 128n - 1n;
+export function boundedUnits(value, allowZero = false) {
   try {
     return pathUsdToUnits(value, {
       allowZero,
-      // The contract's uint256 range is the only application boundary. The
-      // connected Tempo wallet/access key remains the practical spending cap.
+      // V3 through V6 encode reward and entry amounts as uint128. Reject an
+      // oversized value before any MPP charge or wallet plan is created.
       maxUnits: MAX_ESCROW_TOKEN_UNITS,
     });
   } catch (error) {
@@ -3783,6 +4024,7 @@ async function directCreateIntent(db, auth, body, key, config) {
     title = text(body.title, 70, "bounty title"),
     accountAddress = await payoutAddress(db, auth.account),
     digest = await hex(json(body));
+  enforcePaidComplexity(unpackChallenge(blueprint).machine);
   let hold = await db
     .prepare(
       "SELECT * FROM payment_holds WHERE account=? AND request_key=? AND purpose='direct-create' ORDER BY created DESC LIMIT 1",
@@ -3807,6 +4049,7 @@ async function directCreateIntent(db, auth, body, key, config) {
       };
     return directPlanFromCreate(config, hold);
   }
+  await assertV6MigrationReady(db, config);
   const count = await db
     .prepare(
       "SELECT COUNT(*) AS total FROM bounties WHERE owner=? AND status IN ('open','busy')",
@@ -3852,6 +4095,7 @@ async function directCreateIntent(db, auth, body, key, config) {
         expires,
         expiresAt,
         termsHash,
+        engineHash: CLIENT_ENGINE_HASH, chainId: config.chainId, escrowAddress: config.escrowAddress, escrowVersion: config.escrowVersion,
         creator: accountAddress,
       }),
       reward.toString(),
@@ -3946,6 +4190,8 @@ async function directEntryIntent(db, auth, bountyId, body, key, config) {
       };
     return directPlanFromEntry(config, hold, row);
   }
+  await assertV6MigrationReady(db, config);
+  await requireCurrentBounty(db, row, config);
   const created = now();
   await db
     .prepare(
@@ -4075,6 +4321,7 @@ async function confirmDirectIntent(db, auth, intentId, hash, config) {
     const escrowBountyId = BigInt(log.topics[1]).toString(),
       created = now();
     await db.batch([
+      releaseStatement(db, hold.bounty, saved, config),
       db
         .prepare(
           "INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,expires,active_attempt,winner,created,updated,entry_units,reward_units,reserve_units,platform_fee_bps,fee_policy_version,platform_recipient,escrow_bounty_id,terms_hash,escrow_create_tx) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -4156,11 +4403,9 @@ async function confirmDirectIntent(db, auth, intentId, hash, config) {
       updated + requestedSeconds * 1000,
       escrowDeadline - SETTLEMENT_RESERVE_SECONDS * 1000,
     );
-  check(
-    buildDeadline >= updated + 150 * 1000,
-    "The escrow confirmation left too little build time. Do not deploy a counter; the immutable timeout path will finalize the entry to the bounty creator.",
-    409,
-  );
+  // The entry is already final on-chain. Persist the attempt even when the
+  // remaining build window is short so the immutable timeout path can settle
+  // it; never abandon an active escrow entry with a post-entry refund.
   await db.batch([
     db
       .prepare(
@@ -4222,9 +4467,12 @@ async function immutableRecord(
   reason,
   committedAt,
 ) {
+  const release = await bountyRelease(db, bounty);
+  check(release?.engineHash && ENGINE_EVALUATORS[release.engineHash], "The funded engine release is unavailable; settlement recovery is required.", 409);
   return {
     version: 1,
-    engineHash: CLIENT_ENGINE_HASH,
+    engineHash: release.engineHash,
+    escrowVersion: release.escrowVersion || config.escrowVersion,
     chainId: TEMPO_MAINNET_CHAIN_ID,
     escrow: config.escrowAddress,
     attemptId: attempt.id,
@@ -4303,6 +4551,7 @@ async function deployCounter(db, auth, attemptId, body, key, config) {
       Number(bounty.escrow_attempt_deadline) / 1000,
     ),
     updated = now();
+  enforcePaidComplexity(unpackChallenge(challenger).machine);
   const record = await immutableRecord(
     db,
     config,
@@ -4467,7 +4716,7 @@ async function directControlIntent(
       403,
     );
     check(
-      Number(row.escrow_attempt_deadline || 0) <= now(),
+      Number(row.escrow_attempt_deadline || 0) + Number(config.settlementGraceSeconds || 0) * 1000 <= now(),
       "The escrow signer window is still running.",
       409,
     );
@@ -4605,7 +4854,8 @@ async function confirmDirectControl(db, auth, intentId, hash, config) {
             .bind(active)
             .first()
         : null,
-      log = eventLog(receiptValue, config, ESCROW_EVENTS.timedOut);
+      v6 = config.escrowVersion === "6",
+      log = eventLog(receiptValue, config, v6 ? ESCROW_EVENTS.timedOutRefunded : ESCROW_EVENTS.timedOut);
     check(attempt, "The active attempt is missing.", 409);
     check(
       log.topics?.length === 4 &&
@@ -4613,33 +4863,36 @@ async function confirmDirectControl(db, auth, intentId, hash, config) {
         BigInt(log.topics[2]).toString() === String(row.escrow_attempt_nonce) &&
         topicAddress(log.topics[3]) ===
           (await payoutAddress(db, attempt.account)) &&
-        topicAddress(bytesWord(log.data, 0)) ===
-          (await payoutAddress(db, row.owner)) &&
-        word(log.data, 1) === BigInt(row.entry_units),
+        (v6
+          ? topicAddress(bytesWord(log.data, 0)) === (await payoutAddress(db, row.owner)) &&
+            word(log.data, 1) === BigInt(row.entry_units)
+          : topicAddress(bytesWord(log.data, 0)) === (await payoutAddress(db, row.owner)) &&
+            word(log.data, 1) === BigInt(row.entry_units)),
       "Escrow timeout finalizer does not match this active bounty attempt.",
       409,
     );
     const prior = attempt.result ? parse(attempt.result) : {},
       result = {
         ...prior,
-        outcome: "loss",
-        reason: "escrow-timeout-forfeit",
-        winner: 1,
+        outcome: v6 ? "technical-refund" : "loss",
+        reason: v6 ? "escrow-timeout-refund" : "escrow-timeout-forfeit",
+        winner: v6 ? undefined : 1,
         entry: display(row.entry_units),
         grossReward: "0",
         payout: "0",
         platformFee: "0",
         platformFeeBps: row.platform_fee_bps ?? PLATFORM_FEE_BPS,
-        net: "-" + display(row.entry_units),
-        payoutStatus: "settled-onchain",
+        net: v6 ? "0" : "-" + display(row.entry_units),
+        payoutStatus: v6 ? "technical-refund" : "settled-onchain",
+        ...(v6 ? { escrowVersion: 6, refundStatus: "verified", refundStatusVerified: true } : {}),
         verifiedAt: updated,
       };
     await db.batch([
       db
         .prepare(
-          "UPDATE attempts SET status='settled',result=?,escrow_settlement_tx=?,updated=? WHERE id=? AND status IN ('engineering','queued','awaiting-signatures','ready-to-settle')",
+          "UPDATE attempts SET status=?,result=?,escrow_settlement_tx=?,updated=? WHERE id=? AND status IN ('engineering','queued','awaiting-signatures','ready-to-settle')",
         )
-        .bind(json(result), hash, updated, attempt.id),
+        .bind(v6 ? "technical-refund" : "settled", json(result), hash, updated, attempt.id),
       db
         .prepare(
           "UPDATE bounties SET status='open',active_attempt=NULL,escrow_attempt_deadline=NULL,updated=? WHERE id=?",
@@ -4756,7 +5009,7 @@ function settlementCutoffSeconds(config, payload) {
   return (
     Number(payload.validUntil) +
     1 +
-    (config.escrowVersion === "5" ? config.settlementGraceSeconds : 0)
+    (config.escrowVersion === "5" || config.escrowVersion === "6" ? config.settlementGraceSeconds : 0)
   );
 }
 function settlementWindowOpen(config, payload, at = now()) {
@@ -4854,7 +5107,7 @@ async function confirmSettlement(db, attemptId, hash, config) {
     .prepare("SELECT * FROM attempts WHERE id=?")
     .bind(attemptId)
     .first();
-  if (existing && ["settled", "refunded"].includes(existing.status)) {
+  if (existing && ["settled", "refunded", "technical-refund"].includes(existing.status)) {
     check(
       existing.escrow_settlement_tx === hash,
       "Settlement already confirmed with another transaction.",
@@ -4893,7 +5146,7 @@ async function confirmSettlement(db, attemptId, hash, config) {
     outcome = Number(payload.outcome),
     expectedPayout = outcome === 0 ? BigInt(quote.payoutUnits) : 0n,
     expectedFee = outcome === 0 ? BigInt(quote.platformFeeUnits) : 0n,
-    expectedCreatorEntry = 0n;
+    expectedCreatorEntry = config.escrowVersion === "6" ? BigInt(bounty.entry_units) : 0n;
   check(
     word(log.data, 2) === expectedPayout &&
       word(log.data, 3) === expectedFee &&
@@ -5078,7 +5331,15 @@ function v3SettlementAccount(env, config) {
   return account;
 }
 
-async function sendV3Settlement(env, config, attempt, payload) {
+export async function sendV3Settlement(env, config, attempt, payload) {
+  const journalKey = "settlement-broadcast:" + attempt.id;
+  const prior = await readJournal(env.DB, journalKey);
+  if (prior) {
+    check(prior.escrow === config.escrowAddress && prior.chainId === config.chainId, "Settlement contract changed; reconcile the recorded transaction first.", 409);
+    try { await confirmSettlement(env.DB, attempt.id, prior.hash, config); return prior.hash; } catch {}
+    try { await broadcastAgentRelayerTransaction(config, prior.raw); } catch { /* same hash is reconciled by the queue */ }
+    return prior.hash;
+  }
   const account = v3SettlementAccount(env, config);
   check(
     settlementWindowOpen(config, payload),
@@ -5096,7 +5357,7 @@ async function sendV3Settlement(env, config, attempt, payload) {
     .bind(json(payload), now(), attempt.id)
     .run();
   const transactionValidBefore =
-    config.escrowVersion === "5"
+    config.escrowVersion === "5" || config.escrowVersion === "6"
       ? Math.min(
           settlementCutoffSeconds(config, payload),
           Math.floor(now() / 1000) + 60,
@@ -5139,11 +5400,16 @@ async function sendV3Settlement(env, config, attempt, payload) {
     maxFeePerGas: prepared.maxFeePerGas,
     maxPriorityFeePerGas: prepared.maxPriorityFeePerGas,
   });
-  return await createClient({
-    account,
-    feeToken: config.token,
-    transport: http(config.rpcUrl, { timeout: 15_000, retryCount: 0 }),
-  }).sendRawTransaction({ serializedTransaction: raw });
+  const hash = keccak256(raw);
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING")
+      .bind(journalKey, json({ hash, raw, chainId: config.chainId, escrow: config.escrowAddress, validBefore: transactionValidBefore, createdAt: now() })),
+    env.DB.prepare("UPDATE settlement_jobs SET tx_hash=?,state='confirming',updated=? WHERE attempt=?")
+      .bind(hash, now(), attempt.id),
+  ]);
+  const saved = await readJournal(env.DB, journalKey);
+  try { await broadcastAgentRelayerTransaction(config, saved.raw); } catch { /* next run checks this deterministic hash */ }
+  return saved.hash;
 }
 
 export function automaticTimeoutState(attempt, bounty, at = now(), config = null) {
@@ -5262,7 +5528,7 @@ async function confirmTechnicalReopen(db, holdId, hash, config) {
       payout: "0",
       platformFee: "0",
       platformFeeBps: row.platform_fee_bps ?? PLATFORM_FEE_BPS,
-      net: "0",
+      net: display(-BigInt(row.entry_units)),
       payoutStatus: "technical-retry",
       technicalRetryAvailable: true,
       verifiedAt: updated,
@@ -5277,7 +5543,7 @@ async function confirmTechnicalReopen(db, holdId, hash, config) {
   await db.batch([
     db
       .prepare(
-        "UPDATE attempts SET status='refunded',result=?,escrow_settlement_tx=?,updated=? WHERE id=? AND status IN ('engineering','queued','awaiting-signatures','ready-to-settle')",
+        "UPDATE attempts SET status='technical-retry',result=?,escrow_settlement_tx=?,updated=? WHERE id=? AND status IN ('engineering','queued','awaiting-signatures','ready-to-settle')",
       )
       .bind(json(result), hash, updated, attempt.id),
     db
@@ -5381,9 +5647,16 @@ async function finalizeTechnicalSettlementTimeout(db, env, config, attempt, boun
   let raw = typeof stored.rawTransaction === "string" ? stored.rawTransaction : null,
     hash = validHash(hold.provider_ref) ? hold.provider_ref : null,
     validBefore = Number(stored.validBefore || 0);
-  if (hash && validBefore > 0 && validBefore <= Math.floor(now() / 1000)) {
-    raw = null;
-    hash = null;
+  if (hash) {
+    try { await confirmTechnicalReopen(db, hold.id, hash, config); return; }
+    catch (error) { if (!timeoutReceiptPending(error)) throw error; }
+  }
+  if (hash && (!raw || (validBefore > 0 && validBefore <= Math.floor(now() / 1000)))) {
+    await db
+      .prepare("UPDATE payment_holds SET body=?,updated=? WHERE id=? AND status='awaiting-onchain'")
+      .bind(json({ ...bodyValue, rawTransaction: raw, validBefore, recoveryRequired: true, recoveryHash: hash }), now(), hold.id)
+      .run();
+    fail(503, `The timeout transaction ${hash} is unresolved; recovery must reconcile its receipt before any replacement is considered.`);
   }
   if (!hash || !raw) {
     const prepared = await prepareV3Timeout(
@@ -5481,9 +5754,18 @@ async function finalizeOnchainV3Timeout(db, env, config, attempt, bounty) {
   let raw = typeof stored.rawTransaction === "string" ? stored.rawTransaction : null,
     hash = validHash(hold.provider_ref) ? hold.provider_ref : null,
     validBefore = Number(stored.validBefore || 0);
-  if (hash && validBefore > 0 && validBefore <= Math.floor(now() / 1000)) {
-    raw = null;
-    hash = null;
+  if (hash) {
+    try {
+      await confirmDirectControl(db, { account: attempt.account, role: "owner" }, hold.id, hash, config);
+      return;
+    } catch (error) { if (!timeoutReceiptPending(error)) throw error; }
+  }
+  if (hash && (!raw || (validBefore > 0 && validBefore <= Math.floor(now() / 1000)))) {
+    await db
+      .prepare("UPDATE payment_holds SET body=?,updated=? WHERE id=? AND status='awaiting-onchain'")
+      .bind(json({ ...bodyValue, rawTransaction: raw, validBefore, recoveryRequired: true, recoveryHash: hash }), now(), hold.id)
+      .run();
+    fail(503, `The timeout transaction ${hash} is unresolved; recovery must reconcile its receipt before any replacement is considered.`);
   }
   if (!hash || !raw) {
     const prepared = await prepareV3Timeout(
@@ -5538,7 +5820,7 @@ async function finalizeOnchainV3Timeout(db, env, config, attempt, bounty) {
 }
 
 export async function finalizeExpiredV3Builds(db, env, config) {
-  const policy = "pathusd-direct-escrow-v" + config.escrowVersion;
+  const policy = escrowPolicy(config.escrowVersion);
   const expired = (
     await db
       .prepare(
@@ -5596,12 +5878,13 @@ export async function finalizeExpiredV3Builds(db, env, config) {
 // marked a defended V3 bounty completed. V3 itself is authoritative: a loss
 // or draw reopens only a fully funded target; withdrawn or paid rewards stay
 // closed.
-export async function reopenDefendedBounties(db) {
+export async function reopenDefendedBounties(db, config = null) {
   const rows = (
     await db
       .prepare(
-        "SELECT b.id,a.result FROM bounties b JOIN attempts a ON a.bounty=b.id WHERE b.status='completed' AND b.active_attempt IS NULL AND b.winner IS NULL AND b.fee_policy_version='pathusd-direct-escrow-v3' AND b.reserve_units=b.reward_units AND CAST(b.reserve_units AS INTEGER)>0 AND a.status='settled' AND a.escrow_settlement_tx IS NOT NULL",
+        "SELECT b.id,a.result FROM bounties b JOIN attempts a ON a.bounty=b.id WHERE b.status='completed' AND b.active_attempt IS NULL AND b.winner IS NULL AND b.fee_policy_version=? AND b.reserve_units=b.reward_units AND CAST(b.reserve_units AS INTEGER)>0 AND a.status='settled' AND a.escrow_settlement_tx IS NOT NULL",
       )
+      .bind(escrowPolicy(config?.escrowVersion || "3"))
       .all()
   ).results;
   for (const row of rows) {
@@ -5625,6 +5908,32 @@ export async function reopenDefendedBounties(db) {
   }
 }
 
+export async function recoverAgentBountyPayments(db, config) {
+  const rows = (await db.prepare("SELECT key,value FROM payment_kv WHERE key LIKE 'mpp-bounty-state:%' AND json_extract(value,'$.phase') IN ('quoted','paid') AND COALESCE(json_extract(value,'$.recoveryRequired'),0)=0 ORDER BY key LIMIT 100").all()).results;
+  let processed = 0;
+  for (const row of rows) {
+    const state = parse(row.value);
+    if (!state.requestBody || !state.requestKey || (state.nextRecoveryAt || 0) > now()) continue;
+    if (state.phase === "quoted" && !await readJournal(db, paymentJournalKey(state.operation))) continue;
+    if (++processed > 5) break;
+    try {
+      await withOperationLease(db, state.operation, async () => {
+        const request = new Request(config.origin + "/api/recovery", { method: "POST", headers: { "content-type": "application/json" }, body: json(state.requestBody) });
+        return state.kind === "create"
+          ? mppCreateBounty(db, config, request, state.requestBody, state.requestKey, true)
+          : mppEnterBounty(db, config, request, state.bounty, state.requestBody, state.requestKey, true);
+      });
+    } catch (error) {
+      const current = await readJournal(db, row.key);
+      if (current && ["quoted", "paid"].includes(current.phase)) {
+        const message = String(error.message || error).slice(0, 160),
+          quarantined = /manual reconciliation|recovery is required|expired before finality/i.test(message);
+        await writeAgentBountyState(db, state.operation, { ...current, nextRecoveryAt: quarantined ? 0 : now() + 30_000, recoveryRequired: quarantined || current.recoveryRequired === true, recoveryError: message });
+      }
+    }
+  }
+}
+
 export async function runAutomaticSettlement(env) {
   const config = runtimeConfig(env, "https://service.internal");
   if (!config.enabled || !config.automaticSettlementReady || !env.DB) return;
@@ -5639,10 +5948,12 @@ export async function runAutomaticSettlement(env) {
     .run();
   if (runner.meta.changes !== 1) return;
   try {
+    await recoverAgentBountyPayments(env.DB, config);
+    await repairMislabeledBounties(env.DB, config, hash => receipt(config, hash));
+    await reopenDefendedBounties(env.DB, config);
     v3SettlementAccount(env, config);
-    await reopenDefendedBounties(env.DB);
     await finalizeExpiredV3Builds(env.DB, env, config);
-    const policy = "pathusd-direct-escrow-v" + config.escrowVersion;
+    const policy = escrowPolicy(config.escrowVersion);
     const jobs = (
       await env.DB.prepare(
         "SELECT j.* FROM settlement_jobs j JOIN attempts a ON a.id=j.attempt JOIN bounties b ON b.id=a.bounty WHERE b.fee_policy_version=? AND j.state!='complete' AND j.next_run<=? AND j.lease_until<=? ORDER BY j.next_run,j.created LIMIT 10",
@@ -5745,6 +6056,18 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     config = runtimeConfig(env, url.origin);
   if (config.automaticSettlementReady && request.method === "GET")
     ctx.waitUntil(runAutomaticSettlement(env));
+  const checksAdmission = path === "/.well-known/war-machines.json" || path === "/api/health" || path === "/api/rules" ||
+    (request.method === "POST" && (path === "/api/bounties" || /^\/api\/bounties\/[^/]+\/attempts$/.test(path)));
+  if (checksAdmission && env.DB && config.enabled) {
+    config.paymentHealth = await paymentHealth(
+      env.DB,
+      config,
+      async address => pathUsdToUnits(await pathUsdBalance(config, address), { allowZero: true }),
+      async (method, params) => rpc(config, method, params),
+    );
+    config.acceptingNewBounties = config.acceptingNewBounties && config.paymentHealth.ready;
+    if (!config.paymentHealth.ready) config.settlementReason = config.paymentHealth.reason;
+  }
   if (path === "/.well-known/war-machines.json" && request.method === "GET")
     return response(discovery(config));
   if (
@@ -5761,7 +6084,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     check(env.DB, "D1 storage is unavailable.");
     const db = env.DB,
       method = request.method;
-    await archivePreV5Bounties(db);
+    await archivePreV5Bounties(db, config);
     check(
       ["GET", "POST", "PATCH", "PUT", "DELETE"].includes(method),
       "Method not allowed.",
@@ -5779,17 +6102,25 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       // Payment-Authorization alias.
       ? await bodyOf(request.clone())
       : {},
-      auth = await dbAuth(db, request);
+      sessionAuth = await dbAuth(db, request);
+    let auth = sessionAuth;
+    const privateAgentRoute = path.startsWith("/api/me") || /^\/api\/attempts\/[a-f0-9-]{36}$/.test(path);
+    if (!auth && privateAgentRoute && config.agentBountyMppEnabled) {
+      const access = await mppAgentAuth(db, config, request, "read", "agent-private:" + method + ":" + path);
+      if (access.response) return access.response;
+      auth = access.auth;
+    }
     if (path === "/api/rules" && method === "GET")
       return response(catalog(config));
     if (path === "/api/openapi.json" && method === "GET")
-      return response(openapi);
+      return response(mainnetOpenApi);
     if (path === "/api/health" && method === "GET")
       return response({
-        ok: true,
+        ok: config.paymentHealth?.ready ?? false,
+        paymentHealth: config.paymentHealth || null,
         app: "war-machines",
         mode: "tempo-mainnet",
-        paymentsEnabled: config.enabled,
+        paymentsEnabled: !!config.acceptingNewBounties,
         directEscrow: !!config.directEscrow,
         mppAgentApi: !!(
           config.agentBountyMppEnabled && config.acceptingNewBounties
@@ -5812,7 +6143,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       return response(await signInChallenge(db, body, url.origin));
     if (path === "/api/auth/verify" && method === "POST") {
       const verified = await verifyWallet(db, body, config);
-      return response({ me: verified.me }, 200, verified.headers);
+      return response({ me: verified.me, token: verified.token }, 200, verified.headers);
     }
     if (path === "/api/auth/logout" && method === "POST") {
       const value = cookie(request, "wm_session");
@@ -5832,7 +6163,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       503,
     );
     if (path === "/api/me/wallet" && method === "GET") {
-      const me = await account(db, requireAuth(auth).account),
+      const me = await account(db, requireAuth(auth).account, config),
         address = me.payoutAddress;
       return response({
         address,
@@ -5842,11 +6173,11 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       });
     }
     if (path === "/api/me" && method === "GET")
-      return response(await account(db, requireAuth(auth).account));
+      return response(await account(db, requireAuth(auth).account, config));
     if (path === "/api/me" && method === "PATCH") {
       requireOwner(auth);
       fields(body, ["name", "entryCap", "dailyCap"]);
-      const existing = await account(db, auth.account),
+      const existing = await account(db, auth.account, config),
         entryCap = own(body, "entryCap") ? body.entryCap : existing.entryCap,
         dailyCap = own(body, "dailyCap") ? body.dailyCap : existing.dailyCap;
       let entryUnits = null,
@@ -5868,7 +6199,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
           auth.account,
         )
         .run();
-      return response(await account(db, auth.account));
+      return response(await account(db, auth.account, config));
     }
     if (path === "/api/me/activity" && method === "GET")
       return response(await activity(db, requireAuth(auth).account));
@@ -5888,7 +6219,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       );
     }
     if (path === "/api/me/builds" && method === "GET") {
-      requireOwner(auth);
+      requireScope(auth, "read");
       const rows = await db
         .prepare(
           "SELECT id,name,blueprint,created,updated FROM saved_builds WHERE account=? ORDER BY updated DESC LIMIT 50",
@@ -5903,7 +6234,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       );
     }
     if (path === "/api/me/builds" && method === "POST") {
-      requireOwner(auth);
+      requireScope(auth, "read");
       fields(body, ["name", "blueprint"]);
       const key = request.headers.get("idempotency-key"),
         old = await prior(db, auth.account, key, "save-build", body);
@@ -5967,7 +6298,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     }
     let match = path.match(/^\/api\/me\/builds\/([a-f0-9-]{36})$/);
     if (match && method === "PATCH") {
-      requireOwner(auth);
+      requireScope(auth, "read");
       fields(body, ["name", "blueprint"]);
       const key = request.headers.get("idempotency-key"),
         kind = "update-build:" + match[1],
@@ -6006,7 +6337,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       });
     }
     if (match && method === "DELETE") {
-      requireOwner(auth);
+      requireScope(auth, "read");
       const result = await db
         .prepare("DELETE FROM saved_builds WHERE id=? AND account=?")
         .bind(match[1], auth.account)
@@ -6054,7 +6385,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
         .prepare(
           "SELECT * FROM bounties WHERE entry_units IS NOT NULL AND fee_policy_version=? AND (owner=? OR (listed=1 AND (status IN ('open','busy') OR (status IN ('completed','claimed') AND updated>=?)))) ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'busy' THEN 1 WHEN 'completed' THEN 2 WHEN 'claimed' THEN 2 ELSE 3 END, updated DESC LIMIT 100",
         )
-        .bind(CURRENT_ESCROW_POLICY, account, completedAfter)
+        .bind(escrowPolicy(config.escrowVersion), account, completedAfter)
         .all();
       return response(
         await Promise.all(
@@ -6065,7 +6396,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     if (path === "/api/bounties" && method === "POST") {
       const key = request.headers.get("idempotency-key");
       if (config.agentBountyMppEnabled && !auth) {
-        const result = await mppCreateBounty(db, config, request, body, key);
+        const result = await withOperationLease(db, "agent-bounty-create:" + key, () => mppCreateBounty(db, config, request, body, key));
         if (result.response) return result.response;
         return response(result.value, result.status, {
           ...(result.receipt ? { "payment-receipt": result.receipt } : {}),
@@ -6230,14 +6561,8 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       if (action === "attempts" && method === "POST") {
         const key = request.headers.get("idempotency-key");
         if (config.agentBountyMppEnabled && !auth) {
-          const result = await mppEnterBounty(
-            db,
-            config,
-            request,
-            bountyId,
-            body,
-            key,
-          );
+          const result = await withOperationLease(db, "agent-bounty-entry:" + bountyId + ":" + key,
+            () => mppEnterBounty(db, config, request, bountyId, body, key));
           if (result.response) return result.response;
           return response(result.value, result.status, {
             ...(result.receipt ? { "payment-receipt": result.receipt } : {}),

@@ -48,7 +48,7 @@ Static hosting supports local saves, exports, ordinary challenge links, and loca
 ## Mainnet safeguards
 
 - Keep `WM_BOUNTY_ESCROW_ADDRESS` pinned to the verified deployed escrow.
-- Never add a backend custody key, signer private key, or wallet seed phrase to Site runtime variables, D1, Git, or browser storage.
+- Never put a payout custody key, signer private key, or wallet seed phrase in public Site configuration, frontend code, D1, Git, or browser storage. The active V5 signer and relayer keys belong only in protected server-side Worker secret bindings. The V5 relayer key is a deliberate bounded forwarding secret: native MPP payments are temporarily held by that relayer until the matching escrow call, so keep its balance, allowance and exposure small.
 - V5's current small-trial contract uses one fixed settlement signer; keep its key separate from the relayer and guardian. Use an independently reviewed multi-signer contract before accepting larger public funds; see [ESCROW-V4-AUDIT.md](ESCROW-V4-AUDIT.md) for the inherited trust-boundary review.
 - Native MPP bounty charging is off until V5, the relayer address/key, `WM_AGENT_BOUNTY_MPP_*` values and `MPP_SECRET_KEY` have been intentionally configured. The relayer key must stay in the Worker secret store and the relayer must be funded/approved for the deployed V5 escrow.
 - Use controlled small amounts while the V5 single-signer settlement trust boundary is in place. V3/V4 deployments remain readable for recovery but do not accept new paid bounty actions.

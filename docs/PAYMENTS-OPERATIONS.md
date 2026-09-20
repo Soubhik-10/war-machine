@@ -17,16 +17,16 @@ The browser prepares the exact approval and escrow calls in direct mode. In nati
 2. The challenger approves pathUSD and calls `enterBounty`.
 3. The Worker reveals the defender to that paid challenger only and opens the construction window. Public viewers continue to receive only the scout summary.
 4. The challenger validates locally and deploys one counter. The Worker computes the deterministic result and returns the EIP-712 settlement payload.
-5. Both result signers run `scripts/attest-escrow-result.ps1` using their independent encrypted keystores.
-6. Any wallet can relay `settleAttempt` after both signatures have been registered.
+5. The trusted Sites Worker uses the configured V5 settlement signing secret to produce the one required signature. An operator may use `scripts/attest-escrow-result.ps1` with an encrypted keystore for a local or recovery run; the active V5 trial has one signer and therefore relies on that trusted operator. The independent multi-signer procedure below is retained as legacy/future deployment guidance.
+6. Any wallet can relay `settleAttempt` after the configured signer signature has been registered.
 
-The current deployment uses a ten-minute attempt window. The Worker gives the challenger a cost-scaled three-to-five-minute build window, then retains time for the configured signer and relay plus a two-minute V5 grace. A loss, draw, or missed counter deadline settles the entry to the bounty creator. If settlement infrastructure fails after an on-time build, the Worker calls the V5 technical-reopen path and grants one free sponsored retry; it does not record a player loss. Only an idle bounty can expire and release its reward.
+The current deployment uses a ten-minute attempt window. The Worker gives the challenger a cost-scaled three-to-five-minute build window, then retains time for the configured signer and relay plus a two-minute V5 grace. A loss, draw, or missed counter deadline settles the entry to the bounty creator. If settlement infrastructure fails after an on-time build, the Worker calls the V5 technical-reopen path and grants one sponsored retry; it does not record a player loss or return the original entry through that path. Only an idle bounty can expire and release its reward.
 
 ## Operating limits
 
 Use small amounts until the two-wallet flow has been rehearsed for creation, win, loss, draw, cancellation, expiry, missed counter deadline, wrong-token approval, wrong-event receipt, and paused-contract behavior. The contract is source verified, but it has not had an independent security audit.
 
-Keep the two result signer keystores separate from each other, the Site runtime, Git, D1, and the browser. The Worker must remain receipt-verifying and non-custodial.
+Keep the active V5 settlement signing secret in the encrypted trusted Sites Worker secret store; never put it in the frontend, Git, D1, or a browser. An offline encrypted keystore used for local or recovery signing must also stay off those systems. V5 is intentionally a one-signer trusted-operator trial. Native MPP also forwards payer funds through the bounded relayer before escrow, which is temporary custodial exposure; reconcile forwarding failures before accepting larger amounts. A future multi-signer deployment would keep each signer independent.
 
 ## Native MPP bounty rail
 

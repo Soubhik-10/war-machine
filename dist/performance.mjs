@@ -57,6 +57,7 @@ export function classifyGraphicsTier({
   const memory = numberOrNull(deviceMemory);
   const gpu = String(renderer || "");
   const mobile = /android|iphone|ipad|ipod|mobile/i.test(String(userAgent));
+  const knownHardware = cores !== null && memory !== null && gpu.trim().length > 0;
   const software =
     /swiftshader|llvmpipe|software renderer|software rasterizer|microsoft basic render|angle \(.*warp/i.test(
       gpu,
@@ -70,8 +71,9 @@ export function classifyGraphicsTier({
   )
     return "balanced";
 
-  // Devices not explicitly identified as weak get the absolute-high profile.
-  return "high";
+  // Missing hardware telemetry is common in privacy-focused browsers. Keep
+  // the safer profile until the device is explicitly identified as capable.
+  return knownHardware ? "high" : "balanced";
 }
 
 function webglRenderer(env) {
