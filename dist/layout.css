@@ -385,3 +385,18 @@ body[data-page="home"] .portal-footer { border-top: 0; margin-top: 0; }
 @media (prefers-reduced-motion: reduce) {
   .home-paths button, .contract-card { transition: none; }
 }
+
+/* Keep the bounty board controls compact so the challenges stay above the fold. */
+.bounty-board-actions { align-items: center; padding-bottom: 12px; border-bottom: 1px solid #223844; margin-bottom: 14px; }
+.bounty-board-actions button { min-height: 38px; }
+.bounty-board-actions .guide-reopen { margin-left: auto; }
+.bounty-board-main { min-width: 0; }
+.contract-filter { padding: 9px 10px; border: 1px solid #263f4b; border-radius: 10px; background: #101a21; }
+.contract-filter .segmented { display: flex; flex-wrap: wrap; gap: 6px; }
+.contract-search { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(190px, .8fr) minmax(150px, .5fr); align-items: stretch; }
+.contract-search input, .contract-search select { min-height: 42px; border-radius: 8px; }
+@media (max-width: 760px) {
+  .bounty-board-actions .guide-reopen { margin-left: 0; }
+  .contract-search { grid-template-columns: 1fr 1fr; }
+  .contract-search input[type="search"] { grid-column: 1 / -1; }
+}

@@ -69,6 +69,68 @@ const $ = (s) => document.querySelector(s),
 const partGuide = (p) =>
   // Resource bands are shared with the simulation so the HUD and report agree.
   PART_GUIDANCE[p.id] || { role: p.cat.toUpperCase(), quick: p.desc };
+function partMetricRows(part) {
+  const p = partSpec({ id: part.id }),
+    rows = [["DURABILITY", `${Math.round(p.hp)} HP`], ["MASS", `${Math.round(p.mass)} t`]];
+  if (p.damage && p.rate)
+    rows.push(["DPS", `${(p.damage * (p.pellets || 1) / p.rate).toFixed(1)}`]);
+  if (p.range) rows.push(["RANGE", `${Math.round(p.range)} m`]);
+  if (p.thrust) rows.push(["THRUST", `${Math.round(p.thrust)}`]);
+  if (p.power) rows.push(["GENERATION", `+${Math.round(p.power)}/s`]);
+  if (p.cooling) rows.push(["COOLING", `${Math.round(p.cooling)}/s`]);
+  if (p.energy) rows.push(["ENERGY / SHOT", `${p.energy}`]);
+  if (p.heat) rows.push(["HEAT / SHOT", `${p.heat}`]);
+  if (p.shield) rows.push(["SHIELD", `${Math.round(p.shield)}`]);
+  if (p.sensor) rows.push(["SENSOR NETWORK", `${Math.round(p.sensor * 100)}%`]);
+  if (p.armor) rows.push(["DAMAGE RESIST", `${Math.round(p.armor * 100)}%`]);
+  if (p.capacity) rows.push(["ENERGY CAPACITY", `+${Math.round(p.capacity)}`]);
+  if (p.repair) rows.push(["REPAIR", `${Math.round(p.repair)}/s`]);
+  if (p.ram) rows.push(["IMPACT", `${Math.round(p.ram)}`]);
+  return rows;
+}
+function machineMetricRows(s) {
+  const powerFactor = s.energy ? clamp(s.power / s.energy, 0, 1) : 1,
+    coolingFactor = s.heat ? clamp(s.cooling / s.heat, 0, 1) : 1,
+    sustainedDps = s.dps * Math.max(0.2, powerFactor) * Math.max(0.2, coolingFactor),
+    mobility = Math.round(clamp((s.speed / 115) * s.stability * 100, 0, 100));
+  return [
+    ["RAW DPS", `${Math.round(s.dps)}`],
+    ["SUSTAINED DPS", `${Math.round(sustainedDps)}`],
+    ["TOP SPEED", `${Math.round(s.speed)} m/s`],
+    ["MOBILITY SCORE", `${mobility}%`],
+    ["POWER HEADROOM", `${(s.power - s.energy).toFixed(1)}/s`],
+    ["COOLING HEADROOM", `${(s.cooling - s.heat).toFixed(1)}/s`],
+    ["TOTAL DURABILITY", `${Math.round(s.hp)} HP`],
+    ["SENSOR NETWORK", `${Math.round((s.sensor || 0) * 100)}%`],
+  ];
+}
+function ensureHoverPopover() {
+  let node = $("#part-hover-popover");
+  if (!node) {
+    node = document.createElement("div");
+    node.id = "part-hover-popover";
+    node.className = "part-hover-popover";
+    node.hidden = true;
+    document.body.append(node);
+  }
+  return node;
+}
+function showHoverPopover(anchor, title, rows, detail = "") {
+  const node = ensureHoverPopover();
+  node.innerHTML = `<strong>${esc(title)}</strong><span class="part-hover-grid">${rows.map(([label, value]) => `<span><small>${esc(label)}</small><b>${esc(value)}</b></span>`).join("")}</span>${detail ? `<p>${esc(detail)}</p>` : ""}`;
+  node.hidden = false;
+  const rect = anchor.getBoundingClientRect(),
+    width = Math.min(280, window.innerWidth - 24),
+    left = rect.right + 12 + width <= window.innerWidth - 12 ? rect.right + 12 : Math.max(12, rect.left - width - 12),
+    top = Math.max(12, Math.min(window.innerHeight - node.offsetHeight - 12, rect.top));
+  node.style.width = `${width}px`;
+  node.style.left = `${left}px`;
+  node.style.top = `${top}px`;
+}
+function hideHoverPopover() {
+  const node = $("#part-hover-popover");
+  if (node) node.hidden = true;
+}
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let graphicsProfile = getGraphicsProfile();
 let lastArenaRender = 0;
@@ -404,6 +466,20 @@ function workshop() {
  <section class="panel"><div class="panel-head"><h3>Machine behavior</h3><small>CHOOSE BEFORE THE FIGHT</small></div><div class="tactics-body"><label class="field"><span>Movement</span><select id="tactic"><option value="balanced">Hold optimal range</option><option value="kite">Kite & retreat</option><option value="flank">Flank & circle</option><option value="ram">Ram & overwhelm</option></select></label><label class="field"><span>Target priority</span>${targetSelect("target")}</label><label class="field"><span>Range <b id="range-value">${machine.range} m</b></span><input type="range" id="range" min="80" max="600" step="10" value="${machine.range}"></label><label class="field"><span>Damage response</span><select id="stance"><option value="steady">Hold the line</option><option value="aggressive">Push when enemy weakens</option><option value="guarded">Protect the damaged side</option></select></label></div></section></div>
  <div class="deploy-bar"><div><h3>Ready to test.</h3><p>Choose how it moves, run a fight, and fix what breaks.</p></div><div class="deploy-actions"><button id="save-btn">Save blueprint</button><button class="primary" id="deploy-btn">Open the arena ↗</button></div></div><div class="footer-note"><span id="rules-footer">${rulesLabel(rules)}</span><span>R ROTATE / CTRL+Z UNDO / ARROWS + ENTER BUILD</span></div>`;
   renderParts();
+  const machineSurface = $(".builder-wrap");
+  if (machineSurface) {
+    const showMachine = () =>
+      showHoverPopover(
+        machineSurface,
+        machine.name || "Machine",
+        machineMetricRows(stats(machine)),
+        "Live build projection. Power and cooling headroom reduce sustained output when they run negative.",
+      );
+    machineSurface.addEventListener("mouseenter", showMachine);
+    machineSurface.addEventListener("focusin", showMachine);
+    machineSurface.addEventListener("mouseleave", hideHoverPopover);
+    machineSurface.addEventListener("focusout", hideHoverPopover);
+  }
   organizeWorkshop();
   $("#save-btn")?.insertAdjacentHTML("afterend", '<button id="stress-btn">Stress test</button>');
   bindWorkshop();
@@ -556,7 +632,10 @@ function renderParts() {
   )
     .map((p) => {
       const guide = partGuide(p);
-      return `<button class="part-card ${selected === p.id && mode === "place" ? "active" : ""}" data-part="${p.id}" title="${esc(guide.role + " — " + guide.quick + " " + p.desc)}" aria-label="${esc(p.name + ". " + guide.role + ". " + guide.quick)}"><span class="price">${p.cost + layer * 12} ¢</span><span class="part-role">${esc(guide.role)}</span>${sprite(p)}<strong>${p.name}</strong>${p.index >= 16 ? '<span class="part-new">NEW</span>' : ""}</button>`;
+      const metrics = partMetricRows(p)
+        .map(([label, value]) => `${label}: ${value}`)
+        .join(" · ");
+      return `<button class="part-card ${selected === p.id && mode === "place" ? "active" : ""}" data-part="${p.id}" title="${esc(`${guide.role} · ${metrics}. ${p.desc}`)}" aria-label="${esc(p.name + ". " + guide.role + ". " + metrics)}"><span class="price">${p.cost + layer * 12} ¢</span><span class="part-role">${esc(guide.role)}</span>${sprite(p)}<strong>${p.name}</strong></button>`;
     })
     .join("");
   $$("[data-part]").forEach(
@@ -568,6 +647,15 @@ function renderParts() {
           $(".bench").scrollIntoView({ behavior: "smooth", block: "start" });
       }),
   );
+  $$(`[data-part]`).forEach((b) => {
+    const p = BY_ID[b.dataset.part],
+      guide = partGuide(p),
+      show = () => showHoverPopover(b, p.name, partMetricRows(p), guide.quick);
+    b.addEventListener("mouseenter", show);
+    b.addEventListener("focus", show);
+    b.addEventListener("mouseleave", hideHoverPopover);
+    b.addEventListener("blur", hideHoverPopover);
+  });
   const p = BY_ID[selected],
     guide = partGuide(p);
   $("#selection-details").innerHTML =
@@ -704,8 +792,12 @@ function updateReadout() {
     `${s.parts} / ${cap("parts")} FITTED PARTS + CORE`;
   $("#class-label").textContent = rules.mode.toUpperCase();
   $("#rules-footer").textContent = rulesLabel(rules);
+  const powerFactor = s.energy ? clamp(s.power / s.energy, 0, 1) : 1,
+    coolingFactor = s.heat ? clamp(s.cooling / s.heat, 0, 1) : 1,
+    sustainedDps = s.dps * Math.max(0.2, powerFactor) * Math.max(0.2, coolingFactor),
+    mobilityScore = Math.round(clamp((s.speed / 115) * s.stability * 100, 0, 100));
   $("#stats").innerHTML =
-    `<div class="budget-row"><strong>${s.cost.toLocaleString()} <span>¢</span></strong><span>${rules.credits === null ? "NO CREDIT CAP" : (rules.credits - s.cost).toLocaleString() + " left"}</span></div><div class="meter"><i style="width:${rules.credits === null ? 0 : Math.min(100, (s.cost / rules.credits) * 100)}%"></i></div><div class="limit-chips"><span class="${over("parts", s.parts) ? "warn" : ""}">${s.parts}/${cap("parts")} fitted</span><span class="${over("mass", s.mass) ? "warn" : ""}">${s.mass}/${cap("mass")} t</span><span class="${over("weapons", s.weapons) ? "warn" : ""}">${s.weapons}/${cap("weapons")} weapons</span></div><div class="stat-grid"><div><small>INTEGRITY</small><strong>${s.hp.toLocaleString()} <small>HP</small></strong></div><div><small>FIREPOWER</small><strong>${Math.round(s.dps)} <small>DPS</small></strong></div><div><small>TOP SPEED</small><strong>${Math.round(s.speed)} <small>m/s</small></strong></div><div><small>STABILITY</small><strong>${Math.round(s.stability * 100)}<small>%</small></strong></div></div><div class="system-row"><span>Power / demand</span><b class="${s.power < s.energy ? "warn" : ""}">${Math.round(s.power)} / ${Math.ceil(s.energy)}</b></div><div class="system-row"><span>Cooling / heat</span><b class="${s.cooling < s.heat ? "warn" : ""}">${Math.round(s.cooling)} / ${Math.ceil(s.heat)}</b></div><div class="system-row"><span>Shield / energy reserve</span><b>${Math.round(s.shield)} / ${s.capacity}</b></div><div class="system-row"><span>Targeting / sensors</span><b class="${s.sensor < .8 ? "warn" : ""}">${Math.round((s.sensor || 0) * 100)}% / ${s.sensors || 0}</b></div>`;
+    `<div class="budget-row"><strong>${s.cost.toLocaleString()} <span>¢</span></strong><span>${rules.credits === null ? "NO CREDIT CAP" : (rules.credits - s.cost).toLocaleString() + " left"}</span></div><div class="meter"><i style="width:${rules.credits === null ? 0 : Math.min(100, (s.cost / rules.credits) * 100)}%"></i></div><div class="limit-chips"><span class="${over("parts", s.parts) ? "warn" : ""}">${s.parts}/${cap("parts")} fitted</span><span class="${over("mass", s.mass) ? "warn" : ""}">${s.mass}/${cap("mass")} t</span><span class="${over("weapons", s.weapons) ? "warn" : ""}">${s.weapons}/${cap("weapons")} weapons</span></div><div class="stat-grid"><div><small>INTEGRITY</small><strong>${s.hp.toLocaleString()} <small>HP</small></strong></div><div><small>FIREPOWER</small><strong>${Math.round(s.dps)} <small>DPS</small></strong></div><div><small>TOP SPEED</small><strong>${Math.round(s.speed)} <small>m/s</small></strong></div><div><small>STABILITY</small><strong>${Math.round(s.stability * 100)}<small>%</small></strong></div></div><div class="system-row"><span>Sustained DPS</span><b class="${sustainedDps < s.dps * .8 ? "warn" : ""}">${Math.round(sustainedDps)}</b></div><div class="system-row"><span>Mobility score</span><b class="${mobilityScore < 50 ? "warn" : ""}">${mobilityScore}%</b></div><div class="system-row"><span>Power / demand</span><b class="${s.power < s.energy ? "warn" : ""}">${Math.round(s.power)} / ${Math.ceil(s.energy)}</b></div><div class="system-row"><span>Cooling / heat</span><b class="${s.cooling < s.heat ? "warn" : ""}">${Math.round(s.cooling)} / ${Math.ceil(s.heat)}</b></div><div class="system-row"><span>Shield / energy reserve</span><b>${Math.round(s.shield)} / ${s.capacity}</b></div><div class="system-row"><span>Targeting / sensors</span><b class="${s.sensor < .8 ? "warn" : ""}">${Math.round((s.sensor || 0) * 100)}% / ${s.sensors || 0}</b></div>`;
   $("#bench-status").classList.toggle("invalid", !!issues.length);
   $("#bench-status").innerHTML =
     `<span class="status-dot"></span>${esc(issues[0] || "Structure sound. Cleared for deployment.")}`;
