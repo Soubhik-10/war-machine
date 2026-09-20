@@ -789,32 +789,8 @@ function machineMetricRows(s) {
     ["SENSOR NETWORK", \`\${Math.round((s.sensor || 0) * 100)}%\`],
   ];
 }
-function ensureHoverPopover() {
-  let node = $("#part-hover-popover");
-  if (!node) {
-    node = document.createElement("div");
-    node.id = "part-hover-popover";
-    node.className = "part-hover-popover";
-    node.hidden = true;
-    document.body.append(node);
-  }
-  return node;
-}
-function showHoverPopover(anchor, title, rows, detail = "") {
-  const node = ensureHoverPopover();
-  node.innerHTML = \`<strong>\${esc(title)}</strong><span class="part-hover-grid">\${rows.map(([label, value]) => \`<span><small>\${esc(label)}</small><b>\${esc(value)}</b></span>\`).join("")}</span>\${detail ? \`<p>\${esc(detail)}</p>\` : ""}\`;
-  node.hidden = false;
-  const rect = anchor.getBoundingClientRect(),
-    width = Math.min(280, window.innerWidth - 24),
-    left = rect.right + 12 + width <= window.innerWidth - 12 ? rect.right + 12 : Math.max(12, rect.left - width - 12),
-    top = Math.max(12, Math.min(window.innerHeight - node.offsetHeight - 12, rect.top));
-  node.style.width = \`\${width}px\`;
-  node.style.left = \`\${left}px\`;
-  node.style.top = \`\${top}px\`;
-}
-function hideHoverPopover() {
-  const node = $("#part-hover-popover");
-  if (node) node.hidden = true;
+function machineMetricText(s, name = machine.name || "Machine") {
+  return \`\${name} \xB7 \${machineMetricRows(s).map(([label, value]) => \`\${label}: \${value}\`).join(" \xB7 ")}. Power and cooling headroom reduce sustained output when they run negative.\`;
 }
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let graphicsProfile = getGraphicsProfile();
@@ -1153,17 +1129,9 @@ function workshop() {
   renderParts();
   const machineSurface = $(".builder-wrap");
   if (machineSurface) {
-    const showMachine = () =>
-      showHoverPopover(
-        machineSurface,
-        machine.name || "Machine",
-        machineMetricRows(stats(machine)),
-        "Live build projection. Power and cooling headroom reduce sustained output when they run negative.",
-      );
-    machineSurface.addEventListener("mouseenter", showMachine);
-    machineSurface.addEventListener("focusin", showMachine);
-    machineSurface.addEventListener("mouseleave", hideHoverPopover);
-    machineSurface.addEventListener("focusout", hideHoverPopover);
+    const tooltip = machineMetricText(stats(machine));
+    machineSurface.title = tooltip;
+    machineSurface.setAttribute("aria-label", tooltip);
   }
   organizeWorkshop();
   $("#save-btn")?.insertAdjacentHTML("afterend", '<button id="stress-btn">Stress test</button>');
@@ -1332,15 +1300,6 @@ function renderParts() {
           $(".bench").scrollIntoView({ behavior: "smooth", block: "start" });
       }),
   );
-  $$(\`[data-part]\`).forEach((b) => {
-    const p = BY_ID[b.dataset.part],
-      guide = partGuide(p),
-      show = () => showHoverPopover(b, p.name, partMetricRows(p), guide.quick);
-    b.addEventListener("mouseenter", show);
-    b.addEventListener("focus", show);
-    b.addEventListener("mouseleave", hideHoverPopover);
-    b.addEventListener("blur", hideHoverPopover);
-  });
   const p = BY_ID[selected],
     guide = partGuide(p);
   $("#selection-details").innerHTML =
@@ -1481,6 +1440,12 @@ function updateReadout() {
     coolingFactor = s.heat ? clamp(s.cooling / s.heat, 0, 1) : 1,
     sustainedDps = s.dps * Math.max(0.2, powerFactor) * Math.max(0.2, coolingFactor),
     mobilityScore = Math.round(clamp((s.speed / 115) * s.stability * 100, 0, 100));
+  const machineSurface = $(".builder-wrap");
+  if (machineSurface) {
+    const tooltip = machineMetricText(s);
+    machineSurface.title = tooltip;
+    machineSurface.setAttribute("aria-label", tooltip);
+  }
   $("#stats").innerHTML =
     \`<div class="budget-row"><strong>\${s.cost.toLocaleString()} <span>\xA2</span></strong><span>\${rules.credits === null ? "NO CREDIT CAP" : (rules.credits - s.cost).toLocaleString() + " left"}</span></div><div class="meter"><i style="width:\${rules.credits === null ? 0 : Math.min(100, (s.cost / rules.credits) * 100)}%"></i></div><div class="limit-chips"><span class="\${over("parts", s.parts) ? "warn" : ""}">\${s.parts}/\${cap("parts")} fitted</span><span class="\${over("mass", s.mass) ? "warn" : ""}">\${s.mass}/\${cap("mass")} t</span><span class="\${over("weapons", s.weapons) ? "warn" : ""}">\${s.weapons}/\${cap("weapons")} weapons</span></div><div class="stat-grid"><div><small>INTEGRITY</small><strong>\${s.hp.toLocaleString()} <small>HP</small></strong></div><div><small>FIREPOWER</small><strong>\${Math.round(s.dps)} <small>DPS</small></strong></div><div><small>TOP SPEED</small><strong>\${Math.round(s.speed)} <small>m/s</small></strong></div><div><small>STABILITY</small><strong>\${Math.round(s.stability * 100)}<small>%</small></strong></div></div><div class="system-row"><span>Sustained DPS</span><b class="\${sustainedDps < s.dps * .8 ? "warn" : ""}">\${Math.round(sustainedDps)}</b></div><div class="system-row"><span>Mobility score</span><b class="\${mobilityScore < 50 ? "warn" : ""}">\${mobilityScore}%</b></div><div class="system-row"><span>Power / demand</span><b class="\${s.power < s.energy ? "warn" : ""}">\${Math.round(s.power)} / \${Math.ceil(s.energy)}</b></div><div class="system-row"><span>Cooling / heat</span><b class="\${s.cooling < s.heat ? "warn" : ""}">\${Math.round(s.cooling)} / \${Math.ceil(s.heat)}</b></div><div class="system-row"><span>Shield / energy reserve</span><b>\${Math.round(s.shield)} / \${s.capacity}</b></div><div class="system-row"><span>Targeting / sensors</span><b class="\${s.sensor < .8 ? "warn" : ""}">\${Math.round((s.sensor || 0) * 100)}% / \${s.sensors || 0}</b></div>\`;
   $("#bench-status").classList.toggle("invalid", !!issues.length);
@@ -3802,7 +3767,7 @@ if (document.modelContext?.registerTool) {
   }
   window.addEventListener("pagehide", () => lifecycle.abort(), { once: true });
 }
-`,"text/javascript; charset=utf-8","2869795cad3167c8"],"/bounties.css":[`.bounty-heading p {
+`,"text/javascript; charset=utf-8","dc2f4d61136d9b88"],"/bounties.css":[`.bounty-heading p {
   max-width: 660px;
 }
 .contract-hero {
@@ -6828,16 +6793,7 @@ button,input,select{font-size:14px}button{min-height:42px}button.active{color:va
 .resource-meter b{font:10px/1 monospace;text-align:right;color:#cbdad1}
 .resource-meter.caution i{background:#e7b45f}.resource-meter.danger i,.resource-meter.critical i{background:#e17c6e}
 .resource-meter.caution b{color:#f0c879}.resource-meter.danger b,.resource-meter.critical b{color:#ff9d8b}
-.part-hover-popover{position:fixed;z-index:80;pointer-events:none;width:min(280px,calc(100vw - 24px));padding:14px 15px 13px;border:1px solid #4b6570;border-radius:10px;background:linear-gradient(145deg,#182934,#101a21);box-shadow:0 18px 50px #0009;color:var(--text)}
-.part-hover-popover[hidden]{display:none}
-.part-hover-popover>strong{display:block;margin-bottom:10px;color:#f0eee5;font-size:15px;line-height:1.2}
-.part-hover-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
-.part-hover-grid>span{padding:7px 8px;border:1px solid #314a52;border-radius:6px;background:#0d171d99}
-.part-hover-grid small{display:block;color:#89a19b;font:9px/1.2 monospace;letter-spacing:.6px}
-.part-hover-grid b{display:block;margin-top:2px;color:var(--gold);font-size:13px;line-height:1.2}
-.part-hover-popover p{margin:11px 0 0;color:#aebdb8;font-size:11px;line-height:1.5}
-@media(max-width:640px){.part-hover-popover{display:none!important}}
-`,"text/css; charset=utf-8","86e0a52d731cdf91"],"/data.mjs":[`export const BALANCE_VERSION="agent-season-6", ENGINE_VERSION="agent-season-6-explainable", TERRAIN_VERSION="climate-3";
+`,"text/css; charset=utf-8","2ebabedab74333f0"],"/data.mjs":[`export const BALANCE_VERSION="agent-season-6", ENGINE_VERSION="agent-season-6-explainable", TERRAIN_VERSION="climate-3";
 export const VERSION=3, GRID=9, LIMIT=1200, PART_LIMIT=32, MASS_LIMIT=360, WEAPON_LIMIT=8, LEVELS=3, LAYER_HEIGHT=1.65;
 // A modest durability pass gives damaged systems time to degrade visibly before
 // they disappear. Costs and offensive output stay unchanged, so the extra time

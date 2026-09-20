@@ -104,32 +104,8 @@ function machineMetricRows(s) {
     ["SENSOR NETWORK", `${Math.round((s.sensor || 0) * 100)}%`],
   ];
 }
-function ensureHoverPopover() {
-  let node = $("#part-hover-popover");
-  if (!node) {
-    node = document.createElement("div");
-    node.id = "part-hover-popover";
-    node.className = "part-hover-popover";
-    node.hidden = true;
-    document.body.append(node);
-  }
-  return node;
-}
-function showHoverPopover(anchor, title, rows, detail = "") {
-  const node = ensureHoverPopover();
-  node.innerHTML = `<strong>${esc(title)}</strong><span class="part-hover-grid">${rows.map(([label, value]) => `<span><small>${esc(label)}</small><b>${esc(value)}</b></span>`).join("")}</span>${detail ? `<p>${esc(detail)}</p>` : ""}`;
-  node.hidden = false;
-  const rect = anchor.getBoundingClientRect(),
-    width = Math.min(280, window.innerWidth - 24),
-    left = rect.right + 12 + width <= window.innerWidth - 12 ? rect.right + 12 : Math.max(12, rect.left - width - 12),
-    top = Math.max(12, Math.min(window.innerHeight - node.offsetHeight - 12, rect.top));
-  node.style.width = `${width}px`;
-  node.style.left = `${left}px`;
-  node.style.top = `${top}px`;
-}
-function hideHoverPopover() {
-  const node = $("#part-hover-popover");
-  if (node) node.hidden = true;
+function machineMetricText(s, name = machine.name || "Machine") {
+  return `${name} · ${machineMetricRows(s).map(([label, value]) => `${label}: ${value}`).join(" · ")}. Power and cooling headroom reduce sustained output when they run negative.`;
 }
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let graphicsProfile = getGraphicsProfile();
@@ -468,17 +444,9 @@ function workshop() {
   renderParts();
   const machineSurface = $(".builder-wrap");
   if (machineSurface) {
-    const showMachine = () =>
-      showHoverPopover(
-        machineSurface,
-        machine.name || "Machine",
-        machineMetricRows(stats(machine)),
-        "Live build projection. Power and cooling headroom reduce sustained output when they run negative.",
-      );
-    machineSurface.addEventListener("mouseenter", showMachine);
-    machineSurface.addEventListener("focusin", showMachine);
-    machineSurface.addEventListener("mouseleave", hideHoverPopover);
-    machineSurface.addEventListener("focusout", hideHoverPopover);
+    const tooltip = machineMetricText(stats(machine));
+    machineSurface.title = tooltip;
+    machineSurface.setAttribute("aria-label", tooltip);
   }
   organizeWorkshop();
   $("#save-btn")?.insertAdjacentHTML("afterend", '<button id="stress-btn">Stress test</button>');
@@ -647,15 +615,6 @@ function renderParts() {
           $(".bench").scrollIntoView({ behavior: "smooth", block: "start" });
       }),
   );
-  $$(`[data-part]`).forEach((b) => {
-    const p = BY_ID[b.dataset.part],
-      guide = partGuide(p),
-      show = () => showHoverPopover(b, p.name, partMetricRows(p), guide.quick);
-    b.addEventListener("mouseenter", show);
-    b.addEventListener("focus", show);
-    b.addEventListener("mouseleave", hideHoverPopover);
-    b.addEventListener("blur", hideHoverPopover);
-  });
   const p = BY_ID[selected],
     guide = partGuide(p);
   $("#selection-details").innerHTML =
@@ -796,6 +755,12 @@ function updateReadout() {
     coolingFactor = s.heat ? clamp(s.cooling / s.heat, 0, 1) : 1,
     sustainedDps = s.dps * Math.max(0.2, powerFactor) * Math.max(0.2, coolingFactor),
     mobilityScore = Math.round(clamp((s.speed / 115) * s.stability * 100, 0, 100));
+  const machineSurface = $(".builder-wrap");
+  if (machineSurface) {
+    const tooltip = machineMetricText(s);
+    machineSurface.title = tooltip;
+    machineSurface.setAttribute("aria-label", tooltip);
+  }
   $("#stats").innerHTML =
     `<div class="budget-row"><strong>${s.cost.toLocaleString()} <span>¢</span></strong><span>${rules.credits === null ? "NO CREDIT CAP" : (rules.credits - s.cost).toLocaleString() + " left"}</span></div><div class="meter"><i style="width:${rules.credits === null ? 0 : Math.min(100, (s.cost / rules.credits) * 100)}%"></i></div><div class="limit-chips"><span class="${over("parts", s.parts) ? "warn" : ""}">${s.parts}/${cap("parts")} fitted</span><span class="${over("mass", s.mass) ? "warn" : ""}">${s.mass}/${cap("mass")} t</span><span class="${over("weapons", s.weapons) ? "warn" : ""}">${s.weapons}/${cap("weapons")} weapons</span></div><div class="stat-grid"><div><small>INTEGRITY</small><strong>${s.hp.toLocaleString()} <small>HP</small></strong></div><div><small>FIREPOWER</small><strong>${Math.round(s.dps)} <small>DPS</small></strong></div><div><small>TOP SPEED</small><strong>${Math.round(s.speed)} <small>m/s</small></strong></div><div><small>STABILITY</small><strong>${Math.round(s.stability * 100)}<small>%</small></strong></div></div><div class="system-row"><span>Sustained DPS</span><b class="${sustainedDps < s.dps * .8 ? "warn" : ""}">${Math.round(sustainedDps)}</b></div><div class="system-row"><span>Mobility score</span><b class="${mobilityScore < 50 ? "warn" : ""}">${mobilityScore}%</b></div><div class="system-row"><span>Power / demand</span><b class="${s.power < s.energy ? "warn" : ""}">${Math.round(s.power)} / ${Math.ceil(s.energy)}</b></div><div class="system-row"><span>Cooling / heat</span><b class="${s.cooling < s.heat ? "warn" : ""}">${Math.round(s.cooling)} / ${Math.ceil(s.heat)}</b></div><div class="system-row"><span>Shield / energy reserve</span><b>${Math.round(s.shield)} / ${s.capacity}</b></div><div class="system-row"><span>Targeting / sensors</span><b class="${s.sensor < .8 ? "warn" : ""}">${Math.round((s.sensor || 0) * 100)}% / ${s.sensors || 0}</b></div>`;
   $("#bench-status").classList.toggle("invalid", !!issues.length);
