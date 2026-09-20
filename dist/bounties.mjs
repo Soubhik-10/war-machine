@@ -659,6 +659,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
       const draw = () => {
         const shown = data.filter(
           (b) =>
+            !isLegacyV5(b) &&
             (filter === "mine"
               ? b.owner === me?.id
               : filter === "saved"
