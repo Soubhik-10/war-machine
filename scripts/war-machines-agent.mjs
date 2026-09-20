@@ -10,6 +10,7 @@ import { availableParallelism } from "node:os";
 import { Worker } from "node:worker_threads";
 import { Provider, Storage } from "accounts/cli";
 import { Mppx, tempo } from "mppx/client";
+import { Challenge } from "mppx";
 import { Battle } from "../dist/engine.mjs";
 import {
   PRESETS,
@@ -179,11 +180,14 @@ function compareCandidates(left, right) {
 function summarizeCandidate(candidate, results) {
   const wins = results.filter((result) => result.winner === 0).length;
   const draws = results.filter((result) => result.winner < 0).length;
-  const meanIntegrity =
-    results.reduce((total, result) => total + Number(result.integrity?.[0] || 0), 0) /
-    results.length;
+  const meanIntegrity = results.length
+    ? results.reduce((total, result) => total + Number(result.integrity?.[0] || 0), 0) /
+      results.length
+    : 0;
   const meanTime =
-    results.reduce((total, result) => total + Number(result.time || 100), 0) / results.length;
+    results.length
+      ? results.reduce((total, result) => total + Number(result.time || 100), 0) / results.length
+      : 100;
   return {
     ...candidate,
     wins,
@@ -195,12 +199,18 @@ function summarizeCandidate(candidate, results) {
   };
 }
 
-function scoreCandidate(candidate, locked, seedList, existingResults = []) {
+function scoreCandidate(
+  candidate,
+  locked,
+  seedList,
+  existingResults = [],
+  deadlineMs = Number.POSITIVE_INFINITY,
+) {
   const seenSeeds = new Set(existingResults.map((result) => result.seed));
-  const results = existingResults.concat(
-    seedList
-      .filter((seed) => !seenSeeds.has(seed))
-      .map((seed) => {
+  const results = existingResults.slice();
+  for (const seed of seedList.filter((value) => !seenSeeds.has(value))) {
+    if (Date.now() >= deadlineMs) break;
+    results.push((() => {
         const result = new Battle(
           candidate.machine,
           locked.machine,
@@ -209,8 +219,8 @@ function scoreCandidate(candidate, locked, seedList, existingResults = []) {
           { mode: "auto", swapSpawns: !!(seed & 1), objective: locked.objective || "reactor" },
         ).run();
         return { seed, winner: result.winner, time: result.time, integrity: result.integrity };
-      }),
-  );
+      })());
+  }
   return summarizeCandidate(candidate, results);
 }
 
@@ -256,7 +266,7 @@ class BattleWorkerPool {
     );
   }
 
-  run(candidates, locked, seedList) {
+  run(candidates, locked, seedList, { deadlineMs = Number.POSITIVE_INFINITY } = {}) {
     const results = new Array(candidates.length);
     let next = 0;
     let completed = 0;
@@ -269,18 +279,31 @@ class BattleWorkerPool {
           worker.removeListener("error", onError);
         }
       };
+      let timer;
       const fail = (error) => {
         if (settled) return;
         settled = true;
+        if (timer) clearTimeout(timer);
         cleanup();
         reject(error);
       };
       const finish = () => {
         if (settled || completed !== candidates.length) return;
         settled = true;
+        if (timer) clearTimeout(timer);
         cleanup();
         resolve(results);
       };
+      if (Number.isFinite(deadlineMs)) {
+        const remaining = Math.max(0, deadlineMs - Date.now());
+        timer = setTimeout(async () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          await Promise.all(this.workers.map((worker) => worker.terminate()));
+          resolve(null);
+        }, remaining);
+      }
       const assign = (worker) => {
         if (next >= candidates.length) return;
         const index = next++;
@@ -320,9 +343,9 @@ class BattleWorkerPool {
   }
 }
 
-function scoreCandidatesParallel(pool, candidates, locked, seedList) {
-  if (pool) return pool.run(candidates, locked, seedList).then((rows) =>
-    rows.map((results, index) => summarizeCandidate(candidates[index], results)),
+function scoreCandidatesParallel(pool, candidates, locked, seedList, deadlineMs) {
+  if (pool) return pool.run(candidates, locked, seedList, { deadlineMs }).then((rows) =>
+    rows && rows.map((results, index) => summarizeCandidate(candidates[index], results)),
   );
   return Promise.resolve(candidates.map((candidate) => scoreCandidate(candidate, locked, seedList)));
 }
@@ -340,14 +363,25 @@ export function optimizeCounter(
 ) {
   const { locked, candidates, seedList, firstSeeds, shouldScreen, shortlist } =
     prepareCounterSearch(defender, options);
+  const deadlineMs = options.deadlineMs ?? Number.POSITIVE_INFINITY;
   let rows;
   let evaluatedMatches;
+  if (Date.now() >= deadlineMs) {
+    const selected = summarizeCandidate(candidates[0], []);
+    return {
+      locked,
+      selected,
+      candidates: [selected],
+      evaluatedMatches: 0,
+      screening: { initialSeeds: 0, shortlist: 1, totalSeeds: seedList.length, fallback: true },
+    };
+  }
   if (!shouldScreen) {
-    rows = candidates.map((candidate) => scoreCandidate(candidate, locked, seedList));
+    rows = candidates.map((candidate) => scoreCandidate(candidate, locked, seedList, [], deadlineMs));
     evaluatedMatches = candidates.length * seedList.length;
   } else {
     const screened = candidates.map((candidate) =>
-      scoreCandidate(candidate, locked, firstSeeds),
+      scoreCandidate(candidate, locked, firstSeeds, [], deadlineMs),
     );
     const finalistIndexes = new Set(
       [...screened].sort(compareCandidates).slice(0, shortlist).map((row) => row.index),
@@ -355,7 +389,7 @@ export function optimizeCounter(
     const remainingSeeds = seedList.slice(firstSeeds.length);
     rows = screened.map((row) =>
       finalistIndexes.has(row.index)
-        ? scoreCandidate(row, locked, remainingSeeds, row.results)
+        ? scoreCandidate(row, locked, remainingSeeds, row.results, deadlineMs)
         : row,
     );
     evaluatedMatches =
@@ -371,6 +405,7 @@ export function optimizeCounter(
       initialSeeds: firstSeeds.length,
       shortlist: shouldScreen ? Math.min(shortlist, candidates.length) : candidates.length,
       totalSeeds: seedList.length,
+      ...(Date.now() >= deadlineMs ? { fallback: true } : {}),
     },
   };
 }
@@ -389,6 +424,19 @@ export async function optimizeCounterParallel(defender, options = {}) {
     shouldScreen,
     shortlist,
   } = prepareCounterSearch(defender, options);
+  const deadlineMs = options.deadlineMs ?? Number.POSITIVE_INFINITY;
+  if (Date.now() >= deadlineMs) {
+    const selected = summarizeCandidate(candidates[0], []);
+    return {
+      locked,
+      selected,
+      candidates: [selected],
+      evaluatedMatches: 0,
+      screening: { initialSeeds: 0, shortlist: 1, totalSeeds: seedList.length, fallback: true },
+    };
+  }
+  // A deadline is a caller safety boundary. Keep the work in this thread so
+  // every matchup can observe it before starting another simulation.
   const workerCount = options.workerCount;
   const count = Math.min(
     candidates.length,
@@ -399,21 +447,34 @@ export async function optimizeCounterParallel(defender, options = {}) {
   let evaluatedMatches;
   try {
     if (!shouldScreen) {
-      rows = await scoreCandidatesParallel(pool, candidates, locked, seedList);
+      rows = pool
+        ? await scoreCandidatesParallel(pool, candidates, locked, seedList, deadlineMs)
+        : candidates.map((candidate) => scoreCandidate(candidate, locked, seedList, [], deadlineMs));
+      if (!rows) {
+        const selected = summarizeCandidate(candidates[0], []);
+        return { locked, selected, candidates: [selected], evaluatedMatches: 0, screening: { initialSeeds: 0, shortlist: 1, totalSeeds: seedList.length, fallback: true } };
+      }
       evaluatedMatches = candidates.length * seedList.length;
     } else {
-      const screened = await scoreCandidatesParallel(pool, candidates, locked, firstSeeds);
+      const screened = pool
+        ? await scoreCandidatesParallel(pool, candidates, locked, firstSeeds, deadlineMs)
+        : candidates.map((candidate) => scoreCandidate(candidate, locked, firstSeeds, [], deadlineMs));
+      if (!screened) {
+        const selected = summarizeCandidate(candidates[0], []);
+        return { locked, selected, candidates: [selected], evaluatedMatches: 0, screening: { initialSeeds: 0, shortlist: 1, totalSeeds: seedList.length, fallback: true } };
+      }
       const finalistIndexes = new Set(
         [...screened].sort(compareCandidates).slice(0, shortlist).map((row) => row.index),
       );
       const remainingSeeds = seedList.slice(firstSeeds.length);
       const finalists = candidates.filter((candidate) => finalistIndexes.has(candidate.index));
-      const expanded = await scoreCandidatesParallel(
-        pool,
-        finalists,
-        locked,
-        remainingSeeds,
-      );
+      const expanded = pool
+        ? await scoreCandidatesParallel(pool, finalists, locked, remainingSeeds, deadlineMs)
+        : finalists.map((candidate) => scoreCandidate(candidate, locked, remainingSeeds, [], deadlineMs));
+      if (!expanded) {
+        const selected = summarizeCandidate(candidates[0], []);
+        return { locked, selected, candidates: [selected], evaluatedMatches: 0, screening: { initialSeeds: 0, shortlist: 1, totalSeeds: seedList.length, fallback: true } };
+      }
       const expandedByIndex = new Map(expanded.map((row) => [row.index, row.results]));
       rows = screened.map((row) =>
         finalistIndexes.has(row.index)
@@ -433,6 +494,7 @@ export async function optimizeCounterParallel(defender, options = {}) {
         initialSeeds: firstSeeds.length,
         shortlist: shouldScreen ? Math.min(shortlist, candidates.length) : candidates.length,
         totalSeeds: seedList.length,
+        ...(Date.now() >= deadlineMs ? { fallback: true } : {}),
       },
     };
   } finally {
@@ -458,7 +520,9 @@ export function createTempoWallet({ storagePath } = {}) {
 }
 
 function mppInputTokens(value) {
-  const values = Array.isArray(value) && value.length ? value : DEFAULT_TEMPO_INPUT_TOKENS;
+  if (!Array.isArray(value) || value.length === 0)
+    throw new Error("Discovery did not advertise an authoritative Tempo input-token allowlist.");
+  const values = value;
   const seen = new Set();
   const tokens = [];
   for (const value of values) {
@@ -469,17 +533,6 @@ function mppInputTokens(value) {
       seen.add(token);
       tokens.push(value);
     }
-  }
-  for (const fallback of DEFAULT_TEMPO_INPUT_TOKENS) {
-    const normalized = fallback.toLowerCase();
-    if (seen.has(normalized)) continue;
-    if (tokens.length >= 16)
-      throw new Error(
-        "Discovery input tokens must leave room for pathUSD and USDC.e MPP fallbacks.",
-      );
-    seen.add(normalized);
-    if (fallback === DEFAULT_TEMPO_INPUT_TOKENS[0]) tokens.unshift(fallback);
-    else tokens.push(fallback);
   }
   return tokens;
 }
@@ -492,16 +545,31 @@ function mppInputTokens(value) {
  */
 export function createMppClient(
   wallet,
-  { supportedInputTokens, swapSlippageBps = 100 } = {},
+  {
+    supportedInputTokens,
+    swapSlippageBps = 100,
+    expectedRecipient,
+    expectedAmount,
+    expectedExternalId,
+    expectedExternalIdPrefix,
+    expectedResumeExternalId,
+    expectedMeta,
+  } = {},
 ) {
   const slippage = Number(swapSlippageBps);
   if (!Number.isInteger(slippage) || slippage < 0 || slippage > 500)
     throw new Error("swapSlippageBps must be a whole number from 0 to 500.");
+  const recipient = expectedRecipient?.toLowerCase();
+  if (recipient !== undefined && !/^0x[0-9a-f]{40}$/.test(recipient))
+    throw new Error("The MPP recipient is not a valid Tempo address.");
+  if (expectedAmount !== undefined && !/^\d+$/.test(String(expectedAmount)))
+    throw new Error("The expected MPP amount must be integer token units.");
   return Mppx.create({
     methods: [
       tempo.charge({
         ...wallet.getMppxParameters(),
         expectedChainId: TEMPO_CHAIN_ID,
+        expectedRecipients: recipient ? [recipient] : undefined,
         mode: "pull",
         autoSwap: {
           tokenIn: mppInputTokens(supportedInputTokens),
@@ -509,6 +577,49 @@ export function createMppClient(
         },
       }),
     ],
+    onChallenge: async (challenge, helpers) => {
+      Challenge.Schema.parse(challenge);
+      if (challenge.method !== "tempo" || challenge.intent !== "charge")
+        throw new Error("War Machines requires an MPP Tempo charge challenge.");
+      const request = challenge.request || {};
+      if (String(request.currency || "").toLowerCase() !==
+          "0x20c0000000000000000000000000000000000000")
+        throw new Error("The MPP challenge currency is not pathUSD.");
+      if (recipient && String(request.recipient || "").toLowerCase() !== recipient)
+        throw new Error("The MPP challenge recipient does not match discovery.");
+      const zeroValueResume =
+        String(request.amount) === "0" &&
+        expectedResumeExternalId &&
+        String(request.externalId || "") === expectedResumeExternalId &&
+        challenge.meta?.kind === "agent-auth";
+      if (
+        expectedExternalId &&
+        !zeroValueResume &&
+        String(request.externalId || "") !== expectedExternalId
+      )
+        throw new Error("The MPP challenge operation is not bound to this request.");
+      if (
+        expectedAmount !== undefined &&
+        String(request.amount) !== String(expectedAmount) &&
+        !zeroValueResume
+      )
+        throw new Error("The MPP challenge amount does not match the requested operation.");
+      if (
+        expectedExternalIdPrefix &&
+        !zeroValueResume &&
+        !String(request.externalId || "").startsWith(expectedExternalIdPrefix)
+      )
+        throw new Error("The MPP challenge operation is not bound to this route.");
+      if (expectedMeta && !zeroValueResume) {
+        for (const [key, value] of Object.entries(expectedMeta)) {
+          if (String(challenge.meta?.[key] ?? request.meta?.[key] ?? "") !== String(value))
+            throw new Error(`The MPP challenge metadata is not bound to ${key}.`);
+        }
+      }
+      // Challenge.fromResponse and tempo.charge perform the SDK's schema,
+      // expiry and chain checks; only after those checks ask the wallet to sign.
+      return helpers.createCredential();
+    },
     maxPaymentRetries: 1,
     polyfill: false,
   });
@@ -519,6 +630,62 @@ async function apiJson(mppx, baseUrl, path, init = {}) {
   headers.set("accept", "application/json");
   const response = await mppx.fetch(`${baseUrl}${path}`, { ...init, headers });
   return jsonResponse(response);
+}
+
+function agentOperationExternalId(method, pathname, { idempotencyKey, body } = {}) {
+  const upper = String(method || "GET").toUpperCase();
+  let match = pathname.match(/^\/api\/attempts\/([a-f0-9-]{36})\/(retry|deploy|forfeit)$/);
+  if (match && upper === "POST") {
+    const prefix = match[2] === "retry" ? "agent-technical-retry" : `agent-${match[2]}`;
+    return `${prefix}:${match[1]}:${idempotencyKey || "missing"}`;
+  }
+  match = pathname.match(/^\/api\/attempts\/([a-f0-9-]{36})\/settlement-confirm$/);
+  if (match && upper === "POST")
+    return `agent-settle:${match[1]}:${body?.transactionHash || ""}`;
+  match = pathname.match(/^\/api\/bounties\/([a-f0-9-]{36})\/(cancel|expire|timeout-forfeit)$/);
+  if (match && upper === "POST")
+    return `agent-control:${match[2]}:${match[1]}:${idempotencyKey || "missing"}`;
+  match = pathname.match(/^\/api\/escrow\/intents\/([a-f0-9-]{36})\/confirm$/);
+  if (match && upper === "POST")
+    return `agent-confirm:${match[1]}:${body?.transactionHash || ""}`;
+  return `agent-private:${upper}:${pathname}`;
+}
+
+/** Make one authenticated REST call with a zero-value MPP proof when needed. */
+export async function requestAgentApi(
+  wallet,
+  { baseUrl = DEFAULT_AGENT_BASE_URL, path, method = "GET", body, idempotencyKey } = {},
+) {
+  if (!wallet) throw new Error("A connected local Tempo wallet is required.");
+  const base = normalizedBaseUrl(baseUrl);
+  const discovery = await jsonResponse(
+    await fetch(`${base}/.well-known/war-machines.json`, { headers: { accept: "application/json" } }),
+  );
+  if (discovery.mode !== "tempo-mainnet" || discovery.payments?.enabled !== true)
+    throw new Error("The selected War Machines origin is not an enabled Tempo mainnet deployment.");
+  if (discovery.payments.identityProofAvailable !== true)
+    throw new Error("This origin does not advertise free MPP identity proofs for agent API access.");
+  const mppRoute = discovery.payments.mppRoutes?.[0];
+  const recipient = mppRoute?.recipient || discovery.payments.mppRecipient;
+  if (!recipient)
+    throw new Error("Discovery did not publish a bounded MPP recipient for authenticated agent access.");
+  const requestUrl = new URL(path, `${base}/`),
+    expectedExternalId = agentOperationExternalId(method, requestUrl.pathname, { idempotencyKey, body });
+  const mppx = createMppClient(wallet, {
+    supportedInputTokens: discovery.payments.supportedInputTokens,
+    swapSlippageBps: discovery.payments.swap?.slippageBps,
+    expectedRecipient: recipient,
+    expectedAmount: "0",
+    expectedExternalId,
+  });
+  const headers = { accept: "application/json" };
+  if (body !== undefined) headers["content-type"] = "application/json";
+  if (idempotencyKey !== undefined) headers["idempotency-key"] = idempotencyKey;
+  return apiJson(mppx, base, path, {
+    method,
+    headers,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
 }
 
 async function retryRequest(operation, { attempts = 4, delay = 250, shouldRetry } = {}) {
@@ -597,6 +764,20 @@ function safeSummary(bounty) {
   };
 }
 
+export function terminalPaymentMode(attempt) {
+  const payment = attempt?.payment || {};
+  const paid =
+    ["settled", "refunded"].includes(attempt?.status) &&
+    payment.finalized === true &&
+    !payment.technicalFailure;
+  if (paid) return "paid";
+  if (payment.technicalFailure || payment.retryAvailable) return "technical-recovery";
+  if (["awaiting-signatures", "ready-to-settle", "queued", "running"].includes(attempt?.status))
+    return "awaiting-settlement";
+  if (attempt?.status === "refunded") return "lost";
+  return "monitoring-timeout";
+}
+
 /** Run discovery → rank → preflight → enter → optimize → deploy → monitor. */
 export async function runOptimalBounty({
   wallet,
@@ -612,13 +793,15 @@ export async function runOptimalBounty({
   if (!wallet) throw new Error("A connected local Tempo wallet is required.");
   const base = normalizedBaseUrl(baseUrl);
   pathUsdUnits(maxEntry);
-  const [discoveryResponse, bountiesResponse] = await Promise.all([
+  const [discoveryResponse, bountiesResponse, rulesResponse] = await Promise.all([
     fetch(`${base}/.well-known/war-machines.json`, {
       headers: { accept: "application/json" },
     }),
     fetch(`${base}/api/bounties`, { headers: { accept: "application/json" } }),
+    fetch(`${base}/api/rules`, { headers: { accept: "application/json" } }),
   ]);
   const discovery = await jsonResponse(discoveryResponse);
+  const rules = await jsonResponse(rulesResponse);
   if (discovery.mode !== "tempo-mainnet" || discovery.payments?.enabled !== true)
     throw new Error("The selected War Machines origin is not an enabled Tempo mainnet deployment.");
   if (
@@ -628,6 +811,14 @@ export async function runOptimalBounty({
     discovery.payments.directEscrow !== true
   )
     throw new Error("Discovery failed the pinned Tempo chain, token or escrow checks.");
+  if (!dryRun && discovery.payments.acceptingNewBounties !== true)
+    throw new Error("The live escrow is recovery-only; refusing to start a new paid entry.");
+  if (
+    discovery.versions?.hash &&
+    rules.versions?.hash &&
+    discovery.versions.hash !== rules.versions.hash
+  )
+    throw new Error("The live engine hash changed between discovery and rules; refusing to spend.");
 
   const bounties = await jsonResponse(bountiesResponse);
   const ranked = rankBounties(bounties, { maxEntry, titleQuery });
@@ -647,16 +838,32 @@ export async function runOptimalBounty({
       selected: safeSummary(ranked[0]),
     };
 
-  const mppx = createMppClient(wallet, {
-    supportedInputTokens: discovery.payments.supportedInputTokens,
+  const inputTokens = discovery.payments.supportedInputTokens;
+  const mppRoute = discovery.payments.mppRoutes?.find(
+    (route) => route.path === "/api/bounties/{id}/attempts" && route.method === "POST",
+  );
+  const mppRecipient = mppRoute?.recipient || discovery.payments.mppRecipient;
+  if (discovery.payments.mpp && !mppRecipient)
+    throw new Error("Discovery did not bind the paid entry route to an MPP recipient.");
+  const mppOptions = {
+    supportedInputTokens: inputTokens,
     swapSlippageBps: discovery.payments.swap?.slippageBps,
-  });
+    expectedRecipient: mppRecipient,
+    expectedAmount: "0",
+  };
   const from = await connectedAccount(wallet);
   const skipped = [];
   let entry;
   let selectedBounty;
   for (const bounty of ranked) {
     const key = randomKey("wm_enter");
+    const mppx = createMppClient(wallet, {
+      ...mppOptions,
+      expectedAmount: pathUsdUnits(bounty.entry).toString(),
+      expectedExternalIdPrefix: "entry:",
+      expectedMeta: { kind: "entry", bounty: bounty.id },
+      expectedResumeExternalId: `resume:agent-bounty-entry:${bounty.id}:${key}`,
+    });
     const body = {
       maxEntry,
       maxPlatformFeeBps: 250,
@@ -731,8 +938,19 @@ export async function runOptimalBounty({
   if (Number(entry.build?.remainingSeconds || 0) < 30)
     throw new Error("The confirmed bounty left less than 30 seconds to deploy a safe counter.");
 
-  const optimized = await optimizeCounterParallel(entry.defender, { seeds: screenSeeds });
+  const buildDeadline = Number(entry.build?.deadline || 0);
+  const searchDeadline = buildDeadline > 0 ? buildDeadline - 5_000 : Number.POSITIVE_INFINITY;
+  const optimized = await optimizeCounterParallel(entry.defender, {
+    seeds: screenSeeds,
+    deadlineMs: searchDeadline,
+  });
+  if (buildDeadline > 0 && Date.now() >= buildDeadline)
+    throw new Error("The engineering deadline elapsed before a counter could be submitted.");
   const deployKey = randomKey("wm_deploy");
+  const mppx = createMppClient(wallet, {
+    ...mppOptions,
+    expectedExternalId: `agent-deploy:${entry.id}:${deployKey}`,
+  });
   const deployBody = { blueprint: optimized.selected.packed };
   let attempt = await retryRequest(
     () =>
@@ -747,7 +965,7 @@ export async function runOptimalBounty({
   const deadline = Date.now() + Math.max(0, Math.min(Number(pollSeconds), 90)) * 1000;
   let pollDelay = 250;
   while (
-    !["settled", "refunded", "ready-to-settle", "awaiting-signatures"].includes(attempt.status) &&
+    !["settled", "refunded"].includes(attempt.status) &&
     Date.now() < deadline
   ) {
     await sleep(pollDelay);
@@ -762,8 +980,12 @@ export async function runOptimalBounty({
       { shouldRetry: transientDeployRace },
     );
   }
+  const finalPayment = attempt.payment || {};
+  const mode = terminalPaymentMode(attempt);
+  const paid = mode === "paid";
   return {
-    mode: "completed",
+    mode,
+    completed: paid,
     baseUrl: base,
     wallet: from,
     bounty: safeSummary(selectedBounty),

@@ -2,11 +2,11 @@
 
 A modular engineering battle game for desktop and mobile browsers. Build a machine, set its doctrine, scout a defender and design a counter. Battles run automatically. The workshop and ordinary machine links work on a static host; **public bounties use the bundled Worker/D1 backend and direct Tempo escrow**.
 
-No hosted AI calls, external fonts, asset CDNs or analytics. Every machine, texture and arena is generated locally. The public release uses direct Tempo mainnet escrow calls for bounties; the Worker never holds a payout or custody key.
+No hosted AI calls, external fonts, asset CDNs or analytics. Every machine, texture and arena is generated locally. The public release uses direct Tempo mainnet escrow calls for bounties. V5 intentionally uses one trusted settlement signer for this small trial, and native MPP briefly forwards the payer's pathUSD through a bounded relayer before the matching escrow call.
 
 ## Hosting and cost
 
-The public Worker/D1 deployment runs at [war-machine.sssmpp.chatgpt.site](https://war-machine.sssmpp.chatgpt.site). It verifies exact Tempo escrow receipts and records signed results; it does not custody pathUSD. Read [docs/HOSTING.md](docs/HOSTING.md) before operating another host.
+The public Worker/D1 deployment runs at [war-machine.sssmpp.chatgpt.site](https://war-machine.sssmpp.chatgpt.site). It verifies exact Tempo escrow receipts and records signed results. During native MPP forwarding, the configured relayer temporarily controls the payment until it forwards the matching V5 call; the Worker does not hold player payout reserves. Read [docs/HOSTING.md](docs/HOSTING.md) before operating another host.
 
 Automatic settlement deployment, secret bindings, pause controls and recovery are documented in [docs/AUTOMATIC-SETTLEMENT.md](docs/AUTOMATIC-SETTLEMENT.md). Rendering measurements are in [docs/RENDER-PERFORMANCE.md](docs/RENDER-PERFORMANCE.md).
 
@@ -46,12 +46,12 @@ The engineer loop tests candidates with multiple seeds and both spawn positions,
 3. Public scouts show terrain, construction limits, cost, mass, fitted-part count and weapon count. The defender layout, doctrine, colors, firing arcs and blueprint stay sealed.
 4. The challenger approves the entry and calls the escrow. After the Worker confirms that exact on-chain entry event, it reveals the defender only to that challenger and starts the counter-build clock.
 5. The challenger receives the revealed defender and a timed construction window, then deploys one valid counter. The Worker binds both builds, rules, terrain, engine release and seed into the result commitment.
-6. Two independent signer services replay and attest the result. A dedicated relay submits settlement automatically; the UI shows Paid, Lost or Draw only after verifying the finalized receipt. No player settlement confirmation is needed.
-7. An idle bounty can be cancelled by its creator. Missing the counter-build deadline is a real loss and the direct entry remains with the creator. V5 leaves a short relay grace; an unresolved infrastructure timeout reopens the bounty and grants the original challenger one sponsored retry without another entry payment. Expired idle bounties release their reward.
+6. The configured V5 settlement signer replays and signs the result. A dedicated relay submits settlement automatically; the UI shows Paid, Loss settled or Draw settled only after verifying the finalized receipt. No player settlement confirmation is needed. This is a trusted single-signer trial and does not provide independent two-signer protection.
+7. An idle bounty can be cancelled by its creator. Missing the counter-build deadline is a real loss and the direct entry remains with the creator. V5 leaves a short relay grace; an unresolved infrastructure timeout reopens the bounty and grants the original challenger one sponsored retry without another entry payment. That technical recovery is not a refund of the original entry. Expired idle bounties release their reward.
 
 Construction credits are the parts budget. Bounty amounts use 6-decimal pathUSD on Tempo mainnet. Agents supply their own code, model and compute. [docs/AGENT-API.md](docs/AGENT-API.md) documents the API and dependency-free example client; [docs/PAYMENTS-OPERATIONS.md](docs/PAYMENTS-OPERATIONS.md) documents settlement and optional MPP service charging.
 
-Localhost links only work on the same computer. The public deployment uses a Worker and D1 for shared bounties and account state; direct pathUSD value stays in the verified escrow.
+Localhost links only work on the same computer. The public deployment uses a Worker and D1 for shared bounties and account state; funded rewards stay in the verified escrow. Native MPP entry and reward payments pass through the bounded relayer before the escrow transaction, so that forwarding interval is custodial.
 
 ## Engineering edition
 

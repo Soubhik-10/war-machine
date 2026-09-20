@@ -4,7 +4,9 @@
 
 The retired v1 escrow remains immutable at [`0x461eefD1c4bcbE76C470487cF18b892fCD76d494`](https://explore.tempo.xyz/address/0x461eefD1c4bcbE76C470487cF18b892fCD76d494). Its historical record remains in [`contracts/deployments/tempo-mainnet.json`](../contracts/deployments/tempo-mainnet.json); do not send it new bounty funds.
 
-The public application prepares direct wallet calls to this escrow and verifies the emitted events. It does not custody player funds or contain settlement private keys. The current V5 small-amount trial uses one fixed settlement signer (`settlementQuorum = 1`) so the Worker can settle automatically; that is a limited-trial trust boundary, not independent multi-party protection. Do not increase bounty sizes until a reviewed multi-signer contract version is deployed.
+The public application prepares direct wallet calls to this escrow and verifies the emitted events. The current V5 small-amount trial uses one fixed settlement signer (`settlementQuorum = 1`) so the Worker can settle automatically; that is a limited-trial trusted-operator boundary, not independent multi-party protection. Native MPP temporarily forwards payer funds through the bounded relayer before the matching escrow call. Keep the active V5 trial at its reviewed small-amount cap. A separately reviewed multi-signer contract is an optional future hardening path; V6 is source-only in this checkout.
+
+`WarMachineBountyEscrowV6.sol` is a source and test candidate, not a deployed address or active payment rail. It keeps the one-signer V5 trust model while holding entries in escrow. A signed win or loss/draw pays the creator's entry from that reserve; after the deadline and two-minute grace, either legacy-named timeout entrypoint refunds the held entry to the challenger and emits `TimedOutAttemptRefunded`. Do not configure the Worker or public discovery to use V6 until its deployment, address, bytecode verification, migration and backend integration have been reviewed.
 
 ## Live immutable configuration
 
@@ -26,15 +28,15 @@ The token, fee and attempt-window values are the V5 deployment policy. Replace t
 - It accepts one configured TIP-20 token only at deployment. The included mainnet deploy script fixes this to Tempo pathUSD: `0x20C0000000000000000000000000000000000000`.
 - The 2.5% reward fee and its recipient (`0xc20131e9132888993de6519D486E5558A5DbCb7A`) are immutable bytecode constants.
 - The payout recipient is always the active challenger. A result signer cannot substitute a wallet, a fee rate, a token, a reward, or an entry amount.
-- The creator receives the separately disclosed entry amount after a completed non-technical attempt. The platform receives no hidden entry fee.
-- A creator cannot cancel or expire while an attempt is active. Missing the build deadline is a real loss; after the V5 grace, anyone can call the timeout finalizer and the entry remains with the creator. If a committed result was not settled because infrastructure failed, the Worker calls `reopenTimedOutAttempt` instead, reopens the bounty, and grants one sponsored retry without another user payment. Expiry only returns an idle bounty's unused reward reserve.
+- V5 transfers the separately disclosed entry amount directly to the creator when the challenger enters. The platform receives no hidden entry fee; settlement reports the entry as already paid. V6 instead holds that entry in escrow until settlement or a timeout refund.
+- A creator cannot cancel or expire while an attempt is active. Missing the build deadline is a real loss; after the V5 grace, anyone can call the timeout finalizer and the entry remains with the creator. If a committed result was not settled because infrastructure failed, the Worker calls `reopenTimedOutAttempt` instead, reopens the bounty, and grants one sponsored retry without another user payment. That technical recovery is not a refund of the original entry. Expiry only returns an idle bounty's unused reward reserve.
 - The pause guardian can stop new bounties and entries, but cannot block settlement, cancellation, expiry, or player refunds. There is no owner withdrawal, upgrade function, proxy, rescue method, or arbitrary transfer function.
-- A battle outcome needs the constructor's fixed EIP-712 quorum. Current V5 uses one signer for a small trial; the constructor permanently fixes that set and quorum. Use an independently reviewed multi-signer contract for a public release.
+- A battle outcome needs the constructor's fixed EIP-712 quorum. Current V5 uses one trusted signer for a small trial; quorum one does not protect against compromise. A separately reviewed multi-signer contract is optional future hardening, not an active V5 guarantee.
 - Exact token balance checks reject fee-on-transfer or non-conforming token behavior. All value fields are integer token base units; pathUSD uses six decimals.
 
 ## What it does not prove
 
-The on-chain contract cannot simulate the game. Settlement signers are an oracle for the off-chain deterministic replay. A quorum prevents one compromised signer from fabricating a result, but it does not make the oracle trustless. The complete replay must be published and its canonical hash must equal `resultHash` in the signed settlement. No administrator can reverse a settlement.
+The on-chain contract cannot simulate the game. Settlement signers are an oracle for the off-chain deterministic replay. The active quorum of one does not prevent the configured signer from fabricating a result; the trusted operator is the stated V5 trust boundary. A future quorum greater than one would reduce that risk but would still not make the oracle trustless. The complete replay must be published and its canonical hash must equal `resultHash` in the signed settlement. No administrator can reverse a settlement.
 
 V5's relayer methods are intentionally narrower than a general payment channel: the Worker verifies the MPP receipt, then submits the exact payer, terms, reward or entry supplied by the route. The contract never lets the relayer choose a different bounty recipient or settlement result. Direct wallet methods remain available for browser players.
 
@@ -45,7 +47,7 @@ stateDiagram-v2
     [*] --> Open: creator funds reward
     Open --> Active: challenger escrows entry
     Active --> Claimed: signed challenger win
-    Active --> Open: signed loss/draw or technical refund
+    Active --> Open: signed loss/draw or technical retry
     Active --> Open: timeout finalizer sends entry to creator
     Active --> Open: technical reopen grants one sponsored retry
     Open --> Cancelled: creator cancels
@@ -80,7 +82,7 @@ Do not take a payment through the Site until all of these are true:
 
 1. Have an independent Solidity reviewer inspect the exact deployed bytecode and source.
 2. Rehearse the configured V5 signer, pause guardian, expiry, cancellation, incorrect signatures, signer outage, wrong token, and wallet rejection. A future multi-signer release must rehearse each independent signer.
-3. Keep the V5 settlement signer key in a dedicated server secret store and replace the trial signer with a separately operated multi-signer replay/attestation service before public funds. The retired custodial payout queue must remain disabled.
+3. Keep the V5 settlement signing secret in the dedicated trusted Worker secret store and keep the retired custodial payout queue disabled. A separately operated multi-signer replay/attestation service is optional future hardening, not a prerequisite for the active small-amount V5 trial.
 4. Rehearse direct wallet calls for `approve`, `createBounty`, `enterBounty`, settlement, timeout forfeiture, technical reopen, cancellation and expiry. For V5, also rehearse exact MPP challenge/retry, relayer allowance, relay recovery and the sponsored technical retry.
 5. Display this contract address, token, gross reward, 2.5% fee, winner payout, entry amount, expiry, attempt deadline, signer quorum, result hash, and relevant events before every signing request.
 6. Test first with a deliberately low real-money cap and no fee sponsorship. Paid-entry prize rules, tax, sanctions, consumer protection, and payment-provider requirements still need an operator review.
@@ -230,7 +232,7 @@ the same deployer with its keystore:
 Foundry asks locally for the keystore password. Neither the password nor the raw key belongs in
 chat, a Site environment setting, or the repository.
 
-### Creating the two result signers
+### Legacy/future multi-signer procedure
 
 They are not funded wallets and do not pay transaction fees. They are two local, encrypted
 keypairs whose **public** addresses are fixed into the escrow. A result needs both signatures, so

@@ -52,6 +52,12 @@ const TOOLS = [
     ["bountyId"],
   ),
   tool(
+    "war_machines_get_attempt",
+    "Inspect an authorized attempt, including its current payment state, deadline, result and any sponsored retry credit.",
+    { attemptId: string("Attempt UUID") },
+    ["attemptId"],
+  ),
+  tool(
     "war_machines_validate_blueprint",
     "Validate a readable machine or packed blueprint against the live rules.",
     {
@@ -116,6 +122,15 @@ const TOOLS = [
     ["attemptId", "blueprint", "idempotencyKey"],
   ),
   tool(
+    "war_machines_retry_attempt",
+    "Use the one-time sponsored retry after an infrastructure settlement timeout. This does not charge another entry and is never a player loss recovery.",
+    {
+      attemptId: string("Attempt UUID"),
+      idempotencyKey: string("Unique 16-100 character retry key."),
+    },
+    ["attemptId", "idempotencyKey"],
+  ),
+  tool(
     "war_machines_forfeit_attempt",
     "Finalize an expired counter-build window through the immutable timeout path.",
     {
@@ -158,6 +173,53 @@ const TOOLS = [
       idempotencyKey: string("Unique 16-100 character retry key."),
     },
     ["bountyId", "action", "idempotencyKey"],
+  ),
+  tool(
+    "war_machines_list_builds",
+    "List the authenticated account's saved blueprint vault.",
+  ),
+  tool(
+    "war_machines_save_build",
+    "Save a canonical blueprint in the authenticated account's build vault.",
+    {
+      name: string("Saved build name."),
+      blueprint: object("Canonical packed blueprint."),
+      idempotencyKey: string("Unique 16-100 character retry key."),
+    },
+    ["name", "blueprint", "idempotencyKey"],
+  ),
+  tool(
+    "war_machines_update_build",
+    "Replace one saved blueprint in the authenticated account's vault.",
+    {
+      buildId: string("Saved build UUID."),
+      name: string("Saved build name."),
+      blueprint: object("Canonical packed blueprint."),
+      idempotencyKey: string("Unique 16-100 character retry key."),
+    },
+    ["buildId", "name", "blueprint", "idempotencyKey"],
+  ),
+  tool(
+    "war_machines_delete_build",
+    "Delete one saved blueprint from the authenticated account's vault.",
+    { buildId: string("Saved build UUID.") },
+    ["buildId"],
+  ),
+  tool(
+    "war_machines_list_bookmarks",
+    "List bounties bookmarked by the authenticated account.",
+  ),
+  tool(
+    "war_machines_save_bookmark",
+    "Bookmark a bounty for the authenticated account.",
+    { bountyId: string("Bounty UUID.") },
+    ["bountyId"],
+  ),
+  tool(
+    "war_machines_remove_bookmark",
+    "Remove a bounty bookmark from the authenticated account.",
+    { bountyId: string("Bounty UUID.") },
+    ["bountyId"],
   ),
 ];
 
@@ -218,6 +280,11 @@ const apiSpec = (name, args) => {
         method: "GET",
         path: `/api/bounties/${requiredString(args.bountyId, "bountyId")}`,
       };
+    case "war_machines_get_attempt":
+      return {
+        method: "GET",
+        path: `/api/attempts/${requiredString(args.attemptId, "attemptId")}`,
+      };
     case "war_machines_validate_blueprint":
       return { method: "POST", path: "/api/blueprints/validate", body: args };
     case "war_machines_create_bounty": {
@@ -257,6 +324,13 @@ const apiSpec = (name, args) => {
       const { attemptId: _, idempotencyKey: __, ...body } = args;
       return { method: "POST", path: `/api/attempts/${attemptId}/deploy`, body, idempotencyKey };
     }
+    case "war_machines_retry_attempt": {
+      const idempotencyKey = requiredString(args.idempotencyKey, "idempotencyKey");
+      if (!validIdempotencyKey(idempotencyKey))
+        throw new Error("idempotencyKey must contain 16-100 letters, numbers, _ or -.");
+      const attemptId = requiredString(args.attemptId, "attemptId");
+      return { method: "POST", path: `/api/attempts/${attemptId}/retry`, body: {}, idempotencyKey };
+    }
     case "war_machines_forfeit_attempt": {
       const idempotencyKey = requiredString(args.idempotencyKey, "idempotencyKey");
       if (!validIdempotencyKey(idempotencyKey))
@@ -290,6 +364,31 @@ const apiSpec = (name, args) => {
         throw new Error("action must be cancel, expire or timeout-forfeit.");
       return { method: "POST", path: `/api/bounties/${bountyId}/${action}`, body: {}, idempotencyKey };
     }
+    case "war_machines_list_builds":
+      return { method: "GET", path: "/api/me/builds" };
+    case "war_machines_save_build": {
+      const idempotencyKey = requiredString(args.idempotencyKey, "idempotencyKey");
+      if (!validIdempotencyKey(idempotencyKey))
+        throw new Error("idempotencyKey must contain 16-100 letters, numbers, _ or -.");
+      const { idempotencyKey: _, ...body } = args;
+      return { method: "POST", path: "/api/me/builds", body, idempotencyKey };
+    }
+    case "war_machines_update_build": {
+      const idempotencyKey = requiredString(args.idempotencyKey, "idempotencyKey");
+      if (!validIdempotencyKey(idempotencyKey))
+        throw new Error("idempotencyKey must contain 16-100 letters, numbers, _ or -.");
+      const buildId = requiredString(args.buildId, "buildId");
+      const { buildId: _, idempotencyKey: __, ...body } = args;
+      return { method: "PATCH", path: `/api/me/builds/${buildId}`, body, idempotencyKey };
+    }
+    case "war_machines_delete_build":
+      return { method: "DELETE", path: `/api/me/builds/${requiredString(args.buildId, "buildId")}` };
+    case "war_machines_list_bookmarks":
+      return { method: "GET", path: "/api/me/bookmarks" };
+    case "war_machines_save_bookmark":
+      return { method: "PUT", path: `/api/me/bookmarks/${requiredString(args.bountyId, "bountyId")}` };
+    case "war_machines_remove_bookmark":
+      return { method: "DELETE", path: `/api/me/bookmarks/${requiredString(args.bountyId, "bountyId")}` };
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

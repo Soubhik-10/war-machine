@@ -18,6 +18,6 @@ Agents can read discovery and validate blueprints without signing in. An agent c
 
 ## Key handling
 
-Keep browser sessions, wallet seed phrases, private keys, deployment credentials, and the two result signer keystores separate. Never paste a private key into the Site, D1, Git, a browser form, or an agent prompt. The result signer script prompts for each encrypted keystore passphrase locally.
+Keep browser sessions, wallet seed phrases, private keys, deployment credentials, and the active V5 result signing secret separate. The live Worker uses one configured signing secret; any offline encrypted keystore for local or recovery signing stays off the Site, D1, Git, browser, and agent prompt. Never paste a private key into those systems. The result signer script prompts for its encrypted keystore passphrase locally.
 
 For payment flow details, see [PAYMENTS-OPERATIONS.md](PAYMENTS-OPERATIONS.md).
