@@ -628,6 +628,149 @@
 .official-result .hint {
   font-size: 11px;
 }
+.payment-status {
+  position: relative;
+  overflow: hidden;
+  margin: 22px 0 28px;
+  padding: 24px 28px 22px 30px;
+  border: 1px solid #35505b;
+  border-left: 3px solid var(--gold);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 94% 0%, #5b795b20, transparent 42%),
+    linear-gradient(135deg, #151e24, #12181d 72%);
+  box-shadow: 0 16px 42px #00000025;
+}
+.payment-status::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, #edb85d, #74c8b8 55%, transparent);
+  opacity: .65;
+}
+.payment-status h3 {
+  margin: 0 0 7px;
+  color: #f1eee4;
+  font-size: 17px;
+  letter-spacing: .01em;
+}
+.payment-status > p:first-of-type {
+  max-width: 880px;
+  margin: 0;
+  color: #aebdb8;
+  line-height: 1.65;
+}
+.payment-status .payment-timeline {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 20px 0 3px;
+}
+.payment-status .payment-timeline li {
+  min-height: 52px;
+  padding: 11px 12px;
+  border: 1px solid #2d4149;
+  border-radius: 9px;
+  background: #0d161b80;
+}
+.payment-status .payment-timeline li.complete {
+  border-color: #35594f;
+  background: #17312a55;
+}
+.payment-status .payment-timeline li.current {
+  border-color: #79613a;
+  background: #3a2b1640;
+}
+.payment-status .payment-timeline small {
+  color: #859994;
+  line-height: 1.4;
+}
+.payment-status > p:last-child {
+  margin: 17px 0 0;
+  color: #aeb7b3;
+  font-size: 11px;
+}
+.official-result {
+  position: relative;
+  overflow: hidden;
+  max-width: 940px;
+  margin: 30px auto 70px;
+  padding: 40px 42px 34px;
+  border: 1px solid #345060;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% -15%, #42617035, transparent 55%),
+    linear-gradient(145deg, #182733, #14202b 70%);
+  box-shadow: 0 24px 70px #00000035;
+}
+.official-result::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #6ebcb3, transparent);
+  opacity: .75;
+}
+.official-result.won {
+  border-color: #9b8050;
+  background:
+    radial-gradient(circle at 50% -15%, #d6a64b38, transparent 58%),
+    linear-gradient(145deg, #292a24, #1b2528 72%);
+}
+.official-result > .eyebrow {
+  color: #8fd0c0;
+  letter-spacing: .18em;
+}
+.official-result.won > .eyebrow { color: var(--gold); }
+.official-result h2 {
+  margin: 17px 0 25px;
+  font-size: clamp(42px, 6vw, 68px);
+  letter-spacing: .025em;
+  text-shadow: 0 4px 22px #00000035;
+}
+.official-result .contract-economy {
+  gap: 12px;
+  margin: 0 0 25px;
+  padding: 0;
+  border: 0;
+}
+.official-result .contract-economy > div {
+  padding: 16px 14px 14px;
+  border: 1px solid #344d59;
+  border-radius: 10px;
+  background: #0f1a2280;
+}
+.official-result.won .contract-economy > div:first-child {
+  border-color: #8b764a;
+  background: #5a46201f;
+}
+.official-result .contract-economy b { font-size: 32px; }
+.official-result .contract-economy small { color: #8fa39e; }
+.official-result > p:not(.hint):not(.error-message) {
+  max-width: 720px;
+  margin: 0 auto;
+  color: #c0cbc6;
+}
+.official-result .bounty-actions {
+  justify-content: center;
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid #30444f;
+}
+.official-result .bounty-actions button {
+  min-width: 150px;
+}
+.official-result .result-identity {
+  background: #0e1c2180;
+  border-color: #38545b;
+}
+.official-result .hint {
+  max-width: 700px;
+  margin-top: 22px;
+  color: #849a96;
+}
 .trial-spinner {
   font-size: 60px;
   color: #c3ba85;
@@ -854,6 +997,17 @@
   .official-result {
     padding: 30px 20px;
     margin: 20px 0;
+  }
+  .payment-status {
+    margin: 16px 0 20px;
+    padding: 20px 17px 18px 19px;
+  }
+  .payment-status .payment-timeline {
+    grid-template-columns: 1fr 1fr;
+  }
+  .official-result {
+    border-radius: 13px;
+    padding: 30px 20px 24px;
   }
   .official-result h2,
   .trial-wait h2 {
