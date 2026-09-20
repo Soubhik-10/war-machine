@@ -18,4 +18,7 @@ test("V6 board keeps V5 bounty cards visible and read-only", async () => {
   assert.match(source, /!legacyV5 && own && \["open", "completed"\]/);
   assert.match(source, /!legacyV5 && me && isExpired/);
   assert.match(source, /historical entry/);
+  assert.match(source, /isExpired = deadlinePassed && b\.status === "open"/);
+  assert.match(source, /!legacyV5 && me && isExpired && b\.status === "open"/);
+  assert.match(source, /Active paid attempt/);
 });

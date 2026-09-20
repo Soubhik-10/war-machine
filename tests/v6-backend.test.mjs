@@ -275,22 +275,22 @@ test("V6 config exposes the exact EIP712 version 6 domain separator", () => {
   assert.equal(config.technicalRetryEnabled, false);
 });
 
-test("V6 migration guard blocks funded V4 rows and pending escrow holds", async () => {
+test("V6 admission does not brick on funded V4 rows or pending legacy holds", async () => {
   const db = new D1Fixture();
   await seedD1(db, { pendingHold: true });
   db.sqlite.exec(
     `INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,entry_units,reward_units,reserve_units,escrow_bounty_id,fee_policy_version) VALUES ('44444444-4444-4444-8444-444444444444','creator','Mislabelled V4','${blueprintJson}',0,0,'completed',1,1,1,'10000','1000000','1000000','4','pathusd-direct-escrow-v4')`,
   );
-  await assert.rejects(
-    assertV6MigrationReady(db, { escrowVersion: "6" }),
-    (error) => error.status === 503 && /V5|funded|pending/i.test(error.message),
+  assert.deepEqual(
+    await assertV6MigrationReady(db, { escrowVersion: "6" }),
+    { ready: true, isolatedLegacyOperations: true },
   );
   db.sqlite.exec(
     "DELETE FROM bounties WHERE fee_policy_version='pathusd-direct-escrow-v4'",
   );
-  await assert.rejects(
-    assertV6MigrationReady(db, { escrowVersion: "6" }),
-    (error) => error.status === 503 && /pending|hold|funded|active/i.test(error.message),
+  assert.deepEqual(
+    await assertV6MigrationReady(db, { escrowVersion: "6" }),
+    { ready: true, isolatedLegacyOperations: true },
   );
   db.close();
 });

@@ -254,35 +254,10 @@ export async function archivePreV5Bounties(db, config = null) {
 
 export async function assertV6MigrationReady(db, config) {
   if (config?.escrowVersion !== "6") return;
-  // A config flip must not strand a paid V5 request that has not reached the
-  // escrow row yet.  Current V6 holds carry their version in the body; old
-  // holds have no version and therefore fail closed until reconciled.
-  const pendingHolds = (
-    await db
-      .prepare(
-        "SELECT h.id,h.purpose,h.status,b.id AS bounty_id,b.fee_policy_version FROM payment_holds h LEFT JOIN bounties b ON b.id=h.bounty WHERE h.purpose IN ('mpp-create','mpp-entry','direct-create','direct-entry') AND h.status IN ('awaiting-relay','relay-prepared','awaiting-onchain','held') AND (b.id IS NULL OR COALESCE(b.fee_policy_version,'')<>? OR COALESCE(json_extract(h.body,'$.escrowVersion'),'')<>?) LIMIT 1",
-      )
-      .bind(escrowPolicy(config.escrowVersion), config.escrowVersion)
-      .all()
-  ).results;
-  check(
-    pendingHolds.length === 0,
-    "V6 admission is paused while a pending legacy payment operation remains. Recover or refund the original payment before accepting new V6 funds.",
-    503,
-  );
-  const pendingStates = (
-    await db
-      .prepare(
-        "SELECT key FROM payment_kv WHERE key LIKE 'mpp-bounty-state:%' AND json_extract(value,'$.phase')='paid' AND COALESCE(json_extract(value,'$.recoveryRequired'),0)=0 AND (json_extract(value,'$.bounty') IS NULL OR NOT EXISTS (SELECT 1 FROM bounties b WHERE b.id=json_extract(value,'$.bounty') AND b.fee_policy_version=?)) LIMIT 1",
-      )
-      .bind(escrowPolicy(config.escrowVersion))
-      .all()
-  ).results;
-  check(
-    pendingStates.length === 0,
-    "V6 admission is paused while a pending paid MPP operation remains. Recover or refund the original payment before accepting new V6 funds.",
-    503,
-  );
+  // V5/V6 escrows are separate. A stale legacy journal must not brick fresh
+  // V6 admission; operation-specific idempotency and receipt recovery still
+  // protect any old payment when its original request is resumed.
+  return { ready: true, isolatedLegacyOperations: true };
 }
 
 function requireV6PaymentAdmission(config) {
@@ -3189,7 +3164,6 @@ export async function mppCreateBounty(db, config, request, body, key, internal =
     if (denied) return denied;
   }
   if (!existingJournal && (!state || state.phase === "quoted")) {
-    await assertV6MigrationReady(db, config);
     enforcePaidComplexity(unpackChallenge(blueprint).machine);
     requireV6PaymentAdmission(config);
   }
@@ -3559,7 +3533,6 @@ export async function mppEnterBounty(db, config, request, bountyId, body, key, i
     if (denied) return denied;
   }
   if (!existingJournal && (!state || state.phase === "quoted")) {
-    await assertV6MigrationReady(db, config);
     requireV6PaymentAdmission(config);
   }
   if (!existingJournal && (!state || state.phase === "quoted"))
@@ -4051,7 +4024,6 @@ async function directCreateIntent(db, auth, body, key, config) {
       };
     return directPlanFromCreate(config, hold);
   }
-  await assertV6MigrationReady(db, config);
   const count = await db
     .prepare(
       "SELECT COUNT(*) AS total FROM bounties WHERE owner=? AND status IN ('open','busy')",
@@ -4197,7 +4169,6 @@ async function directEntryIntent(db, auth, bountyId, body, key, config) {
       };
     return directPlanFromEntry(config, hold, row);
   }
-  await assertV6MigrationReady(db, config);
   await requireCurrentBounty(db, row, config);
   const created = now();
   await db
