@@ -2448,6 +2448,79 @@ function playBattleSfx(kind, intensity = 1) {
       break;
   }
 }
+function playWeaponSfx(weapon, intensity = 1) {
+  const id = weapon || "cannon";
+  const level = clamp(Number(intensity) || 1, 0.5, 2);
+  const ready = (gap) => soundReady(`weapon:${id}`, gap);
+  switch (id) {
+    case "machinegun":
+    case "gatling":
+      if (ready(id === "gatling" ? 0.045 : 0.065)) {
+        beep(id === "gatling" ? 235 : 330, 0.045, 0.018, "square");
+        noise(0.025, 0.01, 3200);
+      }
+      break;
+    case "railgun":
+      if (ready(0.2)) {
+        beep(760, 0.16, 0.035, "sawtooth");
+        noise(0.12, 0.022, 4800);
+        window.setTimeout(() => beep(180, 0.2, 0.026, "sine"), 50);
+      }
+      break;
+    case "laser":
+      if (ready(0.08)) beep(820 + level * 110, 0.12, 0.026, "sine");
+      break;
+    case "plasma":
+      if (ready(0.12)) {
+        beep(180, 0.18, 0.04, "sine");
+        noise(0.11, 0.015, 700);
+        window.setTimeout(() => beep(80, 0.22, 0.03, "sine"), 40);
+      }
+      break;
+    case "rocket":
+    case "mortar":
+      if (ready(0.18)) {
+        beep(id === "mortar" ? 95 : 130, 0.2, 0.045, "sawtooth");
+        noise(0.16, 0.038, 650);
+      }
+      break;
+    case "flame":
+      if (ready(0.07)) {
+        noise(0.1, 0.03, 1800);
+        beep(210, 0.1, 0.02, "triangle");
+      }
+      break;
+    case "tesla":
+    case "emp":
+      if (ready(0.16)) {
+        beep(id === "tesla" ? 360 : 210, 0.22, 0.03, "sine");
+        beep(id === "tesla" ? 720 : 150, 0.11, 0.018, "triangle");
+      }
+      break;
+    case "cryo":
+      if (ready(0.14)) {
+        beep(980, 0.22, 0.024, "sine");
+        beep(520, 0.16, 0.018, "triangle");
+      }
+      break;
+    case "flak":
+    case "shredder":
+      if (ready(0.1)) {
+        beep(id === "flak" ? 170 : 420, 0.08, 0.03, "square");
+        noise(0.07, 0.022, 2600);
+      }
+      break;
+    case "mine":
+      if (ready(0.22)) beep(120, 0.16, 0.024, "triangle");
+      break;
+    default:
+      if (ready(0.055)) {
+        beep(150 + level * 70, 0.055, 0.028, "square");
+        noise(0.045, 0.016, 2600);
+      }
+      break;
+  }
+}
 function playBattleEventSfx(event) {
   if (!event) return;
   if (event.kind === "overheat") return playBattleSfx("overheat");
@@ -2470,8 +2543,8 @@ function syncBattleSound() {
   for (const effect of battle.effects || []) {
     if (soundSeenEffects.has(effect)) continue;
     soundSeenEffects.add(effect);
-    if (effect.type === "muzzle") playBattleSfx("fire", effect.scale);
-    else if (effect.type === "beam") playBattleSfx("laser", effect.scale);
+    if (effect.type === "muzzle") playWeaponSfx(effect.weapon, effect.scale);
+    else if (effect.type === "beam") playWeaponSfx(effect.weapon || "laser", effect.scale);
     else if (effect.type === "hit" || effect.type === "reactive") playBattleSfx("impact", effect.scale);
     else if (effect.type === "blast") playBattleSfx("explosion", effect.scale);
     else if (effect.type === "intercept") playBattleSfx("intercept", effect.scale);
