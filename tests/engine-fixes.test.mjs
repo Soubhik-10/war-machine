@@ -49,6 +49,26 @@ test('coreless fragments remain vulnerable to containment damage', () => {
   assert.ok(before - after > 0);
 });
 
+test('containment field keeps vehicles inside the contracting ring', () => {
+  const battle = new Battle(PRESETS[0], PRESETS[0], 'foundry', 42, { headless: true });
+  const vehicle = battle.vehicles[0];
+  battle.time = 90;
+  battle.tick = 5400;
+  vehicle.x = 1120;
+  vehicle.y = 740;
+  vehicle.vx = 120;
+  vehicle.vy = 80;
+  battle.updateVehicle = () => {};
+  battle.updateMines = () => {};
+  battle.updateProjectiles = () => {};
+  battle.updateObjectives = () => {};
+  battle.collideVehicles = () => {};
+  battle.step();
+  const distance = Math.hypot(vehicle.x - 600, vehicle.y - 400);
+  assert.ok(distance <= battle.ring - vehicle.radius + 1);
+  assert.ok(battle.events.some((event) => event.text.includes('forced a return')));
+});
+
 test('headless evaluation preserves deterministic battle outcomes', () => {
   const rendered = new Battle(PRESETS[7], PRESETS[0], 'foundry', 913);
   const headless = new Battle(PRESETS[7], PRESETS[0], 'foundry', 913, { headless: true });
