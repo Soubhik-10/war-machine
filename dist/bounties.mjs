@@ -251,6 +251,24 @@ export function createBountyUI(adapter) {
       (error?.status === 503 && /Tempo RPC/i.test(error.message))
     );
   }
+  function friendlyPaymentError(error) {
+    const message = String(error?.message || "Request failed.");
+    if (retryableConfirmation(error))
+      return "Payment submitted, but Tempo is still confirming it. This request is saved; choose Recover request after a moment. Do not pay again.";
+    if (
+      error?.status === 402 &&
+      /proof|credential|already used|already consumed/i.test(message)
+    )
+      return "The payment credential was already used or is still being reconciled. Check the saved request or My runs; do not submit another payment.";
+    if (
+      error?.status === 409 &&
+      /already deployed|different committed counter/i.test(message)
+    )
+      return "This machine submission was already accepted. Reopening the official attempt; do not submit it again.";
+    if (error?.status === 503 && /Tempo RPC/i.test(message))
+      return "Tempo is temporarily unavailable. Your request is saved; choose Recover request later instead of paying again.";
+    return message;
+  }
   async function confirmDirectIntent(request) {
     let lastError;
     // Tempo returns a transaction hash before the receipt reaches finality.
@@ -340,7 +358,16 @@ export function createBountyUI(adapter) {
       invalidateBoardCache();
       return confirmed;
     } catch (e) {
-      if (!request.intentId && e.status && e.status < 500) clearOutbox();
+      // Keep payment-sensitive conflicts recoverable. Clearing a saved key on
+      // a 402/409/429 can turn a retry-safe request into an accidental second
+      // wallet payment.
+      if (
+        !request.intentId &&
+        e.status &&
+        e.status < 500 &&
+        ![402, 409, 429].includes(e.status)
+      )
+        clearOutbox();
       throw e;
     }
   }
@@ -420,7 +447,7 @@ export function createBountyUI(adapter) {
           ? "MAINNET SETUP"
           : "SANDBOX SEASON";
     const pending = pendingOutbox();
-    return `<div class="page-heading bounty-heading"><div><span class="eyebrow">WAR MACHINES BOUNTIES / ${season}</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><button id="contracts-home">All bounties</button>${me ? '<button id="build-vault">Build vault</button>' : ""}<button id="credits-btn" title="${esc(walletTitle)}" aria-label="${esc(walletTitle ? "Connected Tempo Wallet " + walletTitle : account)}">${esc(account)}</button>${runtime.paid && me ? '<button id="swap-pathusd" title="Swap a supported Tempo stablecoin into pathUSD">Swap to pathUSD</button><button id="disconnect-wallet" class="danger" title="Clear this browser’s Tempo Wallet connection">Disconnect</button>' : ""}</div></div>${pending ? `<div class="notice">A payment request was interrupted. ${pending.transactionHash ? "The same transaction will be confirmed; no new wallet payment is sent." : "Your request can be resumed with its saved idempotency key."} <button id="recover-request">Recover request</button><button id="discard-request">Discard request</button></div>` : ""}`;
+    return `<div class="page-heading bounty-heading"><div><span class="eyebrow">WAR MACHINES BOUNTIES / ${season}</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><button id="contracts-home">All bounties</button>${me ? '<button id="build-vault">Build vault</button>' : ""}<button id="credits-btn" title="${esc(walletTitle)}" aria-label="${esc(walletTitle ? "Connected Tempo Wallet " + walletTitle : account)}">${esc(account)}</button>${runtime.paid && me ? '<button id="swap-pathusd" title="Swap a supported Tempo stablecoin into pathUSD">Swap to pathUSD</button><button id="disconnect-wallet" class="danger" title="Clear this browser’s Tempo Wallet connection">Disconnect</button>' : ""}</div></div>${pending ? `<div class="notice" role="status" aria-live="polite"><strong>Payment request saved.</strong> ${pending.transactionHash ? "The same transaction will be confirmed; no new wallet payment will be sent." : "No wallet charge has been recorded yet; recover with the saved idempotency key or discard this request."} <button id="recover-request">Recover request</button><button id="discard-request">Discard request</button></div>` : ""}`;
   }
   function wireHeader() {
     if ($("#contracts-home")) $("#contracts-home").onclick = () => open();
@@ -461,9 +488,10 @@ export function createBountyUI(adapter) {
     try {
       await fn();
     } catch (e) {
-      adapter.toast(e.message);
+      const message = friendlyPaymentError(e);
+      adapter.toast(message);
       const node = $("#bounty-error");
-      if (node) node.textContent = e.message;
+      if (node) node.textContent = message;
     } finally {
       if (button?.isConnected) button.disabled = false;
     }
@@ -535,7 +563,7 @@ export function createBountyUI(adapter) {
     return `<div class="terrain-tags">${arena.climate ? `<span class="terrain-tag climate" title="${esc(arena.desc)}">${esc(arena.climate.name)}</span>` : ""}${types.map((t) => `<span class="terrain-tag ${t}" title="${esc(TERRAIN_INFO[t]?.effect || "")}">${esc(TERRAIN_INFO[t]?.name || t)}</span>`).join("")}</div>`;
   }
   function feeNotice(b) {
-    return `<div class="notice fee-disclosure"><strong>${b.platformFeeBps ? money(b.platformFeeBps / 100) + "% platform fee on a win" : "No platform fee · original bounty terms"}</strong><br>Gross reward ${money(b.reward)} ${paymentUnit()} − platform fee ${money(b.platformFee)} ${paymentUnit()} = <strong>${money(b.payout)} ${paymentUnit()} paid to the winner</strong>. Entry costs ${money(b.entry)} ${paymentUnit()} separately. On a loss, draw, or missed build deadline, that entry is paid to the <strong>bounty creator</strong>. Net before network/swap fees if you win: ${signed(b.netIfWin)} ${paymentUnit()}. Wallet network fees and any input-token swap costs are separate estimates.</div>`;
+    return `<div class="notice fee-disclosure"><strong>${b.platformFeeBps ? money(b.platformFeeBps / 100) + "% platform fee on a win" : "No platform fee · original bounty terms"}</strong><br>Gross reward ${money(b.reward)} ${paymentUnit()} − platform fee ${money(b.platformFee)} ${paymentUnit()} = <strong>${money(b.payout)} ${paymentUnit()} paid to the winner</strong>. Entry costs ${money(b.entry)} ${paymentUnit()} separately. On a loss, draw, or missed build deadline, that entry is paid to the <strong>bounty creator</strong>. Net before network/swap fees if you win: ${signed(b.netIfWin)} ${paymentUnit()}. Wallet network fees and any input-token swap costs are separate estimates.<br><span class="fee-disclosure-subnote">Entry payment reveals the opponent only. Machine submission happens later and does not charge a second entry.</span></div>`;
   }
   function card(b) {
     const s = scout(b),
@@ -596,6 +624,17 @@ export function createBountyUI(adapter) {
       if (dataError) throw dataError;
       if (g !== generation) return;
       if (id) {
+        if (isLegacyV5(data)) {
+          app.innerHTML =
+            header(
+              "CHALLENGE ARCHIVED.",
+              "This legacy V5 bounty is no longer part of the active board.",
+            ) +
+            '<section class="panel bounty-empty"><p>This historical bounty has been removed from the player-facing challenge list. Its on-chain record is retained privately for audit and payment recovery; no new entry or machine submission is available.</p><button id="pending-contract">Back to active challenges</button></section>';
+          wireHeader();
+          $("#pending-contract").onclick = () => open();
+          return;
+        }
         current = data;
         detail(data, g);
         accountUpdate = () => {
@@ -778,7 +817,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         : "",
       entryAction =
         canEnter
-          ? `<button id="official-entry" class="primary contract-enter" ${!b.compatible || (!runtime.paid && !me) || (runtime.paid && !runtime.acceptingNewBounties) ? "disabled" : ""}>${runtime.paid && !runtime.acceptingNewBounties ? "Paid entries paused" : `Pay entry & reveal opponent · ${b.entry} ${paymentUnit()}`}</button>`
+          ? `<button id="official-entry" class="primary contract-enter" ${!b.compatible || (!runtime.paid && !me) || (runtime.paid && !runtime.acceptingNewBounties) ? "disabled" : ""}>${runtime.paid && !runtime.acceptingNewBounties ? "Paid entries paused" : `Pay ${b.entry} ${paymentUnit()} · Reveal opponent`}</button>`
           : legacyV5
             ? legacyNotice
           : isExpired && b.status === "open"
@@ -1215,7 +1254,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
               "OPPONENT READY.",
               "Build and test your machine, then submit it before the timer ends.",
             ) +
-            `<section class="panel trial-wait"><span class="eyebrow">ENTRY CONFIRMED · OPPONENT REVEALED</span><h2>${clock} to submit.</h2><p><strong>${esc(defender.title)}</strong> is now available for your timed build. The verified escrow keeps enough time to record the result after you submit.</p><div class="notice fee-disclosure">Build limit: ${esc(rulesLabel(defender.blueprint.q))} · Arena: ${esc(bountyArena({ blueprint: defender.blueprint }).name)} · Your entry remains in the direct escrow until the signed result settles.</div><div class="bounty-actions"><button id="refit-counter" class="primary">Build your machine</button><button id="select-counter">Use a saved build</button><button id="deploy-counter">Submit current machine</button><button id="pending-contract">View challenge</button></div><p id="bounty-error" class="error-message"></p></section>`;
+            `<section class="panel trial-wait"><span class="eyebrow">ENTRY CONFIRMED · OPPONENT REVEALED</span><h2>${clock} to submit.</h2><p><strong>${esc(defender.title)}</strong> is now available for your timed build. The verified escrow keeps enough time to record the result after you submit.</p><div class="notice fee-disclosure"><strong>No second payment is required.</strong><br>Build limit: ${esc(rulesLabel(defender.blueprint.q))} · Arena: ${esc(bountyArena({ blueprint: defender.blueprint }).name)} · Your entry remains in the direct escrow until the signed result settles.</div><div class="bounty-actions"><button id="refit-counter" class="primary">Build your machine</button><button id="select-counter">Use a saved build</button><button id="deploy-counter">Submit current machine</button><button id="pending-contract">View challenge</button></div><p id="bounty-error" class="error-message"></p></section>`;
           wireHeader();
           $("#refit-counter").onclick = () => adapter.edit(defender);
           $("#select-counter").onclick = () => vault(a.id);
@@ -1259,13 +1298,15 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
           if (await autoplayOfficialReplay(a)) return;
           app.innerHTML =
             header(
-              "RESULT.",
-              "Your settlement continues automatically.",
+              ready ? "SETTLEMENT PENDING." : "RESULT.",
+              ready
+                ? "The signed result is recorded; the Tempo escrow is finalizing payment automatically."
+                : "Your settlement continues automatically.",
             ) +
             paymentPanel(a) +
-            '<section class="panel trial-wait"><h2>' +
+            `<section class="panel trial-wait ${ready ? "settlement-wait" : ""}"><span class="eyebrow">${ready ? "RESULT SIGNED · SETTLEMENT PENDING" : "RESULT RECORDED"}</span><h2>` +
             esc(r?.outcome?.toUpperCase() || "RESULT RECORDED") +
-            '</h2><div class="bounty-actions">' +
+            `</h2><p>${ready ? "The official result is recorded and waiting for the escrow to finalize the payout. Do not pay again or resubmit a machine." : "The official result is recorded; settlement continues automatically."}</p><div class="bounty-actions">` +
             (a.replay
               ? '<button id="watch-official-replay">Watch exact battle</button>'
               : "") +
@@ -1330,7 +1371,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
       } catch (e) {
         if (g !== generation) return;
         app.innerHTML =
-          header("RESULT PENDING.", esc(e.message)) +
+          header("RESULT PENDING.", friendlyPaymentError(e)) +
           '<section class="panel bounty-empty"><p>This run is still processing. Open My runs to check again.</p><button id="retry-attempt">Check again</button></section>';
         wireHeader();
         $("#retry-attempt").onclick = () => attempt(id);
