@@ -6293,10 +6293,20 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     config.paymentHealth.ready && config.paymentHealth.fresh;
   if (!config.acceptingNewBounties && config.enabled)
     config.settlementReason = config.paymentHealth.reason;
-  if (publicConfigRead && env.DB && config.enabled && !config.paymentHealth.fresh && ctx?.waitUntil) {
-    ctx.waitUntil(refreshPaymentAdmission(env.DB, { ...config }).catch(error => {
-      console.error("Background payment readiness refresh failed", error);
-    }));
+  if (publicConfigRead && env.DB && config.enabled && !config.paymentHealth.fresh) {
+    // Discovery, rules and health are the admission documents consumed by
+    // browser clients and agents. Return a bounded readiness result with
+    // them instead of advertising recovery-only mode until a background task
+    // happens to finish after the response has already been consumed.
+    try {
+      await refreshPaymentAdmission(env.DB, config);
+    } catch (error) {
+      console.error("Payment readiness refresh failed for public config", error);
+      if (ctx?.waitUntil)
+        ctx.waitUntil(refreshPaymentAdmission(env.DB, { ...config }).catch(backgroundError => {
+          console.error("Background payment readiness refresh failed", backgroundError);
+        }));
+    }
   }
   if (path === "/.well-known/war-machines.json" && request.method === "GET")
     return response(discovery(config));

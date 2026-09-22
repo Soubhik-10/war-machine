@@ -136,7 +136,7 @@ test('static requests cause no readiness RPC, background work or settlement leas
   assert.equal(env.DB.counts.writes, 0);
 });
 
-test('catalog and health expose explicit cold and unavailable snapshots during D1 failure', async () => {
+test('catalog and health expose unavailable snapshots when D1 readiness reads fail', async () => {
   const key = '0x' + '0a'.repeat(32);
   const signer = privateKeyToAccount(key).address;
   const db = journalDb({ fail: true });
@@ -149,11 +149,11 @@ test('catalog and health expose explicit cold and unavailable snapshots during D
   const rules = await mainnetFetch(new Request('https://foundry.example/api/rules'), env, ctx);
   const catalog = await rules.json();
   assert.equal(rules.status, 200);
-  assert.equal(catalog.paymentHealth.state, 'unknown');
+  assert.equal(catalog.paymentHealth.state, 'unavailable');
   assert.equal(catalog.paymentHealth.ready, false);
-  assert.equal(catalog.settlementCapacity.state, 'checking');
-  assert.equal(catalog.settlementCapacity.signer.state, 'checking');
-  assert.equal(catalog.settlementCapacity.warning, null);
+  assert.equal(catalog.settlementCapacity.state, 'unavailable');
+  assert.equal(catalog.settlementCapacity.signer.state, 'unavailable');
+  assert.match(catalog.settlementCapacity.warning, /unavailable|stale/i);
   assert.equal(catalog.directEscrow.acceptingNewBounties, false);
   assert.ok(catalog.parts.length > 0);
   await Promise.all(pending);
