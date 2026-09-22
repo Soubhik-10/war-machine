@@ -1,6 +1,6 @@
 // The hash is the shareable address of a screen. UI-only state (filters,
 // drafts, focus and scroll) deliberately stays out of it.
-const SIMPLE = new Set(["home", "workshop", "arena", "rules", "agents", "bounties"]);
+const SIMPLE = new Set(["home", "workshop", "arena", "rules", "agents", "bounties", "free-board", "free-create"]);
 
 export function parseRoute(hash = "") {
   const value = String(hash).replace(/^#/, "");
@@ -9,6 +9,7 @@ export function parseRoute(hash = "") {
   if (/^rules-[a-z0-9-]+$/i.test(value)) return { name: "anchor", value };
   for (const [prefix, name] of [
     ["bounty=", "bounty"],
+    ["free=", "free"],
     ["challenge=", "challenge"],
     ["build=", "build"],
   ]) {
@@ -20,7 +21,7 @@ export function parseRoute(hash = "") {
 
 export function serializeRoute(route) {
   if (SIMPLE.has(route?.name)) return route.name === "home" ? "#home" : `#${route.name}`;
-  if (["bounty", "challenge", "build"].includes(route?.name) && route.value)
+  if (["bounty", "free", "challenge", "build"].includes(route?.name) && route.value)
     return `#${route.name}=${route.value}`;
   if (route?.name === "anchor" && route.value) return `#${route.value}`;
   return "#missing";

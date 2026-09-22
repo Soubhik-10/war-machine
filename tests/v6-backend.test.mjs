@@ -83,6 +83,7 @@ class D1Fixture {
       "0007_attempt_identity.sql",
       "0008_escrow_policy_identity.sql",
       "0009_board_pagination.sql",
+      "0010_free_email_challenges.sql",
     ])
       this.sqlite.exec(
         await readFile(new URL(`../drizzle/${name}`, import.meta.url), "utf8"),

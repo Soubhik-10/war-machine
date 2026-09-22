@@ -4,11 +4,14 @@ import { createHashRouter, parseRoute, serializeRoute } from "../dist/routes.mjs
 
 test("route parser preserves share links and identifies recoverable routes", () => {
   assert.deepEqual(parseRoute("#bounty=abc-123"), { name: "bounty", value: "abc-123" });
+  assert.deepEqual(parseRoute("#free=abc-123"), { name: "free", value: "abc-123" });
   assert.deepEqual(parseRoute("#challenge=packed"), { name: "challenge", value: "packed" });
   assert.deepEqual(parseRoute("#rules-result"), { name: "anchor", value: "rules-result" });
   assert.deepEqual(parseRoute("#not-a-route"), { name: "missing", value: "not-a-route" });
   assert.equal(serializeRoute({ name: "bounties" }), "#bounties");
+  assert.equal(serializeRoute({ name: "free-board" }), "#free-board");
   assert.equal(serializeRoute({ name: "bounty", value: "abc-123" }), "#bounty=abc-123");
+  assert.equal(serializeRoute({ name: "free", value: "abc-123" }), "#free=abc-123");
 });
 
 test("back and forward restore one screen even when both browser events fire", async () => {
