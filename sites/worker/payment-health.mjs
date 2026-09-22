@@ -42,6 +42,12 @@ export function paymentHealthCounters() { return { ...counters }; }
 
 export function settlementCapacity(health) {
   const minimumUnits = String(MIN_FEE_BALANCE_UNITS);
+  const fresh = health?.fresh === true;
+  if (!fresh && ['unknown', 'checking', 'stale', undefined, null].includes(health?.state)) {
+    const checking = (role) => ({ role, state: 'checking', balanceUnits: null, minimumUnits });
+    return { state: 'checking', ready: false, fresh: false, checkedAt: health?.checkedAt || null,
+      signer: checking('settlement-signer'), relayer: checking('mpp-relayer'), warning: null };
+  }
   const capacityOf = (role, balanceUnits) => {
     let state = 'unavailable';
     if (balanceUnits !== null && balanceUnits !== undefined && /^\d+$/.test(String(balanceUnits)))
@@ -52,7 +58,6 @@ export function settlementCapacity(health) {
   const relayer = health?.relayer
     ? capacityOf('mpp-relayer', health.relayerBalanceUnits)
     : { role: 'mpp-relayer', state: 'not-configured', balanceUnits: null, minimumUnits };
-  const fresh = health?.fresh === true;
   const state = !fresh ? 'unavailable' : signer.state !== 'ready' ? signer.state
     : relayer.state === 'low' || relayer.state === 'unavailable' ? relayer.state : 'ready';
   const warning = signer.state === 'low'

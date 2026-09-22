@@ -21,8 +21,8 @@ test("player capacity warning identifies the signer, relayer, freshness and reco
   assert.match(warning, /relayer: ready/);
   assert.match(warning, /Checked: .*; fresh/);
   assert.match(warning, /Browsing and recovery remain available/);
-  assert.match(settlementCapacityDescription({ ready: false, fresh: false, checkedAt: null,
-    warning: "Signer unavailable", signer: { state: "unavailable", balanceUnits: null },
-    relayer: { state: "not-configured", balanceUnits: null } }), /never; stale or unavailable/);
+  assert.equal(settlementCapacityDescription({ ready: false, fresh: false, checkedAt: null,
+    warning: null, signer: { state: "checking", balanceUnits: null },
+    relayer: { state: "checking", balanceUnits: null } }), "");
   assert.equal(settlementCapacityDescription({ ready: true }), "");
 });

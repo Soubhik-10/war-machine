@@ -56,7 +56,7 @@ export function boardScopeForFilter(filter, paid, authenticated) {
   return { mine: "mine", saved: "saved", completed: "history" }[filter] || "public";
 }
 export function settlementCapacityDescription(capacity) {
-  if (!capacity || capacity.ready) return "";
+  if (!capacity || capacity.ready || capacity.fresh !== true) return "";
   const role = (name, value) => `${name}: ${value?.state || "unavailable"}${value?.balanceUnits != null ? ` (${money(Number(value.balanceUnits) / 1e6)} pathUSD)` : ""}`;
   return `${capacity.warning || "Settlement fee funding has not been verified."} ${role("Signer", capacity.signer)}; ${role("relayer", capacity.relayer)}. Checked: ${capacity.checkedAt ? time(capacity.checkedAt) : "never"}; ${capacity.fresh ? "fresh" : "stale or unavailable"}. Browsing and recovery remain available.`;
 }
@@ -115,7 +115,7 @@ export function createBountyUI(adapter) {
   // must never be reused after sign-out or by another wallet.
   const getCache = new Map();
   const getInFlight = new Map();
-  const publicCachePrefix = "wm-public-cache-v1:";
+  const publicCachePrefix = "wm-public-cache-v2:";
   const cacheScope = (path = "") => token
     ? `account:${token}`
     : /^\/bounties(?:[/?]|$)/.test(path) || path === "/me/bookmarks"
@@ -150,7 +150,7 @@ export function createBountyUI(adapter) {
   }
   const cacheTtl = (path) =>
     path === "/rules"
-      ? 10 * 60_000
+      ? 15_000
       : /^\/bounties(?:\?|$)/.test(path)
         ? 60_000
         : path === "/me" || path === "/me/wallet"
@@ -215,6 +215,21 @@ export function createBountyUI(adapter) {
       currency: catalog.economics.amountUnit || "sandbox credits",
     };
     return runtime;
+  }
+  function applyPaymentHealth(health) {
+    if (!health) return;
+    runtime.paymentHealth = health.paymentHealth || runtime.paymentHealth;
+    runtime.settlementCapacity = health.settlementCapacity || runtime.settlementCapacity;
+    if (runtime.mode === "tempo-mainnet") {
+      runtime.acceptingNewBounties = health.paymentsEnabled === true;
+      runtime.settlementReason = runtime.paymentHealth?.reason || null;
+    }
+  }
+  async function refreshPaymentReadiness() {
+    if (!runtime.paid || runtime.paymentHealth?.fresh === true) return runtime.acceptingNewBounties;
+    const health = await api("/health");
+    applyPaymentHealth(health);
+    return runtime.acceptingNewBounties;
   }
   function requestError(error) {
     if (error?.name === "AbortError")
@@ -576,7 +591,7 @@ export function createBountyUI(adapter) {
           : "SANDBOX SEASON";
     const pending = pendingOutbox();
     const capacity = runtime.settlementCapacity;
-    const capacityNotice = runtime.paid && capacity && !capacity.ready
+    const capacityNotice = runtime.paid && capacity && capacity.fresh === true && !capacity.ready
       ? `<div class="notice settlement-capacity-warning" role="alert"><strong>Settlement capacity warning</strong><p>${esc(settlementCapacityDescription(capacity))}</p></div>`
       : "";
     return `<div class="page-heading bounty-heading"><div><span class="eyebrow">WAR MACHINES BOUNTIES / ${season}</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><button id="contracts-home">All bounties</button>${me ? '<button id="build-vault">Build vault</button>' : ""}<button id="credits-btn" title="${esc(walletTitle)}" aria-label="${esc(walletTitle ? "Connected Tempo Wallet " + walletTitle : account)}">${esc(account)}</button>${runtime.paid && me ? '<button id="swap-pathusd" title="Swap a supported Tempo stablecoin into pathUSD">Swap to pathUSD</button><button id="disconnect-wallet" class="danger" title="Clear this browser’s Tempo Wallet connection">Disconnect</button>' : ""}</div></div>${capacityNotice}${pending ? `<div class="notice" role="status" aria-live="polite"><strong>Payment request saved.</strong> ${pending.transactionHash ? "The same transaction will be confirmed; no new wallet payment will be sent." : "No wallet charge has been recorded yet; recover with the saved idempotency key or discard this request."} <button id="recover-request">Recover request</button><button id="discard-request">Discard request</button></div>` : ""}`;
@@ -791,7 +806,8 @@ export function createBountyUI(adapter) {
         });
         return;
       }
-const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismissed ? "hidden" : ""}><div class="challenge-hero-copy"><div class="guide-heading"><div><span class="eyebrow">${runtime.paid ? "HOW PAID CHALLENGES WORK" : "HOW LOCAL CHALLENGES WORK"}</span><h2>How to enter and play.</h2></div><button id="close-challenge-guide" class="guide-close" type="button" aria-label="Hide challenge guide">Hide</button></div><ol class="challenge-steps"><li><b>1. Read the challenge</b><span>Check the arena, build limits, reward and entry cost.</span></li><li><b>2. Pay the entry</b><span>Tempo Wallet reveals the opponent and starts your build timer.</span></li><li><b>3. Build and submit</b><span>Stay within the locked limits, then submit before the timer ends.</span></li><li><b>4. Watch the result</b><span>Both machines fight automatically. The escrow pays the winner.</span></li></ol><div class="contract-hero-actions"><button class="primary" id="new-contract" ${runtime.paid && !runtime.acceptingNewBounties ? "disabled" : ""}>${runtime.paid && !runtime.acceptingNewBounties ? "New paid challenges paused" : "+ Create a challenge"}</button><button id="my-history">My runs</button></div>${runtime.paid && !runtime.acceptingNewBounties ? '<p class="notice bounty-footnote">' + esc(runtime.settlementReason) + '</p>' : ''}</div><aside class="credit-summary"><span class="status-stamp">${runtime.paid ? "TEMPO MAINNET / pathUSD" : "LOCAL MODE / NO CASH VALUE"}</span><h3>${runtime.paid ? "Payment details" : "Practice mode"}</h3><div class="credit-balance"><b>${runtime.paid ? (me ? money(me.reserved || 0) : "CONNECT WALLET") : me ? money(me.balance) : "1,000"}</b><span>${runtime.paid ? (me ? "RESERVED FOR CHALLENGES" : "REQUIRED TO PAY") : me ? "AVAILABLE CREDITS" : "STARTING CREDITS"}</span></div><p>${runtime.paid ? (me ? "Connected wallet: confirm the entry or reward transaction shown by Tempo Wallet." : "Connect Tempo Wallet before creating or entering a paid challenge.") : me ? money(me.reserved) + " reserved in your challenges" : "Create a local profile to practice without money."}</p><div class="credit-rules"><p><b>Creator</b><span>Sets the entry, reward, arena, and build limits.</span></p><p><b>Player</b><span>Pays the entry, then sees the full opponent and starts the build timer.</span></p><p><b>Fee</b><span>2.5% of a winning reward. The remaining 97.5% goes to the winner.</span></p></div></aside></section><button id="show-challenge-guide" class="guide-reopen" type="button" ${guideDismissed ? "" : "hidden"}>Show how it works</button>`;
+const paymentPaused = runtime.paid && runtime.paymentHealth?.fresh === true && !runtime.acceptingNewBounties;
+const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismissed ? "hidden" : ""}><div class="challenge-hero-copy"><div class="guide-heading"><div><span class="eyebrow">${runtime.paid ? "HOW PAID CHALLENGES WORK" : "HOW LOCAL CHALLENGES WORK"}</span><h2>How to enter and play.</h2></div><button id="close-challenge-guide" class="guide-close" type="button" aria-label="Hide challenge guide">Hide</button></div><ol class="challenge-steps"><li><b>1. Read the challenge</b><span>Check the arena, build limits, reward and entry cost.</span></li><li><b>2. Pay the entry</b><span>Tempo Wallet reveals the opponent and starts your build timer.</span></li><li><b>3. Build and submit</b><span>Stay within the locked limits, then submit before the timer ends.</span></li><li><b>4. Watch the result</b><span>Both machines fight automatically. The escrow pays the winner.</span></li></ol><div class="contract-hero-actions"><button class="primary" id="new-contract" ${paymentPaused ? "disabled" : ""}>${paymentPaused ? "New paid challenges paused" : "+ Create a challenge"}</button><button id="my-history">My runs</button></div>${paymentPaused ? '<p class="notice bounty-footnote">' + esc(runtime.settlementReason) + '</p>' : ''}</div><aside class="credit-summary"><span class="status-stamp">${runtime.paid ? "TEMPO MAINNET / pathUSD" : "LOCAL MODE / NO CASH VALUE"}</span><h3>${runtime.paid ? "Payment details" : "Practice mode"}</h3><div class="credit-balance"><b>${runtime.paid ? (me ? money(me.reserved || 0) : "CONNECT WALLET") : me ? money(me.balance) : "1,000"}</b><span>${runtime.paid ? (me ? "RESERVED FOR CHALLENGES" : "REQUIRED TO PAY") : me ? "AVAILABLE CREDITS" : "STARTING CREDITS"}</span></div><p>${runtime.paid ? (me ? "Connected wallet: confirm the entry or reward transaction shown by Tempo Wallet." : "Connect Tempo Wallet before creating or entering a paid challenge.") : me ? money(me.reserved) + " reserved in your challenges" : "Create a local profile to practice without money."}</p><div class="credit-rules"><p><b>Creator</b><span>Sets the entry, reward, arena, and build limits.</span></p><p><b>Player</b><span>Pays the entry, then sees the full opponent and starts the build timer.</span></p><p><b>Fee</b><span>2.5% of a winning reward. The remaining 97.5% goes to the winner.</span></p></div></aside></section><button id="show-challenge-guide" class="guide-reopen" type="button" ${guideDismissed ? "" : "hidden"}>Show how it works</button>`;
       app.innerHTML =
         header(
           "CHOOSE A CHALLENGE.",
@@ -956,6 +972,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
     }
   }
   function detail(b, g) {
+    const paymentPaused = runtime.paid && runtime.paymentHealth?.fresh === true && !runtime.acceptingNewBounties;
     const revealed = !!b.blueprint,
       s = scout(b),
       a = bountyArena(b),
@@ -992,7 +1009,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         : "",
       entryAction =
         canEnter
-          ? `<button id="official-entry" class="primary contract-enter" ${!b.compatible || (!runtime.paid && !me) || (runtime.paid && !runtime.acceptingNewBounties) ? "disabled" : ""}>${runtime.paid && !runtime.acceptingNewBounties ? "Paid entries paused" : `Pay ${b.entry} ${paymentUnit()} · Reveal opponent`}</button>`
+          ? `<button id="official-entry" class="primary contract-enter" ${!b.compatible || (!runtime.paid && !me) || paymentPaused ? "disabled" : ""}>${paymentPaused ? "Paid entries paused" : `Pay ${b.entry} ${paymentUnit()} · Reveal opponent`}</button>`
           : legacyV5
             ? legacyNotice
           : isExpired && b.status === "open"
@@ -1023,7 +1040,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         revealed ? "BUILD YOUR MACHINE." : "VIEW THE CHALLENGE.",
         esc(b.title),
       ) +
-      `<div class="contract-detail"><section class="panel defender-card"><div class="contract-card-top">${status(bountyCardState(b))}<small>${bountyAvailabilityLabel(b, ["completed", "claimed"].includes(b.status))}</small></div>${preview}<div class="defender-caption">${defenderCaption}</div><div class="bounty-actions">${defenderActions}<button id="copy-contract">↗ Copy challenge link</button><button id="save-contract">${savedIds.has(b.id) ? "★ Saved challenge" : "☆ Save challenge"}</button>${navigator.share ? '<button id="native-share-contract">Share…</button>' : ""}</div></section><section class="panel contract-terms"><span class="eyebrow">${esc(b.ownerName)} / CHALLENGE TERMS</span><h2>${esc(b.title)}</h2><div class="contract-economy"><div><b>${money(b.reward)}</b><small>GROSS REWARD · ${esc(paymentUnit())}</small></div><div><b>${money(b.entry)}</b><small>ENTRY COST · ${esc(paymentUnit())}</small></div><div><b>${signed(b.netIfWin)}</b><small>NET BEFORE NETWORK/SWAP FEES · ${esc(paymentUnit())}</small></div></div>${feeNotice(b)}${completionNotice}<div class="contract-rule"><strong>${esc(a.name)}</strong><p>${esc(a.desc)}</p>${terrain(a)}</div><div class="contract-rule"><strong>${esc(rulesLabel(lockedRules))}</strong><p>Both machines use the same locked rules and fight automatically for up to 100 seconds.</p></div><div class="contract-rule"><strong>Your machine: ${esc(draft.machine.name)}</strong><p>${counterStatus}</p></div>${revealed ? `<div class="bounty-actions"><button id="refit-counter" ${!b.compatible ? "disabled" : ""}>Edit your machine</button>${runtime.paid ? "" : '<button id="local-simulation">Local simulation</button>'}</div>` : ""}${entryAction}${busyExpiryNotice}${!runtime.paid && !me ? '<button id="join-profile">Sign in to enter this sandbox challenge</button>' : ""}<p class="hint">${legacyV5 ? "Existing V5 challenge; new entries are closed while V6 is active." : revealed ? runtime.paid ? "Your entry is active. Submit a valid machine before the timer ends." : "This local challenge can be tested without transferring funds." : runtime.paid && !runtime.acceptingNewBounties ? runtime.settlementReason : runtime.paid ? `Pay the entry in Tempo Wallet. Once it confirms, the full opponent appears and the build timer starts. The entry is ${b.entry} ${paymentUnit()}; construction limits use ${constructionUnit()}.` : "Your entry uses sandbox credits. Construction credits are separate from any live pathUSD payment."} ${own ? "You cannot claim your own reward." : ""}</p><p class="error-message" id="bounty-error">${!b.compatible ? "This challenge uses an older engine version. Its result remains available, but you cannot submit a new machine." : ""}</p><p class="contract-expiry">${legacyV5 ? "Read-only historical challenge" : b.expires ? (deadlinePassed && b.status === "busy" ? "Bounty deadline passed · active attempt continues" : isExpired ? "Expired " : "Expires ") + time(b.expires) : "No deadline · until claimed or closed"} · ${b.attempts} runs<br>${b.listed ? "Visible on the board" : legacyV5 ? "Unlisted: anyone with the link can view." : "Unlisted: anyone with the link can view and pay the posted entry."}</p>${returnAction}${!legacyV5 && me && isExpired && b.status === "open" ? '<button id="expire-contract">Settle expiry onchain</button>' : ""}</section></div><section class="panel contract-history"><h3>Past results</h3>${b.history.length ? b.history.map((a) => (revealed ? `<button data-attempt="${a.id}" class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : a.status === "technical-retry" ? "TECHNICAL RECOVERY" : "RESULT PENDING"}</span><small>${time(a.created)}</small><strong>${a.result?.time ? Number(a.result.time).toFixed(1) + "s" : a.status === "technical-retry" ? "Sponsored retry available" : "Settlement pending"} ↗</strong></button>` : `<div class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : a.status === "technical-retry" ? "TECHNICAL RECOVERY" : "RESULT PENDING"}</span><small>${time(a.created)}</small><strong>Opponent replay sealed</strong></div>`)).join("") : hasPendingBountyResult(b) ? "<p>Result recorded. Settlement confirmation is still pending.</p>" : b.status === "busy" ? "<p>An attempt is in progress. Its signed result will appear here after settlement verification.</p>" : "<p>No results yet. Be the first to try.</p>"}</section>`;
+      `<div class="contract-detail"><section class="panel defender-card"><div class="contract-card-top">${status(bountyCardState(b))}<small>${bountyAvailabilityLabel(b, ["completed", "claimed"].includes(b.status))}</small></div>${preview}<div class="defender-caption">${defenderCaption}</div><div class="bounty-actions">${defenderActions}<button id="copy-contract">↗ Copy challenge link</button><button id="save-contract">${savedIds.has(b.id) ? "★ Saved challenge" : "☆ Save challenge"}</button>${navigator.share ? '<button id="native-share-contract">Share…</button>' : ""}</div></section><section class="panel contract-terms"><span class="eyebrow">${esc(b.ownerName)} / CHALLENGE TERMS</span><h2>${esc(b.title)}</h2><div class="contract-economy"><div><b>${money(b.reward)}</b><small>GROSS REWARD · ${esc(paymentUnit())}</small></div><div><b>${money(b.entry)}</b><small>ENTRY COST · ${esc(paymentUnit())}</small></div><div><b>${signed(b.netIfWin)}</b><small>NET BEFORE NETWORK/SWAP FEES · ${esc(paymentUnit())}</small></div></div>${feeNotice(b)}${completionNotice}<div class="contract-rule"><strong>${esc(a.name)}</strong><p>${esc(a.desc)}</p>${terrain(a)}</div><div class="contract-rule"><strong>${esc(rulesLabel(lockedRules))}</strong><p>Both machines use the same locked rules and fight automatically for up to 100 seconds.</p></div><div class="contract-rule"><strong>Your machine: ${esc(draft.machine.name)}</strong><p>${counterStatus}</p></div>${revealed ? `<div class="bounty-actions"><button id="refit-counter" ${!b.compatible ? "disabled" : ""}>Edit your machine</button>${runtime.paid ? "" : '<button id="local-simulation">Local simulation</button>'}</div>` : ""}${entryAction}${busyExpiryNotice}${!runtime.paid && !me ? '<button id="join-profile">Sign in to enter this sandbox challenge</button>' : ""}<p class="hint">${legacyV5 ? "Existing V5 challenge; new entries are closed while V6 is active." : revealed ? runtime.paid ? "Your entry is active. Submit a valid machine before the timer ends." : "This local challenge can be tested without transferring funds." : paymentPaused ? runtime.settlementReason : runtime.paid ? `Pay the entry in Tempo Wallet. Once it confirms, the full opponent appears and the build timer starts. The entry is ${b.entry} ${paymentUnit()}; construction limits use ${constructionUnit()}.` : "Your entry uses sandbox credits. Construction credits are separate from any live pathUSD payment."} ${own ? "You cannot claim your own reward." : ""}</p><p class="error-message" id="bounty-error">${!b.compatible ? "This challenge uses an older engine version. Its result remains available, but you cannot submit a new machine." : ""}</p><p class="contract-expiry">${legacyV5 ? "Read-only historical challenge" : b.expires ? (deadlinePassed && b.status === "busy" ? "Bounty deadline passed · active attempt continues" : isExpired ? "Expired " : "Expires ") + time(b.expires) : "No deadline · until claimed or closed"} · ${b.attempts} runs<br>${b.listed ? "Visible on the board" : legacyV5 ? "Unlisted: anyone with the link can view." : "Unlisted: anyone with the link can view and pay the posted entry."}</p>${returnAction}${!legacyV5 && me && isExpired && b.status === "open" ? '<button id="expire-contract">Settle expiry onchain</button>' : ""}</section></div><section class="panel contract-history"><h3>Past results</h3>${b.history.length ? b.history.map((a) => (revealed ? `<button data-attempt="${a.id}" class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : a.status === "technical-retry" ? "TECHNICAL RECOVERY" : "RESULT PENDING"}</span><small>${time(a.created)}</small><strong>${a.result?.time ? Number(a.result.time).toFixed(1) + "s" : a.status === "technical-retry" ? "Sponsored retry available" : "Settlement pending"} ↗</strong></button>` : `<div class="attempt-row"><span>${a.result ? esc(a.result.outcome.toUpperCase()) : a.status === "technical-retry" ? "TECHNICAL RECOVERY" : "RESULT PENDING"}</span><small>${time(a.created)}</small><strong>Opponent replay sealed</strong></div>`)).join("") : hasPendingBountyResult(b) ? "<p>Result recorded. Settlement confirmation is still pending.</p>" : b.status === "busy" ? "<p>An attempt is in progress. Its signed result will appear here after settlement verification.</p>" : "<p>No results yet. Be the first to try.</p>"}</section>`;
     if (participantPrompt) {
       const template = document.createElement("template");
       template.innerHTML = participantPrompt;
@@ -1076,6 +1093,11 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
     if ($("#official-entry"))
       $("#official-entry").onclick = (e) =>
         act(e.currentTarget, async () => {
+          if (runtime.paid && !runtime.acceptingNewBounties) {
+            await refreshPaymentReadiness();
+            if (!runtime.acceptingNewBounties)
+              throw Error(runtime.settlementReason || "Paid entries are paused.");
+          }
           const participantName = $("#participant-name")?.value.trim() || "",
             showAddress = !!$("#participant-show-address")?.checked;
           const entry = runtime.paid
@@ -1138,8 +1160,11 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
       }, g);
   }
   async function create() {
-    if (runtime.paid && !runtime.acceptingNewBounties)
-      throw Error(runtime.settlementReason || "New paid bounties are paused.");
+    if (runtime.paid && !runtime.acceptingNewBounties) {
+      await refreshPaymentReadiness();
+      if (!runtime.acceptingNewBounties)
+        throw Error(runtime.settlementReason || "New paid bounties are paused.");
+    }
     if (!me && !runtime.paid) return profile();
     const g = begin(),
       draft = adapter.getBuild();

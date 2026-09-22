@@ -151,8 +151,9 @@ test('catalog and health expose explicit cold and unavailable snapshots during D
   assert.equal(rules.status, 200);
   assert.equal(catalog.paymentHealth.state, 'unknown');
   assert.equal(catalog.paymentHealth.ready, false);
-  assert.equal(catalog.settlementCapacity.signer.state, 'unavailable');
-  assert.match(catalog.settlementCapacity.warning, /signer fee balance/);
+  assert.equal(catalog.settlementCapacity.state, 'checking');
+  assert.equal(catalog.settlementCapacity.signer.state, 'checking');
+  assert.equal(catalog.settlementCapacity.warning, null);
   assert.equal(catalog.directEscrow.acceptingNewBounties, false);
   assert.ok(catalog.parts.length > 0);
   await Promise.all(pending);
