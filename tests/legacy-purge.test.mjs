@@ -25,12 +25,12 @@ class D1 {
 test("V6 cleanup removes proven pre-V6 app rows, preserves V6 and unknown orphans, and reruns safely", async (t) => {
   const db = new D1();
   t.after(() => db.close());
-  for (const name of ["0000_war_machines.sql", "0001_tempo_mainnet.sql", "0002_direct_escrow.sql", "0003_paid_reveal.sql", "0005_automatic_settlement.sql", "0006_reset_bounty_board_v3.sql", "0007_attempt_identity.sql", "0008_escrow_policy_identity.sql", "0009_board_pagination.sql", "0010_free_email_challenges.sql"])
+  for (const name of ["0000_war_machines.sql", "0001_tempo_mainnet.sql", "0002_direct_escrow.sql", "0003_paid_reveal.sql", "0005_automatic_settlement.sql", "0006_reset_bounty_board_v3.sql", "0007_attempt_identity.sql", "0008_escrow_policy_identity.sql", "0009_board_pagination.sql"])
     db.sqlite.exec(await readFile(new URL(`../drizzle/${name}`, import.meta.url), "utf8"));
   const blueprint = JSON.stringify(packChallenge(PRESETS[0], "foundry", 0));
   db.sqlite.prepare("INSERT INTO accounts (id,token_hash,name,balance,created) VALUES ('owner','token','Owner',0,1)").run();
   const bounties = db.sqlite.prepare("INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,fee_policy_version) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
-  for (const [id, status, policy] of [["old-open", "open", "pathusd-direct-escrow-v5"], ["old-busy", "busy", "pathusd-direct-escrow-v5"], ["old-unsettled", "busy", "pathusd-direct-escrow-v5"], ["current-v6", "open", "pathusd-direct-escrow-v6"], ["free-current", "open", "free-email-v1"]])
+  for (const [id, status, policy] of [["old-open", "open", "pathusd-direct-escrow-v5"], ["old-busy", "busy", "pathusd-direct-escrow-v5"], ["old-unsettled", "busy", "pathusd-direct-escrow-v5"], ["current-v6", "open", "pathusd-direct-escrow-v6"]])
     bounties.run(id, "owner", id, blueprint, 0, 0, status, 1, 1, 1, policy);
   const attempts = db.sqlite.prepare("INSERT INTO attempts (id,bounty,account,blueprint,seed,status,created,updated) VALUES (?,?,?,?,?,?,?,?)");
   attempts.run("old-attempt", "old-unsettled", "owner", blueprint, 42, "queued", 1, 1);
@@ -50,7 +50,7 @@ test("V6 cleanup removes proven pre-V6 app rows, preserves V6 and unknown orphan
   assert.deepEqual(await purgePreV6Bounties(db, { escrowVersion: "5" }), { ran: false });
   assert.deepEqual(await purgePreV6Bounties(db, { escrowVersion: "6" }), { ran: true, removedBounties: 3 });
   const rows = (table, column = "id") => db.sqlite.prepare(`SELECT ${column} FROM ${table} ORDER BY ${column}`).all().map(row => row[column]);
-  assert.deepEqual(rows("bounties"), ["current-v6", "free-current"]);
+  assert.deepEqual(rows("bounties"), ["current-v6"]);
   assert.deepEqual(rows("attempts"), ["v6-attempt"]);
   assert.deepEqual(rows("settlement_jobs", "attempt"), ["v6-attempt"]);
   assert.deepEqual(rows("settlement_audit", "attempt"), ["v6-attempt"]);

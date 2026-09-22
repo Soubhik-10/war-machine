@@ -108,12 +108,6 @@ class D1Mock {
         "utf8",
       ),
     );
-    this.sqlite.exec(
-      await readFile(
-        new URL("../drizzle/0010_free_email_challenges.sql", import.meta.url),
-        "utf8",
-      ),
-    );
   }
   close() {
     this.sqlite.close();

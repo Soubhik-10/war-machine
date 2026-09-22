@@ -35,7 +35,6 @@
 import { PART_GUIDANCE } from "./part-guidance.mjs";
 import { createPortal } from "./portal.mjs";
 import { createBountyUI } from "./bounties.mjs";
-import { createFreeChallengeUI } from "./free-challenges.mjs";
 import { createHashRouter } from "./routes.mjs";
 import { TERRAIN_INFO } from "./data.mjs";
 import {
@@ -165,7 +164,6 @@ let arenaIdleRAF = 0,
   bountyClock = 0;
 let portal = null,
   bountyUI = null,
-  freeChallengeUI = null,
   routeRouter = null,
   routeRestoring = false,
   bountyContext = null,
@@ -291,7 +289,6 @@ function cleanupView() {
   }
   portal?.leave();
   bountyUI?.leave();
-  freeChallengeUI?.leave();
   clearInterval(bountyClock);
   bountyClock = 0;
   cancelAnimationFrame(arenaIdleRAF);
@@ -2077,8 +2074,7 @@ function finishBattle() {
   const r = battle.result,
     won = r.winner === 0,
     draw = r.winner < 0,
-    v = battle.vehicles[0],
-    freeReplay = bountyContext?.kind === "free";
+    v = battle.vehicles[0];
   if (won && !battle.replaying && matchSource.enemy !== null) {
     wins[matchSource.enemy] = true;
     try {
@@ -2088,23 +2084,20 @@ function finishBattle() {
   const advice = battleAdvice(battle).notes[0];
   const overlay = $("#fight-overlay");
   overlay.hidden = false;
-  overlay.innerHTML = `<div class="match-card"><small>${officialReceipt ? (freeReplay ? "HOSTED FREE REPLAY · " : "PAID REPLAY · ") : ""}${esc(r.reason.toUpperCase())}</small><h2 style="color:${won ? "var(--gold)" : draw ? "var(--text)" : "var(--red)"}">${won ? "VICTORY." : draw ? "STALEMATE." : "OUTENGINEERED."}</h2><div class="result-grid"><div><strong>${r.time.toFixed(1)}s</strong><small>BATTLE TIME</small></div><div><strong>${r.damage[0]}</strong><small>DAMAGE</small></div><div><strong>${v.intercepts}</strong><small>INTERCEPTIONS</small></div></div><p>${esc(advice)}</p><p class="hint">Deterministic trial · ${v.pickups} caches · ${v.detached} part${v.detached === 1 ? "" : "s"} collapsed</p><div class="modal-footer"><button id="battle-report-btn">Battle report</button><button id="watch-replay">↻ Exact replay</button><button class="primary" id="result-tune">Refit machine</button></div><div class="result-extras"><button id="fight-again">${officialReceipt ? "Continue to result" : "Fight again"}</button><button id="inspect-wreck">Inspect wreckage</button></div></div>`;
+  overlay.innerHTML = `<div class="match-card"><small>${officialReceipt ? "PAID REPLAY · " : ""}${esc(r.reason.toUpperCase())}</small><h2 style="color:${won ? "var(--gold)" : draw ? "var(--text)" : "var(--red)"}">${won ? "VICTORY." : draw ? "STALEMATE." : "OUTENGINEERED."}</h2><div class="result-grid"><div><strong>${r.time.toFixed(1)}s</strong><small>BATTLE TIME</small></div><div><strong>${r.damage[0]}</strong><small>DAMAGE</small></div><div><strong>${v.intercepts}</strong><small>INTERCEPTIONS</small></div></div><p>${esc(advice)}</p><p class="hint">Deterministic trial · ${v.pickups} caches · ${v.detached} part${v.detached === 1 ? "" : "s"} collapsed</p><div class="modal-footer"><button id="battle-report-btn">Battle report</button><button id="watch-replay">↻ Exact replay</button><button class="primary" id="result-tune">Refit machine</button></div><div class="result-extras"><button id="fight-again">${officialReceipt ? "Continue to result" : "Fight again"}</button><button id="inspect-wreck">Inspect wreckage</button></div></div>`;
   $("#battle-report-btn").onclick = showBattleReportEnhanced;
   $("#watch-replay").onclick = () => startBattle(true);
   $("#result-tune").onclick = workshop;
   $("#fight-again").onclick = () =>
-    freeReplay
-      ? freeChallengeUI.open(bountyContext.id)
-      : officialReceipt && officialAttemptId
-        ? bountyUI.attempt(officialAttemptId)
-        : officialReceipt
-          ? bountyUI.open(bountyContext.id)
-          : startBattle(false);
+    officialReceipt && officialAttemptId
+      ? bountyUI.attempt(officialAttemptId)
+      : officialReceipt
+        ? bountyUI.open(bountyContext.id)
+        : startBattle(false);
   if (officialReceipt && officialAttemptId) {
     officialRedirectTimer = window.setTimeout(() => {
       officialRedirectTimer = 0;
-      if (freeReplay) freeChallengeUI.open(bountyContext.id);
-      else bountyUI.attempt(officialAttemptId);
+      bountyUI.attempt(officialAttemptId);
     }, 1400);
   }
   $("#inspect-wreck").onclick = () => {
@@ -2711,7 +2704,6 @@ function renderTerrainKey(arena) {
 }
 function renderContractContext() {
   if (!bountyContext) return;
-  const freeChallenge = bountyContext.kind === "free";
   clearInterval(bountyClock);
   bountyClock = 0;
   const el = document.createElement("section");
@@ -2726,9 +2718,7 @@ function renderContractContext() {
     esc(bountyContext.title) +
     "</strong><p>" +
     (officialReceipt
-      ? freeChallenge
-        ? "Viewing a hosted free challenge. Replay never changes your wallet or creates a payment."
-        : "Viewing a paid challenge. Replay never changes your balance."
+      ? "Viewing a paid challenge. Replay never changes your balance."
       : view === "arena"
         ? bountyContext.attemptId
           ? "PAID BUILD WINDOW · Submit once before the deadline."
@@ -2752,11 +2742,9 @@ function renderContractContext() {
     el.querySelector(".bounty-actions")?.prepend(clock);
   }
   $("#return-contract").onclick = () =>
-    freeChallenge
-      ? freeChallengeUI.open(bountyContext.id)
-      : officialReceipt && officialAttemptId
-        ? bountyUI.attempt(officialAttemptId)
-        : bountyUI.open(bountyContext.id);
+    officialReceipt && officialAttemptId
+      ? bountyUI.attempt(officialAttemptId)
+      : bountyUI.open(bountyContext.id);
   $("#exit-bounty")?.addEventListener("click", leaveChallenge);
   if ($("#deploy-official-counter"))
     $("#deploy-official-counter").onclick = async (e) => {
@@ -2772,10 +2760,8 @@ function renderContractContext() {
     };
   if (view === "arena") {
     const button = document.createElement("button");
-    button.textContent = freeChallenge ? "← Free challenge" : "← Bounty";
-    button.onclick = () => freeChallenge
-      ? freeChallengeUI.open(bountyContext.id)
-      : bountyUI.open(bountyContext.id);
+    button.textContent = "← Bounty";
+    button.onclick = () => bountyUI.open(bountyContext.id);
     $(".arena-camera-bar .group")?.append(button);
   }
   if (view === "arena" && bountyContext && !officialReceipt) {
@@ -2867,63 +2853,6 @@ bountyUI = createBountyUI({
     bountyContext = b;
     arenaId = a.replay.arena;
     objective = challenge.objective || c.objective || "reactor";
-    seed = a.replay.seed;
-    battleMode = "auto";
-    officialReceipt = a;
-    officialAttemptId = a.id;
-    arenaView();
-    matchSource = {
-      a: clone(machine),
-      b: clone(challenge.machine),
-      arena: arenaId,
-      objective,
-      seed,
-      enemy: null,
-      mode: "auto",
-      rules: clone(rules),
-      commands: [],
-      swapSpawns: a.replay.swapSpawns,
-    };
-    startBattle(true);
-  },
-});
-
-freeChallengeUI = createFreeChallengeUI({
-  navigate: go,
-  show() {
-    restoreReplay();
-    cleanupView();
-    closeModal();
-    view = "bounties";
-    setNav();
-  },
-  getBuild: () => ({
-    machine: clone(machine),
-    rules: clone(rules),
-    arena: arenaId,
-    objective,
-  }),
-  toast,
-  workshop,
-  replay(a, b) {
-    restoreReplay();
-    replayRestore = {
-      machine: clone(machine),
-      challenge,
-      rules: clone(rules),
-      arenaId,
-      objective,
-      seed,
-      bountyContext,
-      officialAttemptId,
-    };
-    const challenger = unpackChallenge(a.replay.challenger);
-    machine = challenger.machine;
-    rules = challenger.rules;
-    challenge = unpackChallenge(a.replay.defender);
-    bountyContext = { ...b, kind: "free" };
-    arenaId = a.replay.arena;
-    objective = challenge.objective || challenger.objective || "reactor";
     seed = a.replay.seed;
     battleMode = "auto";
     officialReceipt = a;
@@ -3085,9 +3014,6 @@ function renderRoute(route) {
     }
     if (route.name === "bounties") return void bountyUI.open(undefined, { restore: true });
     if (route.name === "bounty") return void bountyUI.open(route.value, { restore: true });
-    if (route.name === "free-board") return void freeChallengeUI.openBoard({ restore: true });
-    if (route.name === "free") return void freeChallengeUI.open(route.value, { restore: true });
-    if (route.name === "free-create") return void freeChallengeUI.openCreate({ restore: true });
     if (route.name === "challenge") {
       try {
         return loadChallenge(decodeChallenge(route.value));

@@ -813,7 +813,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
           "CHOOSE A CHALLENGE.",
           "Review the rules, then create or join a challenge.",
         ) +
-        `<nav class="board-kind-tabs" aria-label="Challenge board type"><button class="active" type="button" aria-current="page">Paid bounties · pathUSD</button><button id="show-free-board" type="button">Free friend challenges</button></nav><div class="bounty-board-layout"><aside class="bounty-guide-side">${guide}</aside><section class="bounty-board-main"><div class="contract-filter"><div class="segmented">${[
+        `<div class="bounty-board-layout"><aside class="bounty-guide-side">${guide}</aside><section class="bounty-board-main"><div class="contract-filter"><div class="segmented">${[
           ["open", "Available"],
           ["mine", "My bounties"],
           ["saved", "Saved"],
@@ -835,7 +835,6 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
       boardActions.className = "bounty-board-actions";
       boardActions.append($("#new-contract"), $("#my-history"), $("#show-challenge-guide"));
       $(".bounty-board-layout").before(boardActions);
-      $("#show-free-board").onclick = () => adapter.navigate({ name: "free-board" });
       const guidePanel = $("#challenge-guide"),
         closeGuide = $("#close-challenge-guide"),
         showGuide = $("#show-challenge-guide");

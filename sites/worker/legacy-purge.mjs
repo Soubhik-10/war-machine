@@ -1,11 +1,8 @@
 // V6 has a separate escrow. The owner authorized removing app-side pre-V6
 // records; this never submits a transaction or changes an on-chain escrow.
 const POLICY = "pathusd-direct-escrow-v6";
-const FREE_EMAIL_POLICY = "free-email-v1";
 const MARKER = "v6-predecessor-purge:1";
-// Free friend challenges are a current, no-escrow product. They must never be
-// treated as an old funded policy merely because their policy name is not V6.
-const legacy = `SELECT id FROM bounties WHERE COALESCE(fee_policy_version,'') NOT IN ('${POLICY}','${FREE_EMAIL_POLICY}')`;
+const legacy = `SELECT id FROM bounties WHERE COALESCE(fee_policy_version,'')<> '${POLICY}'`;
 const attempts = `SELECT id FROM attempts WHERE bounty IN (${legacy})`;
 const holds = `SELECT id FROM payment_holds WHERE (bounty IN (${legacy}) AND CASE WHEN json_valid(body) THEN COALESCE(CAST(json_extract(body,'$.escrowVersion') AS TEXT),'')<>'6' ELSE 1 END) OR CASE WHEN json_valid(body) THEN CAST(json_extract(body,'$.escrowVersion') AS TEXT) IN ('2','3','4','5') ELSE 0 END`;
 
@@ -13,8 +10,8 @@ export async function purgePreV6Bounties(db, config) {
   if (config?.escrowVersion !== "6") return { ran: false };
   if (await db.prepare("SELECT value FROM payment_kv WHERE key=?").bind(MARKER).first())
     return { ran: false };
-  const count = await db.prepare(`SELECT COUNT(*) AS total FROM bounties WHERE COALESCE(fee_policy_version,'') NOT IN (?,?)`)
-    .bind(POLICY, FREE_EMAIL_POLICY).first();
+  const count = await db.prepare(`SELECT COUNT(*) AS total FROM bounties WHERE COALESCE(fee_policy_version,'')<>?`)
+    .bind(POLICY).first();
   // D1 batch is transactional. The two no-delete triggers are restored in the
   // same transaction, retaining V6's immutable record and audit protections.
   const sql = [

@@ -115,41 +115,6 @@ const text = (value, max, label) => {
   );
   return value.trim();
 };
-const emailAddress = (value) => {
-  const normalized = text(value, 254, "email address").toLowerCase();
-  check(
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized),
-    "Use a valid email address.",
-  );
-  return normalized;
-};
-const emailReturnTo = (value) => {
-  if (value === undefined || value === null || value === "")
-    return "/#free-board";
-  const target = text(value, 300, "return destination");
-  check(
-    target.startsWith("/#") && !target.startsWith("//") && !/[\r\n]/.test(target),
-    "The email link can only return to this site.",
-  );
-  return target;
-};
-const emailAuthConfig = (env) => {
-  const apiKey = String(env.WM_EMAIL_AUTH_RESEND_API_KEY || ""),
-    from = String(env.WM_EMAIL_AUTH_FROM || ""),
-    secret = String(env.WM_EMAIL_AUTH_SECRET || "");
-  if (!apiKey || !from || !secret)
-    return {
-      ready: false,
-      reason:
-        "Email sign-in is not configured yet. Add the email delivery key, verified sender, and session secret before posting free challenges.",
-    };
-  if (secret.length < 32)
-    return {
-      ready: false,
-      reason: "The email session secret must be at least 32 characters.",
-    };
-  return { ready: true, apiKey, from, secret };
-};
 const optionalParticipantName = (value) =>
   value === undefined || value === null || value === ""
     ? null
@@ -210,23 +175,6 @@ const hex = async (value) => {
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 };
-const hmac = async (secret, value) => {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const bytes = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    new TextEncoder().encode(value),
-  );
-  return [...new Uint8Array(bytes)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-};
 const response = (value, status = 200, headers = {}) =>
   new Response(json(value), {
     status,
@@ -254,17 +202,6 @@ const SETTLEMENT_RESERVE_SECONDS = 120;
 const ESCROW_SETTLEMENT_GRACE_SECONDS = 120;
 const escrowPolicy = (version) => "pathusd-direct-escrow-v" + String(version);
 const CURRENT_ESCROW_POLICY = escrowPolicy("5");
-// Free friend challenges deliberately have their own policy. They hold no
-// funds, do not use MPP, and are never eligible for an escrow settlement job.
-const FREE_EMAIL_POLICY = "free-email-v1";
-const EMAIL_LOGIN_TOKEN_MS = 15 * 60 * 1000;
-const EMAIL_SESSION_MS = 30 * 24 * 60 * 60 * 1000;
-const EMAIL_RATE_WINDOW_MS = 15 * 60 * 1000;
-const EMAIL_RATE_PER_ADDRESS = 3;
-const EMAIL_RATE_PER_REQUESTER = 10;
-const FREE_MAX_OPEN_PER_ACCOUNT = 20;
-const FREE_MAX_CREATED_PER_DAY = 10;
-const FREE_MAX_HOURS = 7 * 24;
 const LEGACY_BOUNTY_ARCHIVE_KEY = "migration:archive-pre-v5-bounties-v1";
 const SETTLEMENT_RUNNER_KEY = "system:settlement-runner";
 const expectedSettlementDomain = (version, chainId, verifyingContract) =>
@@ -300,10 +237,10 @@ export async function archivePreV5Bounties(db, config = null) {
     await db
       .prepare(
         config?.escrowVersion === "6"
-          ? "SELECT id,status,listed,fee_policy_version FROM bounties WHERE COALESCE(fee_policy_version,'') NOT IN (?,?) AND listed=1 AND NOT (escrow_bounty_id IS NOT NULL AND (CAST(COALESCE(reserve_units,reward_units,'0') AS INTEGER)>0 OR status IN ('open','busy')))"
-          : "SELECT id,status,listed,fee_policy_version FROM bounties WHERE COALESCE(fee_policy_version,'') NOT IN (?,?) AND listed=1",
+          ? "SELECT id,status,listed,fee_policy_version FROM bounties WHERE COALESCE(fee_policy_version,'')<>? AND listed=1 AND NOT (escrow_bounty_id IS NOT NULL AND (CAST(COALESCE(reserve_units,reward_units,'0') AS INTEGER)>0 OR status IN ('open','busy')))"
+          : "SELECT id,status,listed,fee_policy_version FROM bounties WHERE COALESCE(fee_policy_version,'')<>? AND listed=1",
       )
-      .bind(escrowPolicy(config?.escrowVersion || "5"), FREE_EMAIL_POLICY)
+      .bind(escrowPolicy(config?.escrowVersion || "5"))
       .all()
   ).results;
   if (!rows.length) return;
@@ -1016,155 +953,6 @@ async function dbAuth(db, request) {
     .first();
   return row ? { ...row, account: row.id, role: "owner" } : null;
 }
-async function emailAuth(db, request) {
-  const value = cookie(request, "wm_email_session");
-  if (!value) return null;
-  const session = await db
-    .prepare(
-      "SELECT s.account,a.name FROM email_sessions s JOIN accounts a ON a.id=s.account WHERE s.token_hash=? AND s.expires>?",
-    )
-    .bind(await hex(value), now())
-    .first();
-  return session ? { account: session.account, id: session.account, name: session.name } : null;
-}
-const requireEmailAuth = (auth) =>
-  check(
-    auth,
-    "Verify your email to create or enter a hosted free challenge.",
-    401,
-  );
-async function accountForEmailHash(db, emailHash, displayName) {
-  const known = await db
-    .prepare(
-      "SELECT account FROM identities WHERE scheme='email' AND chain='magic-link-v1' AND address=?",
-    )
-    .bind(emailHash)
-    .first();
-  if (known) {
-    await db
-      .prepare("UPDATE accounts SET name=? WHERE id=?")
-      .bind(displayName, known.account)
-      .run();
-    return known.account;
-  }
-  const accountId = id(), created = now();
-  await db
-    .prepare(
-      "INSERT INTO accounts (id,token_hash,name,balance,entry_cap,daily_cap,created,payout_address) VALUES (?,?,?,?,?,?,?,NULL)",
-    )
-    .bind(accountId, "email:" + accountId, displayName, 0, null, null, created)
-    .run();
-  try {
-    await db
-      .prepare(
-        "INSERT INTO identities (scheme,chain,address,account,created) VALUES ('email','magic-link-v1',?,?,?)",
-      )
-      .bind(emailHash, accountId, created)
-      .run();
-  } catch (error) {
-    // The identity has a uniqueness constraint. If two verification requests
-    // race, both links still resolve to the one existing account.
-    const raced = await db
-      .prepare(
-        "SELECT account FROM identities WHERE scheme='email' AND chain='magic-link-v1' AND address=?",
-      )
-      .bind(emailHash)
-      .first();
-    if (!raced) throw error;
-    await db
-      .prepare("UPDATE accounts SET name=? WHERE id=?")
-      .bind(displayName, raced.account)
-      .run();
-    return raced.account;
-  }
-  return accountId;
-}
-async function requestEmailSignIn(db, request, body, origin, env) {
-  fields(body, ["email", "name", "returnTo"]);
-  const delivery = emailAuthConfig(env);
-  check(delivery.ready, delivery.reason, 503);
-  const address = emailAddress(body.email),
-    displayName = body.name === undefined || body.name === ""
-      ? "Independent engineer"
-      : text(body.name, 28, "display name"),
-    returnTo = emailReturnTo(body.returnTo),
-    emailHash = await hmac(delivery.secret, "email:" + address),
-    requester = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "unknown",
-    requesterHash = await hmac(delivery.secret, "requester:" + requester),
-    since = now() - EMAIL_RATE_WINDOW_MS;
-  check(!displayName.includes("@"), "Choose a display name instead of an email address.");
-  const [addressRate, requesterRate] = await Promise.all([
-    db.prepare("SELECT COUNT(*) AS total FROM email_login_tokens WHERE email_hash=? AND created>?")
-      .bind(emailHash, since).first(),
-    db.prepare("SELECT COUNT(*) AS total FROM email_login_tokens WHERE requester_hash=? AND created>?")
-      .bind(requesterHash, since).first(),
-  ]);
-  check(
-    Number(addressRate?.total || 0) < EMAIL_RATE_PER_ADDRESS &&
-      Number(requesterRate?.total || 0) < EMAIL_RATE_PER_REQUESTER,
-    "Too many email sign-in links were requested. Wait a few minutes and try again.",
-    429,
-  );
-  const token = randomSecret(), tokenId = id(), created = now(), expires = created + EMAIL_LOGIN_TOKEN_MS;
-  await db
-    .prepare("DELETE FROM email_login_tokens WHERE expires<? OR (used=1 AND created<?)")
-    .bind(created, created - EMAIL_LOGIN_TOKEN_MS)
-    .run();
-  await db
-    .prepare(
-      "INSERT INTO email_login_tokens (id,token_hash,email_hash,display_name,return_to,requester_hash,expires,used,created) VALUES (?,?,?,?,?,?,?,?,?)",
-    )
-    .bind(tokenId, await hex(token), emailHash, displayName, returnTo, requesterHash, expires, 0, created)
-    .run();
-  const verify = new URL("/api/auth/email/verify", origin);
-  verify.searchParams.set("token", token);
-  let delivered;
-  try {
-    delivered = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        authorization: "Bearer " + delivery.apiKey,
-        "content-type": "application/json",
-      },
-      body: json({
-        from: delivery.from,
-        to: [address],
-        subject: "Sign in to War Machines",
-        html: `<p>Use this one-time link to sign in to War Machines:</p><p><a href="${verify.toString()}">Sign in securely</a></p><p>This link expires in 15 minutes. No wallet or payment is involved.</p>`,
-      }),
-    });
-  } catch (error) {
-    await db.prepare("DELETE FROM email_login_tokens WHERE id=?").bind(tokenId).run();
-    fail(502, "Email delivery could not be reached. Try again shortly.");
-  }
-  if (!delivered.ok) {
-    await db.prepare("DELETE FROM email_login_tokens WHERE id=?").bind(tokenId).run();
-    fail(502, "Email delivery was rejected. Check the configured verified sender and try again.");
-  }
-  return { ok: true, expiresAt: expires, message: "Check your inbox for a secure sign-in link." };
-}
-async function verifyEmailSignIn(db, token, env) {
-  const delivery = emailAuthConfig(env);
-  check(delivery.ready, delivery.reason, 503);
-  check(typeof token === "string" && /^[A-Za-z0-9_-]{32,100}$/.test(token), "This email sign-in link is invalid or has expired.", 401);
-  const record = await db
-    .prepare("SELECT * FROM email_login_tokens WHERE token_hash=? AND expires>? AND used=0")
-    .bind(await hex(token), now())
-    .first();
-  check(record, "This email sign-in link is invalid, expired, or has already been used.", 401);
-  const consumed = await db
-    .prepare("UPDATE email_login_tokens SET used=1 WHERE id=? AND used=0 AND expires>?")
-    .bind(record.id, now())
-    .run();
-  check(consumed.meta.changes === 1, "This email sign-in link has already been used.", 401);
-  const accountId = await accountForEmailHash(db, record.email_hash, record.display_name);
-  const sessionToken = randomSecret(), created = now();
-  await db
-    .prepare("INSERT INTO email_sessions (id,token_hash,account,expires,created) VALUES (?,?,?,?,?)")
-    .bind(id(), await hex(sessionToken), accountId, created + EMAIL_SESSION_MS, created)
-    .run();
-  return { sessionToken, returnTo: record.return_to, accountId, expires: created + EMAIL_SESSION_MS };
-}
 const requireAuth = (auth) =>
   check(
     auth,
@@ -1653,263 +1441,6 @@ async function bountyView(db, row, viewer = null, history = false, config = null
   }
   return value;
 }
-
-async function freeBountyRow(db, bountyId) {
-  const row = await db
-    .prepare("SELECT * FROM bounties WHERE id=? AND fee_policy_version=?")
-    .bind(bountyId, FREE_EMAIL_POLICY)
-    .first();
-  return check(row, "Free challenge not found.", 404);
-}
-
-function enforceHostedComplexity(machine) {
-  const summary = stats(machine), issues = [];
-  if (machine.modules.length > PAID_SIMULATION_MAX_MODULES)
-    issues.push(`Hosted challenges support at most ${PAID_SIMULATION_MAX_MODULES} modules.`);
-  if (summary.weapons > PAID_SIMULATION_MAX_WEAPONS)
-    issues.push(`Hosted challenges support at most ${PAID_SIMULATION_MAX_WEAPONS} weapons.`);
-  check(!issues.length, issues.join(" "), 409);
-  return summary;
-}
-
-async function freeBountyView(db, row, viewer = null, history = false, options = {}) {
-  const owner = options.ownerName === undefined
-      ? await db.prepare("SELECT name FROM accounts WHERE id=?").bind(row.owner).first()
-      : { name: options.ownerName },
-    count = options.attempts === undefined
-      ? await db.prepare("SELECT COUNT(*) AS total FROM attempts WHERE bounty=?").bind(row.id).first()
-      : { total: options.attempts },
-    blueprint = parse(row.blueprint),
-    expired = !!row.expires && Number(row.expires) <= now(),
-    release = options.release === undefined
-      ? await readJournal(db, "bounty-release:" + row.id)
-      : options.release,
-    reasons = [];
-  if (!viewer) reasons.push("Verify an email address to join this hosted free challenge.");
-  if (viewer && row.owner === viewer) reasons.push("The creator cannot enter their own challenge.");
-  if (row.status !== "open") reasons.push("This free challenge is closed.");
-  if (expired) reasons.push("This free challenge has expired.");
-  if (release?.engineHash !== CLIENT_ENGINE_HASH)
-    reasons.push("This free challenge was created with an older game release. Repost it from the current board.");
-  const value = {
-    id: row.id,
-    kind: "free",
-    free: true,
-    official: true,
-    owner: row.owner,
-    ownerName: owner?.name || "Independent engineer",
-    title: row.title,
-    blueprint,
-    scout: scoutBlueprint(blueprint),
-    entry: "0",
-    reward: "0",
-    payout: "0",
-    platformFee: "0",
-    platformFeeBps: 0,
-    status: row.status,
-    listed: !!row.listed,
-    created: Number(row.created),
-    updated: Number(row.updated),
-    expires: row.expires ? Number(row.expires) : null,
-    attempts: Number(count?.total || 0),
-    versions: { hash: release?.engineHash || null },
-    links: {
-      share: "/#free=" + row.id,
-      self: "/api/free/bounties/" + row.id,
-      attempts: "/api/free/bounties/" + row.id + "/attempts",
-    },
-    availability: {
-      enter: { allowed: reasons.length === 0, reasons },
-      email: { required: true },
-      payment: { required: false, ready: true, reason: null },
-    },
-  };
-  if (history) {
-    const rows = await db
-      .prepare(
-        "SELECT a.id,a.status,a.result,a.blueprint,a.participant_name,a.created,a.updated,ac.name AS account_name FROM attempts a LEFT JOIN accounts ac ON ac.id=a.account WHERE a.bounty=? AND a.status='settled' ORDER BY a.created DESC LIMIT 20",
-      )
-      .bind(row.id)
-      .all();
-    value.history = rows.results.map((attempt) => ({
-      id: attempt.id,
-      status: attempt.status,
-      participantName: attempt.participant_name || attempt.account_name || "Independent engineer",
-      machineName: participantMachineName(attempt.blueprint),
-      result: attempt.result ? parse(attempt.result) : null,
-      created: Number(attempt.created),
-      updated: Number(attempt.updated),
-    }));
-  }
-  return value;
-}
-
-async function listFreeBounties(db, viewer, url) {
-  const rawLimit = url.searchParams.get("limit"),
-    limit = rawLimit === null ? 50 : Number(rawLimit);
-  check(Number.isSafeInteger(limit) && limit >= 1 && limit <= 50, "limit must be a whole number from 1 to 50.");
-  const rows = await db
-    .prepare(
-      "SELECT b.*,owner.name AS owner_name,COALESCE(attempt_count.total,0) AS attempt_total,release.value AS release_metadata FROM bounties b JOIN accounts owner ON owner.id=b.owner LEFT JOIN (SELECT bounty,COUNT(*) AS total FROM attempts GROUP BY bounty) attempt_count ON attempt_count.bounty=b.id LEFT JOIN payment_kv release ON release.key=('bounty-release:' || b.id) WHERE b.fee_policy_version=? AND b.listed=1 ORDER BY CASE b.status WHEN 'open' THEN 0 ELSE 1 END,b.updated DESC,b.id DESC LIMIT ?",
-    )
-    .bind(FREE_EMAIL_POLICY, limit)
-    .all();
-  return Promise.all(
-    rows.results.map((row) =>
-      freeBountyView(db, row, viewer?.account, false, {
-        ownerName: row.owner_name,
-        attempts: Number(row.attempt_total || 0),
-        release: safeJson(row.release_metadata),
-      }),
-    ),
-  );
-}
-
-async function createFreeBounty(db, auth, body, key) {
-  requireEmailAuth(auth);
-  fields(body, ["title", "blueprint", "hours", "listed"]);
-  const old = await prior(db, auth.account, key, "free-create", body);
-  if (old) return freeBountyView(db, await freeBountyRow(db, old), auth.account, true);
-  integer(body.hours, 1, FREE_MAX_HOURS, "Duration");
-  const blueprint = canonicalBlueprint(body.blueprint),
-    challenge = unpackChallenge(blueprint),
-    title = text(body.title, 70, "challenge title"),
-    listed = body.listed !== false,
-    created = now(),
-    openCount = await db
-      .prepare("SELECT COUNT(*) AS total FROM bounties WHERE owner=? AND fee_policy_version=? AND status='open'")
-      .bind(auth.account, FREE_EMAIL_POLICY)
-      .first(),
-    dailyCount = await db
-      .prepare("SELECT COUNT(*) AS total FROM bounties WHERE owner=? AND fee_policy_version=? AND created>=?")
-      .bind(auth.account, FREE_EMAIL_POLICY, created - 24 * 60 * 60 * 1000)
-      .first();
-  enforceHostedComplexity(challenge.machine);
-  check(Number(openCount?.total || 0) < FREE_MAX_OPEN_PER_ACCOUNT, "Close or wait for an existing free challenge before posting another.", 409);
-  check(Number(dailyCount?.total || 0) < FREE_MAX_CREATED_PER_DAY, "Free challenge posting limit reached. Try again tomorrow.", 429);
-  const bountyId = id(), expires = created + body.hours * 60 * 60 * 1000;
-  await db.batch([
-    db
-      .prepare(
-        "INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,expires,active_attempt,winner,created,updated,entry_units,reward_units,reserve_units,platform_fee_bps,fee_policy_version,platform_recipient) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-      )
-      .bind(bountyId, auth.account, title, json(blueprint), 0, 0, "open", listed ? 1 : 0, expires, null, null, created, created, "0", "0", "0", 0, FREE_EMAIL_POLICY, null),
-    db
-      .prepare("INSERT INTO payment_kv (key,value) VALUES (?,?)")
-      .bind("bounty-release:" + bountyId, json({ kind: FREE_EMAIL_POLICY, engineHash: CLIENT_ENGINE_HASH, created })),
-    db
-      .prepare("INSERT INTO idempotency (account,key,kind,digest,ref,created) VALUES (?,?,?,?,?,?)")
-      .bind(auth.account, key, "free-create", await hex(json(body)), bountyId, created),
-  ]);
-  return freeBountyView(db, await freeBountyRow(db, bountyId), auth.account, true);
-}
-
-async function freeAttemptView(db, attemptId, viewer) {
-  const attempt = await db.prepare("SELECT * FROM attempts WHERE id=?").bind(attemptId).first();
-  check(attempt, "Free challenge run not found.", 404);
-  const bounty = await freeBountyRow(db, attempt.bounty);
-  check(
-    viewer === attempt.account || viewer === bounty.owner,
-    "Only the challenge creator and verified challenger can inspect this run.",
-    403,
-  );
-  const challenger = parse(attempt.blueprint), defender = parse(bounty.blueprint), record = safeJson(attempt.match_record);
-  return {
-    id: attempt.id,
-    bounty: bounty.id,
-    kind: "free",
-    free: true,
-    official: true,
-    status: attempt.status,
-    participantName: attempt.participant_name || null,
-    machineName: participantMachineName(attempt.blueprint),
-    result: attempt.result ? parse(attempt.result) : null,
-    created: Number(attempt.created),
-    updated: Number(attempt.updated),
-    economics: { entry: "0", reward: "0", payout: "0", platformFee: "0", platformFeeBps: 0 },
-    payment: { state: "not-applicable", required: false },
-    replay: {
-      challenger,
-      defender,
-      arena: defender.a,
-      seed: Number(attempt.seed),
-      swapSpawns: !!(Number(attempt.seed) & 1),
-      versions: { hash: record?.engineHash || null },
-    },
-  };
-}
-
-async function enterFreeBounty(db, auth, bountyId, body, key) {
-  requireEmailAuth(auth);
-  fields(body, ["blueprint", "participantName"]);
-  const old = await prior(db, auth.account, key, "free-enter:" + bountyId, body);
-  if (old) return freeAttemptView(db, old, auth.account);
-  const bounty = await freeBountyRow(db, bountyId),
-    release = await readJournal(db, "bounty-release:" + bounty.id);
-  check(bounty.owner !== auth.account, "You cannot enter your own free challenge.", 403);
-  check(bounty.status === "open", "This free challenge is closed.", 409);
-  check(!bounty.expires || Number(bounty.expires) > now(), "This free challenge has expired.", 409);
-  check(release?.engineHash === CLIENT_ENGINE_HASH, "This free challenge was created with an older game release. Ask its creator to repost it.", 409);
-  const defender = parse(bounty.blueprint), blueprint = canonicalBlueprint(body.blueprint, defender), challenger = unpackChallenge(blueprint);
-  enforceHostedComplexity(challenger.machine);
-  const entered = await db
-    .prepare("SELECT attempt FROM free_bounty_entries WHERE bounty=? AND account=?")
-    .bind(bounty.id, auth.account)
-    .first();
-  check(!entered, "You have already completed this free challenge with this verified email account.", 409);
-  const seedBytes = new Uint32Array(1);
-  crypto.getRandomValues(seedBytes);
-  const seed = seedBytes[0], started = now();
-  const result = new Battle(challenger.machine, unpackChallenge(defender).machine, defender.a, seed, {
-    mode: "auto",
-    swapSpawns: !!(seed & 1),
-    objective: defender.o || challenger.objective || "reactor",
-    headless: true,
-  }).run();
-  check(result && [-1, 0, 1].includes(result.winner), "The hosted simulation could not produce a result. Retry with the same key.", 503);
-  const attemptId = id(), completed = now(), outcome = result.winner === 0 ? "win" : result.winner === 1 ? "loss" : "draw",
-    receipt = {
-      ...result,
-      seed,
-      outcome,
-      kind: "free",
-      official: true,
-      entry: "0",
-      grossReward: "0",
-      reward: "0",
-      payout: "0",
-      platformFee: "0",
-      platformFeeBps: 0,
-      net: "0",
-      verifiedAt: completed,
-    },
-    record = { version: 1, kind: FREE_EMAIL_POLICY, engineHash: CLIENT_ENGINE_HASH, seed, committedAt: completed };
-  try {
-    await db.batch([
-      db
-        .prepare("INSERT INTO attempts (id,bounty,account,blueprint,seed,status,result,error,created,updated,participant_name,show_address,match_record) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
-        .bind(attemptId, bounty.id, auth.account, json(blueprint), seed, "settled", json(receipt), null, started, completed, optionalParticipantName(body.participantName) || auth.name, 0, json(record)),
-      db
-        .prepare("INSERT INTO free_bounty_entries (bounty,account,attempt,created) VALUES (?,?,?,?)")
-        .bind(bounty.id, auth.account, attemptId, completed),
-      db
-        .prepare("INSERT INTO idempotency (account,key,kind,digest,ref,created) VALUES (?,?,?,?,?,?)")
-        .bind(auth.account, key, "free-enter:" + bounty.id, await hex(json(body)), attemptId, completed),
-      db
-        .prepare("UPDATE bounties SET updated=? WHERE id=? AND fee_policy_version=?")
-        .bind(completed, bounty.id, FREE_EMAIL_POLICY),
-    ]);
-  } catch (error) {
-    const raced = await db
-      .prepare("SELECT attempt FROM free_bounty_entries WHERE bounty=? AND account=?")
-      .bind(bounty.id, auth.account)
-      .first();
-    if (raced) fail(409, "You have already completed this free challenge with this verified email account.");
-    throw error;
-  }
-  return freeAttemptView(db, attemptId, auth.account);
-}
-
 async function recordFinancial(
   db,
   {
@@ -6831,8 +6362,7 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       // Payment-Authorization alias.
       ? await bodyOf(request.clone())
       : {},
-      sessionAuth = await dbAuth(db, request),
-      emailSession = await emailAuth(db, request);
+      sessionAuth = await dbAuth(db, request);
     let auth = sessionAuth;
     const privateAgentRoute = path.startsWith("/api/me") || /^\/api\/attempts\/[a-f0-9-]{36}$/.test(path);
     if (!auth && privateAgentRoute && config.agentBountyMppEnabled) {
@@ -6865,65 +6395,6 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
           "wm_session=; Path=/api; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
       });
     }
-    if (path === "/api/auth/email/request" && method === "POST")
-      return response(await requestEmailSignIn(db, request, body, url.origin, env), 202);
-    if (path === "/api/auth/email/verify" && method === "GET") {
-      const verified = await verifyEmailSignIn(db, url.searchParams.get("token"), env);
-      return new Response(null, {
-        status: 303,
-        headers: {
-          location: verified.returnTo,
-          "cache-control": "no-store",
-          "x-content-type-options": "nosniff",
-          "set-cookie": `wm_email_session=${verified.sessionToken}; Path=/api; HttpOnly; Secure; SameSite=Lax; Max-Age=${Math.floor(EMAIL_SESSION_MS / 1000)}`,
-        },
-      });
-    }
-    if (path === "/api/auth/email/me" && method === "GET") {
-      requireEmailAuth(emailSession);
-      return response({ id: emailSession.id, name: emailSession.name, kind: "email" });
-    }
-    if (path === "/api/auth/email/logout" && method === "POST") {
-      const value = cookie(request, "wm_email_session");
-      if (value)
-        await db
-          .prepare("DELETE FROM email_sessions WHERE token_hash=?")
-          .bind(await hex(value))
-          .run();
-      return response({ ok: true }, 200, {
-        "set-cookie": "wm_email_session=; Path=/api; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
-      });
-    }
-    if (path === "/api/free/bounties" && method === "GET")
-      return response(await listFreeBounties(db, emailSession, url));
-    if (path === "/api/free/bounties" && method === "POST")
-      return response(
-        await createFreeBounty(db, emailSession, body, request.headers.get("idempotency-key")),
-        201,
-      );
-    const freeMatch = path.match(/^\/api\/free\/bounties\/([a-f0-9-]{36})(?:\/(attempts|cancel))?$/);
-    if (freeMatch) {
-      const [, bountyId, action] = freeMatch;
-      if (!action && method === "GET")
-        return response(await freeBountyView(db, await freeBountyRow(db, bountyId), emailSession?.account, true));
-      if (action === "attempts" && method === "POST")
-        return response(await enterFreeBounty(db, emailSession, bountyId, body, request.headers.get("idempotency-key")), 201);
-      if (action === "cancel" && method === "POST") {
-        requireEmailAuth(emailSession);
-        fields(body, []);
-        const bounty = await freeBountyRow(db, bountyId);
-        check(bounty.owner === emailSession.account, "Only the creator can close this free challenge.", 403);
-        check(bounty.status === "open", "This free challenge is already closed.", 409);
-        await db
-          .prepare("UPDATE bounties SET status='cancelled',updated=? WHERE id=? AND fee_policy_version=? AND status='open'")
-          .bind(now(), bounty.id, FREE_EMAIL_POLICY)
-          .run();
-        return response(await freeBountyView(db, await freeBountyRow(db, bounty.id), emailSession.account, true));
-      }
-    }
-    const freeAttemptMatch = path.match(/^\/api\/free\/attempts\/([a-f0-9-]{36})$/);
-    if (freeAttemptMatch && method === "GET")
-      return response(await freeAttemptView(db, freeAttemptMatch[1], emailSession?.account));
     check(
       config.enabled,
       config.reason || "Mainnet payments are unavailable.",
