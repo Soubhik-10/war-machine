@@ -51,6 +51,15 @@ const GUIDE_DISMISSED_KEY = "wm-bounty-guide-dismissed";
 const validHash = (value) =>
   typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
 const officialReplayPlayed = new Set();
+export function boardScopeForFilter(filter, paid, authenticated) {
+  if (!paid || !authenticated) return "public";
+  return { mine: "mine", saved: "saved", completed: "history" }[filter] || "public";
+}
+export function settlementCapacityDescription(capacity) {
+  if (!capacity || capacity.ready) return "";
+  const role = (name, value) => `${name}: ${value?.state || "unavailable"}${value?.balanceUnits != null ? ` (${money(Number(value.balanceUnits) / 1e6)} pathUSD)` : ""}`;
+  return `${capacity.warning || "Settlement fee funding has not been verified."} ${role("Signer", capacity.signer)}; ${role("relayer", capacity.relayer)}. Checked: ${capacity.checkedAt ? time(capacity.checkedAt) : "never"}; ${capacity.fresh ? "fresh" : "stale or unavailable"}. Browsing and recovery remain available.`;
+}
 function clearOutbox() {
   localStorage.removeItem(OUTBOX_KEY);
 }
@@ -96,14 +105,26 @@ export function createBountyUI(adapter) {
     searchText = "",
     arenaFilter = "",
     feeFilter = "",
-    runtime = { mode: "sandbox", paid: false, currency: "sandbox credits" },
+    runtime = { mode: null, paid: null, currency: null },
     walletBalance = null,
     tempoClient = null,
-    accountUpdate = null;
+    accountUpdate = null,
+    routeAbort = null;
   let guideDismissed = read(GUIDE_DISMISSED_KEY, true) === true;
+  // GET state is deliberately scoped. A revealed bounty or account response
+  // must never be reused after sign-out or by another wallet.
   const getCache = new Map();
+  const getInFlight = new Map();
   const publicCachePrefix = "wm-public-cache-v1:";
-  function readPublicCache(path, ttl) {
+  const cacheScope = (path = "") => token
+    ? `account:${token}`
+    : /^\/bounties(?:[/?]|$)/.test(path) || path === "/me/bookmarks"
+      ? `account:${me?.payoutAddress || "unresolved-wallet"}`
+    : runtime.paid
+      ? `account:${me?.payoutAddress || "pending-wallet"}`
+      : "public";
+  function readPublicCache(path, ttl, scope) {
+    if (scope !== "public") return null;
     if (!ttl) return null;
     try {
       const raw = sessionStorage.getItem(publicCachePrefix + path);
@@ -111,16 +132,17 @@ export function createBountyUI(adapter) {
       const cached = JSON.parse(raw);
       if (!cached || typeof cached.time !== "number") return null;
       if (Date.now() - cached.time >= ttl) return null;
-      return cached.value;
+      return cached;
     } catch {
       return null;
     }
   }
-  function writePublicCache(path, value) {
+  function writePublicCache(path, value, scope, nextCursor = null) {
+    if (scope !== "public") return;
     try {
       sessionStorage.setItem(
         publicCachePrefix + path,
-        JSON.stringify({ time: Date.now(), value }),
+        JSON.stringify({ time: Date.now(), value, nextCursor }),
       );
     } catch {
       // Private browsing and embedded webviews may deny sessionStorage.
@@ -129,15 +151,31 @@ export function createBountyUI(adapter) {
   const cacheTtl = (path) =>
     path === "/rules"
       ? 10 * 60_000
-      : path === "/bounties"
+      : /^\/bounties(?:\?|$)/.test(path)
         ? 60_000
+        : path === "/me" || path === "/me/wallet"
+          ? 5_000
+          : path === "/me/bookmarks"
+            ? 15_000
         : /^\/bounties\//.test(path)
           ? 15_000
           : 0;
+  const invalidateMutationCache = () => {
+    getCache.clear();
+    for (let index = sessionStorage.length - 1; index >= 0; index--) {
+      const key = sessionStorage.key(index);
+      if (key?.startsWith(publicCachePrefix)) sessionStorage.removeItem(key);
+    }
+  };
   const invalidateBoardCache = () => {
     for (const key of getCache.keys()) {
-      if (key === "/bounties" || key.startsWith("/bounties/"))
+      if (key.endsWith(":/bounties") || key.includes(":/bounties?") || key.includes(":/bounties/"))
         getCache.delete(key);
+    }
+    for (let index = sessionStorage.length - 1; index >= 0; index--) {
+      const key = sessionStorage.key(index);
+      if (key?.startsWith(publicCachePrefix + "/bounties"))
+        sessionStorage.removeItem(key);
     }
   };
   const app = $("#app");
@@ -155,13 +193,22 @@ export function createBountyUI(adapter) {
   async function configureRuntime(catalog) {
     runtime = {
       mode: catalog.mode,
+      escrowVersion: String(catalog.directEscrow?.version || ""),
       paid:
         catalog.mode === "tempo-mainnet" &&
         catalog.directEscrow?.enabled === true,
       acceptingNewBounties:
         catalog.mode !== "tempo-mainnet" ||
         catalog.directEscrow?.acceptingNewBounties === true,
+      paymentHealth: catalog.paymentHealth || {
+        state: "unknown",
+        checkedAt: null,
+        fresh: false,
+        reason: "Payment readiness has not yet been verified.",
+      },
+      settlementCapacity: catalog.settlementCapacity || null,
       settlementReason:
+        catalog.paymentHealth?.reason ||
         catalog.directEscrow?.settlement?.reason ||
         catalog.activation?.reason ||
         null,
@@ -169,70 +216,138 @@ export function createBountyUI(adapter) {
     };
     return runtime;
   }
-  async function api(path, method = "GET", body, key) {
+  function requestError(error) {
+    if (error?.name === "AbortError")
+      return Error(
+        "The arena server took too long to finish responding. Try again. Your saved build is safe.",
+      );
+    return error instanceof Error
+      ? error
+      : Error("Cannot reach the arena server. Your saved build is safe.");
+  }
+  function subscribe(flight, signal) {
+    return new Promise((resolve, reject) => {
+      const subscriber = {};
+      const cleanup = () => {
+        flight.subscribers.delete(subscriber);
+        signal?.removeEventListener("abort", abort);
+      };
+      const abort = () => {
+        cleanup();
+        if (!flight.subscribers.size) flight.controller.abort();
+        const error = Error("Request cancelled because this screen changed.");
+        error.name = "AbortError";
+        reject(error);
+      };
+      if (signal?.aborted) return abort();
+      flight.subscribers.add(subscriber);
+      signal?.addEventListener("abort", abort, { once: true });
+      flight.promise.then(
+        (value) => {
+          cleanup();
+          resolve(value);
+        },
+        (error) => {
+          cleanup();
+          reject(error);
+        },
+      );
+    });
+  }
+  function sharedGet(path, request, key, ttl, signal) {
+    let flight = getInFlight.get(key);
+    if (!flight) {
+      const controller = new AbortController();
+      flight = { controller, subscribers: new Set(), promise: null };
+      flight.promise = (async () => {
+        const timeout = setTimeout(() => controller.abort(), 8_000);
+        try {
+          // Keep the deadline armed through response body consumption: fetch()
+          // resolving only says headers arrived, not that JSON is usable.
+          const response = await fetch("/api" + path, { ...request, signal: controller.signal });
+          let result;
+          try {
+            result = await response.json();
+          } catch {
+            throw Error("Bounties need a complete server response. Try again; the static workshop still works.");
+          }
+          if (!response.ok) {
+            const error = Error(result.error || "Request failed.");
+            error.status = response.status;
+            throw error;
+          }
+          const nextCursor = response.headers?.get("x-next-cursor") || null;
+          getCache.set(key, { time: Date.now(), value: result, nextCursor });
+          writePublicCache(path, result, key.slice(0, key.indexOf(":")), nextCursor);
+          return result;
+        } finally {
+          clearTimeout(timeout);
+          getInFlight.delete(key);
+        }
+      })();
+      getInFlight.set(key, flight);
+    }
+    return subscribe(flight, signal);
+  }
+  async function api(path, method = "GET", body, key, { signal } = {}) {
     const ttl = !body && method === "GET" ? cacheTtl(path) : 0;
+    const scope = cacheScope(path);
+    const scopedKey = `${scope}:${path}`;
     if (ttl) {
-      const cached = getCache.get(path);
+      const cached = getCache.get(scopedKey);
       if (cached && Date.now() - cached.time < ttl) return cached.value;
-      const stored = readPublicCache(path, ttl);
+      const stored = readPublicCache(path, ttl, scope);
       if (stored !== null) {
-        getCache.set(path, { time: Date.now(), value: stored });
-        return stored;
+        getCache.set(scopedKey, stored);
+        return stored.value;
       }
     }
-    let response;
+    const request = {
+      method,
+      credentials: "include",
+      headers: {
+        ...(token ? { Authorization: "Bearer " + token } : {}),
+        ...(body ? { "Content-Type": "application/json" } : {}),
+        ...(key ? { "Idempotency-Key": key } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    };
     try {
-      const request = {
-        method,
-        credentials: "include",
-        headers: {
-          ...(token ? { Authorization: "Bearer " + token } : {}),
-          ...(body ? { "Content-Type": "application/json" } : {}),
-          ...(key ? { "Idempotency-Key": key } : {}),
-        },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      };
-      const controller = new AbortController(),
-        timeout = setTimeout(
-          () => controller.abort(),
-          method === "GET" ? 8_000 : 45_000,
-        );
+      if (ttl) return await sharedGet(path, request, scopedKey, ttl, signal || routeAbort?.signal);
+      const controller = new AbortController();
+      const routeSignal = method === "GET" ? signal || routeAbort?.signal : null;
+      const cancelForRoute = () => controller.abort();
+      if (routeSignal?.aborted) controller.abort();
+      else routeSignal?.addEventListener("abort", cancelForRoute, { once: true });
+      const timeout = setTimeout(() => controller.abort(), method === "GET" ? 8_000 : 45_000);
       try {
-        response = await fetch("/api" + path, {
-          ...request,
-          signal: controller.signal,
-        });
+        const response = await fetch("/api" + path, { ...request, signal: controller.signal });
+        const result = await response.json();
+        if (!response.ok) {
+          const error = Error(result.error || "Request failed.");
+          error.status = response.status;
+          throw error;
+        }
+        // Mutations change board, detail and account state. Do not retain a
+        // generic GET response across them.
+        if (method !== "GET") invalidateMutationCache();
+        return result;
       } finally {
         clearTimeout(timeout);
+        routeSignal?.removeEventListener("abort", cancelForRoute);
       }
     } catch (e) {
-      if (e?.name === "AbortError")
-        throw Error(
-          "The arena server took too long to respond. Try Refresh board. Your saved build is safe.",
-        );
-      throw Error(
-        e?.message ||
-          "Cannot reach the arena server. Your saved build is safe.",
-      );
+      throw requestError(e);
     }
-    let result;
-    try {
-      result = await response.json();
-    } catch {
-      throw Error(
-        "Bounties need the game server. Start play-local.bat or node server.mjs. The static sandbox still works.",
-      );
-    }
-    if (!response.ok) {
-      const e = Error(result.error || "Request failed.");
-      e.status = response.status;
-      throw e;
-    }
-    if (ttl) {
-      getCache.set(path, { time: Date.now(), value: result });
-      writePublicCache(path, result);
-    }
-    return result;
+  }
+  async function boardPage(scope, cursor = null) {
+    const path = scope === "public" && !cursor
+      ? "/bounties"
+      : `/bounties?scope=${encodeURIComponent(scope)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const requestScope = cacheScope(path);
+    const items = await api(path);
+    return { items: Array.isArray(items) ? items : [],
+      nextCursor: getCache.get(`${requestScope}:${path}`)?.nextCursor || null };
   }
   async function ensurePaidWalletSession() {
     if (!runtime.paid || me) return me;
@@ -374,8 +489,16 @@ export function createBountyUI(adapter) {
   function leave() {
     generation++;
     clearTimeout(timer);
+    routeAbort?.abort();
+    routeAbort = null;
   }
   function begin() {
+    // A route owns its subscriptions, not the underlying shared request. The
+    // last departing subscriber aborts the network work; otherwise another
+    // screen can continue using the same GET without a duplicate request.
+    routeAbort?.abort();
+    routeAbort = new AbortController();
+    clearTimeout(timer);
     adapter.show();
     current = null;
     accountUpdate = null;
@@ -406,7 +529,8 @@ export function createBountyUI(adapter) {
   const bountyEscrowVersion = (b) =>
     Number(b?.escrowVersion ?? b?.payment?.escrowVersion ?? b?.protocolVersion ?? 0);
   const isLegacyV5 = (b) =>
-    b?.legacy === true || Number(b?.legacy) === 5 || bountyEscrowVersion(b) === 5;
+    runtime.escrowVersion === "6" &&
+    (b?.legacy === true || Number(b?.legacy) === 5 || bountyEscrowVersion(b) === 5);
   const bountyCardState = (b) => {
     if (bountyExpired(b)) return "expired";
     return b.status;
@@ -432,7 +556,9 @@ export function createBountyUI(adapter) {
   function header(title, subtitle) {
     const walletTitle =
         runtime.paid && me?.payoutAddress ? me.payoutAddress : "",
-      account = me
+      account = runtime.mode === null
+        ? "Checking wallet…"
+        : me
         ? runtime.paid
           ? `${shortAddress(me.payoutAddress)} · ${walletBalance ? money(walletBalance.balance) + " pathUSD" : "balance unavailable"}`
           : runtime.mode === "tempo-mainnet"
@@ -441,13 +567,19 @@ export function createBountyUI(adapter) {
         : runtime.mode === "tempo-mainnet"
           ? "Saved builds"
           : "Sign in for bounties",
-      season = runtime.paid
+      season = runtime.mode === null
+        ? "CHECKING ENVIRONMENT"
+        : runtime.paid
         ? "TEMPO MAINNET"
         : runtime.mode === "tempo-mainnet"
           ? "MAINNET SETUP"
           : "SANDBOX SEASON";
     const pending = pendingOutbox();
-    return `<div class="page-heading bounty-heading"><div><span class="eyebrow">WAR MACHINES BOUNTIES / ${season}</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><button id="contracts-home">All bounties</button>${me ? '<button id="build-vault">Build vault</button>' : ""}<button id="credits-btn" title="${esc(walletTitle)}" aria-label="${esc(walletTitle ? "Connected Tempo Wallet " + walletTitle : account)}">${esc(account)}</button>${runtime.paid && me ? '<button id="swap-pathusd" title="Swap a supported Tempo stablecoin into pathUSD">Swap to pathUSD</button><button id="disconnect-wallet" class="danger" title="Clear this browser’s Tempo Wallet connection">Disconnect</button>' : ""}</div></div>${pending ? `<div class="notice" role="status" aria-live="polite"><strong>Payment request saved.</strong> ${pending.transactionHash ? "The same transaction will be confirmed; no new wallet payment will be sent." : "No wallet charge has been recorded yet; recover with the saved idempotency key or discard this request."} <button id="recover-request">Recover request</button><button id="discard-request">Discard request</button></div>` : ""}`;
+    const capacity = runtime.settlementCapacity;
+    const capacityNotice = runtime.paid && capacity && !capacity.ready
+      ? `<div class="notice settlement-capacity-warning" role="alert"><strong>Settlement capacity warning</strong><p>${esc(settlementCapacityDescription(capacity))}</p></div>`
+      : "";
+    return `<div class="page-heading bounty-heading"><div><span class="eyebrow">WAR MACHINES BOUNTIES / ${season}</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><button id="contracts-home">All bounties</button>${me ? '<button id="build-vault">Build vault</button>' : ""}<button id="credits-btn" title="${esc(walletTitle)}" aria-label="${esc(walletTitle ? "Connected Tempo Wallet " + walletTitle : account)}">${esc(account)}</button>${runtime.paid && me ? '<button id="swap-pathusd" title="Swap a supported Tempo stablecoin into pathUSD">Swap to pathUSD</button><button id="disconnect-wallet" class="danger" title="Clear this browser’s Tempo Wallet connection">Disconnect</button>' : ""}</div></div>${capacityNotice}${pending ? `<div class="notice" role="status" aria-live="polite"><strong>Payment request saved.</strong> ${pending.transactionHash ? "The same transaction will be confirmed; no new wallet payment will be sent." : "No wallet charge has been recorded yet; recover with the saved idempotency key or discard this request."} <button id="recover-request">Recover request</button><button id="discard-request">Discard request</button></div>` : ""}`;
   }
   function wireHeader() {
     if ($("#contracts-home")) $("#contracts-home").onclick = () => open();
@@ -497,6 +629,7 @@ export function createBountyUI(adapter) {
     }
   }
   async function refreshMe({ skipWallet = false } = {}) {
+    const priorAccount = me?.payoutAddress || null;
     if (token || runtime.paid) {
       try {
         me = await api("/me");
@@ -504,6 +637,12 @@ export function createBountyUI(adapter) {
         if (e.status !== 401) throw e;
         me = null;
       }
+    }
+    if (priorAccount !== (me?.payoutAddress || null)) {
+      // Cookie-backed wallet sessions can change without a page reload.
+      // Private GET state belongs to the prior account and is discarded.
+      getCache.clear();
+      walletBalance = null;
     }
     walletBalance = null;
     if (runtime.paid && me?.payoutAddress) {
@@ -528,6 +667,7 @@ export function createBountyUI(adapter) {
     await (await ensureTempoClient()).logout();
     me = null;
     walletBalance = null;
+    invalidateMutationCache();
     await open(returnId);
   }
   function thumb(canvas, packed) {
@@ -586,13 +726,12 @@ export function createBountyUI(adapter) {
     node.replaceWith(shell.firstElementChild);
     wireHeader();
   }
-  async function open(id) {
+  async function open(id, { restore = false } = {}) {
+    if (!restore && adapter.navigate) {
+      adapter.navigate({ name: id ? "bounty" : "bounties", value: id || undefined });
+      return;
+    }
     const g = begin();
-    window.history.replaceState(
-      null,
-      "",
-      "#" + (id ? "bounty=" + id : "bounties"),
-    );
     app.innerHTML =
       header(
         "CHOOSE A CHALLENGE.",
@@ -603,14 +742,29 @@ export function createBountyUI(adapter) {
     try {
       // Start the public board request immediately and overlap it with the
       // rules/config request. The board does not need wallet state to load.
-      let dataError = null;
-      const dataRequest = api(id ? "/bounties/" + id : "/bounties").catch(
-        (error) => {
-          dataError = error;
-          return null;
-        },
-      );
-      const catalog = await api("/rules");
+      const boardRequestScope = cacheScope("/bounties");
+      const dataRequest = api(id ? "/bounties/" + id : "/bounties");
+      const catalogRequest = api("/rules");
+      const data = await dataRequest;
+      if (g !== generation) return;
+      // Configuration/readiness can be stale or checking without making the
+      // public board unusable. Paint useful challenge identities immediately;
+      // the later render supplies verified payment controls and economics.
+      if (id) {
+        app.innerHTML =
+          header("CHALLENGE LOADED.", "Loading current rules and payment controls…") +
+          `<section class="panel bounty-empty"><h2>${esc(data.title || "Challenge")}</h2><p>${esc(data.ownerName || "Arena engineer")} · ${esc(data.status || "available")}</p><p>Challenge details are ready. Payment eligibility is being verified separately.</p></section>`;
+      } else {
+        const publicRows = Array.isArray(data) ? data : [];
+        app.innerHTML =
+          header("CHOOSE A CHALLENGE.", "Browsing live challenges while payment readiness refreshes.") +
+          `<section class="bounty-board-main" aria-live="polite"><p class="notice">Payment controls are loading. You can browse challenges now.</p><div class="contract-grid">${publicRows.map((b) => `<article class="contract-card"><div class="contract-content"><h2>${esc(b.title)}</h2><p>${esc(b.ownerName || "Arena engineer")} · ${esc(String(b.status || "open").toUpperCase())}</p><button data-preview-contract="${esc(b.id)}">View challenge ↗</button></div></article>`).join("") || '<div class="bounty-empty">No challenges are listed right now.</div>'}</div></section>`;
+        $$('[data-preview-contract]').forEach((button) => {
+          button.onclick = () => open(button.dataset.previewContract);
+        });
+      }
+      wireHeader();
+      const catalog = await catalogRequest;
       await configureRuntime(catalog);
       currentFeeBps = catalog.economics.platformFee.basisPoints;
       if (catalog.versions.hash !== CLIENT_ENGINE_HASH)
@@ -620,21 +774,8 @@ export function createBountyUI(adapter) {
       // Account hydration is deliberately non-blocking. Wallet balance RPCs
       // can take tens of seconds while the public board is ready in a moment.
       const meRequest = refreshMe({ skipWallet: true }).catch(() => null);
-      const data = await dataRequest;
-      if (dataError) throw dataError;
       if (g !== generation) return;
       if (id) {
-        if (isLegacyV5(data)) {
-          app.innerHTML =
-            header(
-              "CHALLENGE ARCHIVED.",
-              "This legacy V5 bounty is no longer part of the active board.",
-            ) +
-            '<section class="panel bounty-empty"><p>This historical bounty has been removed from the player-facing challenge list. Its on-chain record is retained privately for audit and payment recovery; no new entry or machine submission is available.</p><button id="pending-contract">Back to active challenges</button></section>';
-          wireHeader();
-          $("#pending-contract").onclick = () => open();
-          return;
-        }
         current = data;
         detail(data, g);
         accountUpdate = () => {
@@ -660,7 +801,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
           ["open", "Available"],
           ["mine", "My bounties"],
           ["saved", "Saved"],
-          ["completed", "Completed"],
+          ["completed", "History"],
         ]
           .map(
             ([v, t]) =>
@@ -668,7 +809,7 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
           )
           .join(
             "",
-          )}</div><button id="refresh-contracts">⟳ Refresh board</button></div><div class="contract-search"><input id="contract-search" type="search" aria-label="Search bounties" placeholder="Search machines or bounties" value="${esc(searchText)}"><select id="arena-filter" aria-label="Filter bounties by arena"><option value="">All arenas</option>${ARENAS.map((a) => `<option value="${a.id}" ${a.id === arenaFilter ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select><input id="fee-filter" type="number" min="0" step="${runtime.paid ? ".01" : "1"}" aria-label="Maximum entry fee" placeholder="Max entry · any" value="${esc(feeFilter)}"></div><div class="contract-grid" id="contract-grid"></div><div class="notice bounty-footnote">${runtime.paid ? "Construction limits are separate from the reward. A paid run locks both machines, the arena, terrain and rules. A fresh seed decides the match." : "Construction limits are separate from the reward. A paid run locks both machines, the arena, terrain and rules. A fresh seed decides the match. Local simulation never pays rewards."}</div></section></div>`;
+          )}</div><button id="refresh-contracts">⟳ Refresh board</button></div><div class="contract-search"><input id="contract-search" type="search" aria-label="Search bounties" placeholder="Search machines or bounties" value="${esc(searchText)}"><select id="arena-filter" aria-label="Filter bounties by arena"><option value="">All arenas</option>${ARENAS.map((a) => `<option value="${a.id}" ${a.id === arenaFilter ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select><input id="fee-filter" type="number" min="0" step="${runtime.paid ? ".01" : "1"}" aria-label="Maximum entry fee" placeholder="Max entry · any" value="${esc(feeFilter)}"></div><div class="contract-grid" id="contract-grid"></div><button id="load-more-contracts" type="button" hidden>Load more challenges</button><div class="notice bounty-footnote">${runtime.paid ? "Construction limits are separate from the reward. A paid run locks both machines, the arena, terrain and rules. A fresh seed decides the match." : "Construction limits are separate from the reward. A paid run locks both machines, the arena, terrain and rules. A fresh seed decides the match. Local simulation never pays rewards."}</div></section></div>`;
       if (runtime.paid) {
         const feeInput = $("#fee-filter");
         if (feeInput) feeInput.step = "0.01";
@@ -695,17 +836,41 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
           guidePanel.hidden = false;
           showGuide.hidden = true;
         };
+      const scopeRows = new Map([["public", data]]),
+        scopeCursors = new Map([["public", getCache.get(`${boardRequestScope}:/bounties`)?.nextCursor || null]]),
+        scopeLoading = new Set();
+      const activeScope = () => boardScopeForFilter(filter, runtime.paid, !!me);
+      const loadScope = async (scope, more = false) => {
+        if (scopeLoading.has(scope) || (more && !scopeCursors.get(scope))) return;
+        scopeLoading.add(scope);
+        draw();
+        try {
+          const page = await boardPage(scope, more ? scopeCursors.get(scope) : null);
+          if (g !== generation) return;
+          const previous = more ? scopeRows.get(scope) || [] : [];
+          const known = new Set(previous.map((row) => row.id));
+          scopeRows.set(scope, [...previous, ...page.items.filter((row) => !known.has(row.id))]);
+          scopeCursors.set(scope, page.nextCursor);
+          if (scope === "saved") for (const row of page.items) savedIds.add(row.id);
+        } catch (error) {
+          if (g === generation) adapter.toast(error.message || "Board page could not load.");
+        } finally {
+          scopeLoading.delete(scope);
+          if (g === generation) draw();
+        }
+      };
       const draw = () => {
-        const shown = data.filter(
+        const scope = activeScope();
+        const rows = scopeRows.get(scope) || [];
+        const shown = rows.filter(
           (b) =>
-            !isLegacyV5(b) &&
             (filter === "mine"
               ? b.owner === me?.id
               : filter === "saved"
                 ? savedIds.has(b.id)
-                : filter === "open"
-                  ? ["open", "busy"].includes(b.status)
-                  : !["open", "busy"].includes(b.status)) &&
+              : filter === "open"
+                  ? !isLegacyV5(b) && ["open", "busy"].includes(b.status) && !bountyExpired(b)
+                  : !["open", "busy"].includes(b.status) || bountyExpired(b) || isLegacyV5(b)) &&
             (!arenaFilter || bountyArena(b).id === arenaFilter) &&
             (feeFilter === "" || b.entry <= +feeFilter) &&
             (!searchText ||
@@ -721,7 +886,10 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         });
         $("#contract-grid").innerHTML = shown.length
           ? shown.map(card).join("")
-          : '<div class="bounty-empty">No bounties yet. Create one from a workshop build.</div>';
+          : `<div class="bounty-empty">${scopeLoading.has(scope) ? "Loading challenges…" : runtime.paid && !me && filter !== "open" ? "Connect a wallet to view your private challenges." : "No bounties in this view."}</div>`;
+        const next = $("#load-more-contracts");
+        next.hidden = !scopeCursors.get(scope);
+        next.disabled = scopeLoading.has(scope);
         drawThumbs(shown);
         $$("[data-contract]").forEach(
           (b) => (b.onclick = () => open(b.dataset.contract)),
@@ -737,11 +905,11 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
       void meRequest.then(async () => {
         const saved = me ? await api("/me/bookmarks").catch(() => []) : [];
         savedIds = new Set(saved.map((b) => b.id));
-        for (const b of saved)
-          if (!data.some((n) => n.id === b.id)) data.push(b);
         if (g !== generation) return;
         refreshHeaderAccount();
         draw();
+        const scope = activeScope();
+        if (scope !== "public" && !scopeRows.has(scope)) void loadScope(scope);
       });
       $("#contract-search").oninput = (e) => {
         searchText = e.target.value;
@@ -763,17 +931,24 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
               t.classList.toggle("active", t === b),
             );
             draw();
+            const scope = activeScope();
+            if (scope !== "public" && !scopeRows.has(scope)) void loadScope(scope);
           }),
       );
+      $("#load-more-contracts").onclick = () => void loadScope(activeScope(), true);
       $("#new-contract").onclick = () =>
         runtime.paid || me ? create() : profile();
       $("#my-history").onclick = history;
       $("#refresh-contracts").onclick = () => open();
     } catch (e) {
       if (g !== generation) return;
+      const missing = id && e.status === 404;
+      const message = missing
+        ? "This challenge is no longer in the app database. Older escrow records were removed during the V6 cleanup; this did not change any on-chain escrow."
+        : e.message;
       app.innerHTML =
-        header("BOUNTIES UNAVAILABLE.", esc(e.message)) +
-        `<section class="panel bounty-empty"><p>${esc(e.message)}</p><button id="retry-contracts">Try again</button><button id="offline-workshop">Back to workshop</button>${e.status === 401 ? '<button id="reset-profile">Use a different profile key</button>' : ""}</section>`;
+        header(missing ? "CHALLENGE NOT FOUND." : "BOUNTIES UNAVAILABLE.", esc(message)) +
+        `<section class="panel bounty-empty"><p>${esc(message)}</p><button id="retry-contracts">Try again</button><button id="offline-workshop">Back to workshop</button>${e.status === 401 ? '<button id="reset-profile">Use a different profile key</button>' : ""}</section>`;
       wireHeader();
       $("#retry-contracts").onclick = () => open(id);
       $("#offline-workshop").onclick = adapter.workshop;
@@ -1149,6 +1324,9 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
   }
   async function attempt(id) {
     const g = begin();
+    let polling = false,
+      nextAccountRefresh = 0,
+      lastAccountState = "";
     app.innerHTML =
       header(
         "PAID RESULT.",
@@ -1210,11 +1388,23 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
       );
       await attempt(retried.id);
     }
+    function refreshAttemptAccount(a) {
+      // Result rendering owns the fast path. Account/balance polling has a
+      // separate cadence and is only accelerated for a payment transition.
+      const state = `${a.status}:${a.payment?.state || ""}:${a.result?.payoutStatus || ""}`;
+      const now = Date.now();
+      if (state === lastAccountState && now < nextAccountRefresh) return;
+      lastAccountState = state;
+      nextAccountRefresh = now + 30_000;
+      void refreshMe({ skipWallet: true }).catch(() => {});
+    }
     async function poll() {
+      if (polling) return;
+      polling = true;
       try {
         const a = await api("/attempts/" + id);
         if (g !== generation) return;
-        await refreshMe();
+        refreshAttemptAccount(a);
         if (a.status === "engineering") {
           const remaining = Math.max(
               0,
@@ -1376,6 +1566,8 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         wireHeader();
         $("#retry-attempt").onclick = () => attempt(id);
         schedule(poll, g, 5000);
+      } finally {
+        polling = false;
       }
     }
     await poll();

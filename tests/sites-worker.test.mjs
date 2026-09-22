@@ -13,7 +13,7 @@ import {
   runtimeConfig,
   validateEscrowAttestation,
 } from "../sites/worker/mainnet.mjs";
-import { packChallenge, PRESETS } from "../dist/data.mjs";
+import { packChallenge, PARTS, PRESETS, partSpec } from "../dist/data.mjs";
 import {
   pathUsdToUnits,
   payoutQuote,
@@ -44,8 +44,10 @@ class Statement {
 class D1Mock {
   constructor() {
     this.sqlite = new DatabaseSync(":memory:");
+    this.prepareCount = 0;
   }
   prepare(sql) {
+    this.prepareCount += 1;
     return new Statement(this.sqlite.prepare(sql));
   }
   async batch(statements) {
@@ -100,6 +102,12 @@ class D1Mock {
         "utf8",
       ),
     );
+    this.sqlite.exec(
+      await readFile(
+        new URL("../drizzle/0009_board_pagination.sql", import.meta.url),
+        "utf8",
+      ),
+    );
   }
   close() {
     this.sqlite.close();
@@ -151,6 +159,71 @@ test("pathUSD uses exact base units for cents and preserves the 2.5% fee quote",
   assert.equal(quote.platformFee, "0.025");
   assert.equal(quote.payout, "0.975");
   assert.equal(quote.netIfWin, "0.875");
+});
+
+test("mainnet board pages public scouts with bounded reads and hides unlisted, expired, and defender data", async (t) => {
+  const DB = new D1Mock();
+  await DB.migrate();
+  t.after(() => DB.close());
+  const stamp = Date.now(), blueprint = JSON.stringify(packChallenge(PRESETS[0], "foundry", 0));
+  DB.sqlite.prepare("INSERT INTO accounts (id,token_hash,name,balance,created,payout_address) VALUES (?,?,?,?,?,?)")
+    .run("board-owner", "board-owner-token", "Board owner", 0, stamp, "0x" + "11".repeat(20));
+  const insert = DB.sqlite.prepare("INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,expires,created,updated,entry_units,reward_units,reserve_units,platform_fee_bps,fee_policy_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+  for (let index = 0; index < 101; index += 1) {
+    const id = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    insert.run(id, "board-owner", "Scout " + index, blueprint, 0, 0, "open", 1, null, stamp - index, stamp - index, "10000", "1000000", "1000000", 250, "pathusd-direct-escrow-v5");
+  }
+  insert.run("10000000-0000-4000-8000-000000000000", "board-owner", "Unlisted", blueprint, 0, 0, "open", 0, null, stamp, stamp, "10000", "1000000", "1000000", 250, "pathusd-direct-escrow-v5");
+  insert.run("20000000-0000-4000-8000-000000000000", "board-owner", "Expired", blueprint, 0, 0, "open", 1, stamp, stamp, stamp, "10000", "1000000", "1000000", 250, "pathusd-direct-escrow-v5");
+  DB.sqlite.prepare("INSERT INTO accounts (id,token_hash,name,balance,created,payout_address) VALUES (?,?,?,?,?,?)")
+    .run("board-entrant", "board-entrant-token", "Board entrant", 0, stamp, "0x" + "22".repeat(20));
+  const sessions = DB.sqlite.prepare("INSERT INTO sessions (id,token_hash,account,expires,created) VALUES (?,?,?,?,?)");
+  sessions.run("owner-session", createHash("sha256").update("owner-board-cookie").digest("hex"), "board-owner", stamp + 60_000, stamp);
+  sessions.run("entrant-session", createHash("sha256").update("entrant-board-cookie").digest("hex"), "board-entrant", stamp + 60_000, stamp);
+  DB.sqlite.prepare("INSERT INTO attempts (id,bounty,account,blueprint,seed,status,created,updated) VALUES (?,?,?,?,?,?,?,?)")
+    .run("40000000-0000-4000-8000-000000000000", "10000000-0000-4000-8000-000000000000", "board-entrant", blueprint, 42, "engineering", stamp, stamp);
+  const env = { DB, WM_MODE: "tempo-mainnet", WM_BOUNTY_ESCROW_VERSION: "5", WM_BOUNTY_ESCROW_ADDRESS: "0x5555555555555555555555555555555555555555" };
+  const ctx = { waitUntil() {} };
+  DB.prepareCount = 0;
+  const first = await worker.fetch(new Request("https://foundry.example/api/bounties?limit=50"), env, ctx);
+  assert.equal(first.status, 200);
+  const firstRows = await first.json(), cursor = first.headers.get("x-next-cursor");
+  assert.equal(firstRows.length, 50);
+  assert.ok(cursor);
+  assert.ok(DB.prepareCount <= 3, `expected a bounded three-query public page, got ${DB.prepareCount}`);
+  assert.equal(firstRows.some((row) => row.title === "Unlisted" || row.title === "Expired" || row.blueprint), false);
+  insert.run("30000000-0000-4000-8000-000000000000", "board-owner", "Historical", blueprint, 0, 0, "open", 1, null, stamp, stamp, "10000", "1000000", "1000000", 250, "pathusd-direct-escrow-v4");
+  DB.sqlite.prepare("INSERT INTO bookmarks (account,bounty,created) VALUES (?,?,?)")
+    .run("board-entrant", "30000000-0000-4000-8000-000000000000", stamp);
+  const second = await worker.fetch(new Request("https://foundry.example/api/bounties?limit=50&cursor=" + encodeURIComponent(cursor)), env, ctx);
+  assert.equal(second.status, 200);
+  const secondRows = await second.json();
+  const third = await worker.fetch(new Request("https://foundry.example/api/bounties?limit=50&cursor=" + encodeURIComponent(second.headers.get("x-next-cursor"))), env, ctx);
+  assert.equal(third.status, 200);
+  const thirdRows = await third.json();
+  const ids = [...firstRows, ...secondRows, ...thirdRows].map((row) => row.id);
+  assert.equal(ids.length, 101);
+  assert.equal(new Set(ids).size, ids.length);
+  const owner = await worker.fetch(new Request("https://foundry.example/api/bounties?scope=mine&limit=100", { headers: { cookie: "wm_session=owner-board-cookie" } }), env, ctx);
+  assert.equal(owner.status, 200);
+  const ownerRows = await owner.json();
+  for (const title of ["Unlisted", "Expired", "Historical"])
+    assert.ok(ownerRows.some(row => row.title === title), `owner scope omitted ${title}`);
+  const saved = await worker.fetch(new Request("https://foundry.example/api/bounties?scope=saved", { headers: { cookie: "wm_session=entrant-board-cookie" } }), env, ctx);
+  assert.equal(saved.status, 200);
+  assert.deepEqual((await saved.json()).map(row => row.title), ["Historical"]);
+  const history = await worker.fetch(new Request("https://foundry.example/api/bounties?scope=history", { headers: { cookie: "wm_session=entrant-board-cookie" } }), env, ctx);
+  assert.equal(history.status, 200);
+  assert.ok((await history.json()).some(row => row.title === "Unlisted"), "entrant history includes its unlisted attempt");
+  const anonymous = await worker.fetch(new Request("https://foundry.example/api/bounties?scope=mine"), env, ctx);
+  assert.equal(anonymous.status, 401);
+  const invalidLimit = await worker.fetch(new Request("https://foundry.example/api/bounties?limit=101"), env, ctx);
+  const invalidCursor = await worker.fetch(new Request("https://foundry.example/api/bounties?cursor=not-a-cursor"), env, ctx);
+  assert.equal(invalidLimit.status, 400);
+  assert.equal(invalidCursor.status, 400);
+  const catalog = await (await worker.fetch(new Request("https://foundry.example/api/rules"), { DB })).json();
+  for (const part of PARTS) for (const grade of ["stock", "reinforced", "tuned"])
+    assert.equal(catalog.parts.find((candidate) => candidate.id === part.id).effectiveStats[grade].hp, partSpec({ id: part.id, u: grade }).hp);
 });
 
 test("settlement attestations bind the exact V3 Tempo escrow typed data", async () => {
@@ -273,6 +346,9 @@ test("native MPP exposes only paid bounty routes and uses the standard Authoriza
     ctx,
   );
   const discoveryBody = await discovery.json();
+  assert.equal(discoveryBody.settlementCapacity.signer.role, "settlement-signer");
+  assert.equal(discoveryBody.settlementCapacity.signer.minimumUnits, "10000");
+  assert.equal(typeof discoveryBody.settlementCapacity.fresh, "boolean");
   assert.equal(discoveryBody.payments.mpp, true);
   assert.deepEqual(discoveryBody.payments.mppRoutes, [
     {
@@ -295,6 +371,8 @@ test("native MPP exposes only paid bounty routes and uses the standard Authoriza
     openapi.body.components.securitySchemes.mppProof.name,
     "Authorization",
   );
+  assert.ok(openapi.body.components.schemas.SettlementCapacity);
+  assert.equal(openapi.body.components.schemas.Rules.properties.settlementCapacity.$ref, "#/components/schemas/SettlementCapacity");
 
   const challenge = await worker.fetch(
     new Request("https://foundry.example/api/bounties", {
@@ -1110,7 +1188,7 @@ test("completed paid bounties retain a public replay window", async () => {
   assert.match(workerSource, /COMPLETED_BOUNTY_BOARD_MS = 10 \* 60 \* 1000/);
   assert.match(
     workerSource,
-    /status IN \('completed','claimed'\) AND updated>=\?/,
+    /b\.status IN \('completed','claimed'\) AND b\.updated>=\?/,
   );
   assert.match(client, /RESULT .*10 MINUTES/);
   assert.match(client, /REWARD PAID/);

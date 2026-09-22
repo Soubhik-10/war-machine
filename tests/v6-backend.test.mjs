@@ -82,6 +82,7 @@ class D1Fixture {
       "0006_reset_bounty_board_v3.sql",
       "0007_attempt_identity.sql",
       "0008_escrow_policy_identity.sql",
+      "0009_board_pagination.sql",
     ])
       this.sqlite.exec(
         await readFile(new URL(`../drizzle/${name}`, import.meta.url), "utf8"),
@@ -295,7 +296,7 @@ test("V6 admission does not brick on funded V4 rows or pending legacy holds", as
   db.close();
 });
 
-test("V6 board keeps listed V5 bounties visible and read-only", async () => {
+test("V6 removes unlisted V5 app rows before board and direct-detail routes", async () => {
   const db = new D1Fixture();
   await db.migrate();
   const stamp = Date.now();
@@ -311,22 +312,28 @@ test("V6 board keeps listed V5 bounties visible and read-only", async () => {
     WM_ALLOW_ESCROW_V6: "true",
     DB: db,
   };
+  const pending = [];
+  const ctx = { waitUntil(work) { pending.push(work); } };
   try {
     const result = await mainnetFetch(
       new Request("https://foundry.example/api/bounties"),
       env,
-      { waitUntil() {} },
+      ctx,
       () => new Response("not found", { status: 404 }),
     );
     assert.equal(result.status, 200);
     const rows = await result.json();
-    const legacy = rows.find((row) => row.id === "55555555-5555-4555-8555-555555555555");
-    assert.equal(legacy.escrowVersion, "5");
-    assert.equal(legacy.legacy, true);
-    assert.equal(legacy.readOnly, true);
-    assert.equal(legacy.canEnter, false);
-    assert.match(legacy.compatibilityReason, /Legacy V5 challenge.*read-only/);
+    assert.equal(rows.some((row) => row.id === "55555555-5555-4555-8555-555555555555"), false);
+    const detail = await mainnetFetch(
+      new Request("https://foundry.example/api/bounties/55555555-5555-4555-8555-555555555555"),
+      env,
+      ctx,
+      () => new Response("not found", { status: 404 }),
+    );
+    assert.equal(detail.status, 404);
+    assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS total FROM bounties WHERE fee_policy_version<>'pathusd-direct-escrow-v6'").get().total, 0);
   } finally {
+    await Promise.allSettled(pending);
     db.close();
   }
 });
@@ -445,4 +452,50 @@ test("a finalized V6 timeout confirmation is idempotent and cannot spend the hol
     .get(ATTEMPT_ID);
   assert.deepEqual({ ...after }, { ...before });
   first.db.close();
+});
+
+test("fresh V6 chain, domain and balance checks permit a new wallet intent", async () => {
+  const db = new D1Fixture();
+  await db.migrate();
+  const stamp = Date.now();
+  const sessionToken = 'fresh-v6-create-session';
+  db.sqlite.prepare('INSERT INTO accounts(id,token_hash,name,balance,created,payout_address) VALUES (?,?,?,?,?,?)')
+    .run('fresh-creator', 'creator-token', 'Creator', 0, stamp, creator);
+  db.sqlite.prepare('INSERT INTO sessions(id,token_hash,account,expires,created) VALUES (?,?,?,?,?)')
+    .run('fresh-session', createHash('sha256').update(sessionToken).digest('hex'),
+      'fresh-creator', stamp + 600000, stamp);
+  const previousFetch = globalThis.fetch;
+  const methods = [];
+  globalThis.fetch = async (_url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    methods.push(method);
+    const result = method === 'eth_chainId' ? '0x1079'
+      : params?.[0]?.to?.toLowerCase() === V6_ESCROW.toLowerCase()
+        ? v6Domain(V6_ESCROW)
+        : '0x186a0';
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
+  };
+  try {
+    const result = await mainnetFetch(
+      new Request('https://foundry.example/api/bounties', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json',
+          'idempotency-key': 'fresh-v6-create-1234',
+          cookie: 'wm_session=' + sessionToken },
+        body: JSON.stringify({ title: 'Fresh V6', blueprint, entry: '0.01',
+          reward: '1', hours: 0, listed: true, maxPlatformFeeBps: 250 }),
+      }),
+      { ...base, WM_BOUNTY_ESCROW_VERSION: '6', WM_ALLOW_ESCROW_V6: 'true',
+        WM_TEMPO_RPC_URL: 'https://tempo-rpc.fixture', DB: db },
+      { waitUntil() {} },
+    );
+    const body = await result.json();
+    assert.equal(result.status, 202, JSON.stringify(body));
+    assert.equal(body.kind, 'create-bounty');
+    assert.ok(methods.includes('eth_chainId'));
+    assert.equal(methods.filter(method => method === 'eth_call').length, 2);
+  } finally {
+    globalThis.fetch = previousFetch;
+    db.close();
+  }
 });

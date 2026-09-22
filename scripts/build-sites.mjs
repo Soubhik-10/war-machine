@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, extname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { verifyRelease } from "./verify-release.mjs";
 
+verifyRelease();
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dist = resolve(root, "dist");
 const mime = {

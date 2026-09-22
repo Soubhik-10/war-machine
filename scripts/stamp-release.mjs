@@ -1,4 +1,4 @@
-// Regenerate after editing simulation or catalog data, before starting a release.
+// Explicit generation only, after authoritative simulation sources are final.
 import {writeFileSync} from 'node:fs';
 import {simulationHash} from '../server/simulation-hash.mjs';
 const hash=simulationHash();

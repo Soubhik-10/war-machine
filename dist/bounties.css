@@ -1064,6 +1064,21 @@
   }
   .payment-breakdown { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+@media (max-width: 640px) {
+  .bounty-heading { align-items: flex-start; }
+  .bounty-heading .heading-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+  .bounty-heading .heading-actions button { min-height: 44px; font-size: 13px; overflow-wrap: anywhere; }
+  .contract-filter { align-items: stretch; }
+  .contract-filter .segmented { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .contract-filter .segmented button, #refresh-contracts { min-height: 44px; }
+  #refresh-contracts { width: 100%; }
+  .contract-search { display: grid; grid-template-columns: 1fr 1fr; }
+  .contract-search input[type="search"] { grid-column: 1 / -1; }
+  .contract-search input, .contract-search select { min-height: 44px; }
+  .bounty-board-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .bounty-board-actions .guide-reopen { grid-column: 1 / -1; margin: 0; }
+}
 @media (max-width: 430px) {
   .contract-grid {
     grid-template-columns: 1fr;
@@ -1321,3 +1336,7 @@ body.official-replay .footer-note {
     height: 68dvh;
   }
 }
+.settlement-capacity-warning{border:2px solid #dba04b;background:rgba(84,46,17,.94);color:#fff1d5;margin:0 0 18px;padding:14px 18px}
+.settlement-capacity-warning strong{display:block;font-size:1rem;letter-spacing:.04em;text-transform:uppercase}
+.settlement-capacity-warning p{margin:8px 0;line-height:1.45}
+.settlement-capacity-warning small{display:block;line-height:1.4;color:#ffe2b0}

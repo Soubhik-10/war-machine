@@ -3,7 +3,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { verifyRelease } from "./verify-release.mjs";
 
+verifyRelease();
 const run = promisify(execFile),
   root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const archive = resolve(
@@ -50,6 +52,7 @@ for (const required of [
   "dist/.openai/drizzle/0003_paid_reveal.sql",
   "dist/.openai/drizzle/0007_attempt_identity.sql",
   "dist/.openai/drizzle/0008_escrow_policy_identity.sql",
+  "dist/.openai/drizzle/0009_board_pagination.sql",
 ])
   if (!stdout.split(/\r?\n/).includes(required))
     throw Error(`Archive is missing ${required}.`);

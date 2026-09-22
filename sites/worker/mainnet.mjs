@@ -34,6 +34,7 @@ import {
   environmentProfile,
   normalizeRules,
   packChallenge,
+  partSpec,
   stats,
   terrainAt,
   unpackChallenge,
@@ -54,7 +55,8 @@ import {
   payoutQuote,
   unitsToPathUsd,
 } from "./pathusd.mjs";
-import { paymentHealth } from "./payment-health.mjs";
+import { paymentHealth, paymentHealthSnapshot, persistedPaymentHealthSnapshot, settlementCapacity } from "./payment-health.mjs";
+import { purgePreV6Bounties } from "./legacy-purge.mjs";
 import { repairMislabeledBounties } from "./payment-migrations.mjs";
 import { mainnetOpenApi } from "./openapi.mjs";
 import { handleMcpRequest } from "../../server/mcp.mjs";
@@ -269,6 +271,19 @@ function requireV6PaymentAdmission(config) {
   );
 }
 
+async function refreshPaymentAdmission(db, config) {
+  config.paymentHealth = await paymentHealth(
+    db, config,
+    async address => pathUsdToUnits(await pathUsdBalance(config, address), { allowZero: true }),
+    async (method, params) => rpc(config, method, params),
+  );
+  config.acceptingNewBounties = !!config.automaticSettlementReady &&
+    (config.escrowVersion === "5" || config.escrowVersion === "6") &&
+    config.paymentHealth.ready && config.paymentHealth.fresh;
+  if (!config.acceptingNewBounties) config.settlementReason = config.paymentHealth.reason;
+  return config.paymentHealth;
+}
+
 function assertSavedRelayScope(saved, config, source) {
   if (!saved) return;
   if (saved.chainId != null)
@@ -317,6 +332,24 @@ async function canRevealDefender(db, row, accountId) {
     .bind(row.id, accountId)
     .first();
   return !!entered;
+}
+
+async function revealedBounties(db, rows, accountId) {
+  if (!accountId || !rows.length) return new Set();
+  const owned = new Set(
+    rows.filter((row) => row.owner === accountId).map((row) => row.id),
+  );
+  const ids = rows.filter((row) => !owned.has(row.id)).map((row) => row.id);
+  if (!ids.length) return owned;
+  const placeholders = ids.map(() => "?").join(",");
+  const entered = await db
+    .prepare(
+      `SELECT DISTINCT bounty FROM attempts WHERE account=? AND bounty IN (${placeholders})`,
+    )
+    .bind(accountId, ...ids)
+    .all();
+  for (const row of entered.results) owned.add(row.bounty);
+  return owned;
 }
 
 function canonicalBlueprint(input, locked) {
@@ -537,10 +570,51 @@ export function runtimeConfig(env, origin) {
   };
 }
 
+const CATALOG_STAT_FIELDS = [
+  "cost",
+  "hp",
+  "mass",
+  "damage",
+  "heat",
+  "power",
+  "cooling",
+  "thrust",
+  "shield",
+];
+
+function catalogStats(part, grade) {
+  const spec = partSpec({ id: part.id, u: grade });
+  return Object.fromEntries(
+    CATALOG_STAT_FIELDS.filter((field) => spec?.[field] !== undefined).map(
+      (field) => [field, spec[field]],
+    ),
+  );
+}
+
+function catalogParts() {
+  return PARTS.map((part) => ({
+    ...part,
+    ...PART_GUIDANCE[part.id],
+    baseStats: Object.fromEntries(
+      CATALOG_STAT_FIELDS.filter((field) => part[field] !== undefined).map(
+        (field) => [field, part[field]],
+      ),
+    ),
+    effectiveStats: Object.fromEntries(
+      ["stock", "reinforced", "tuned"].map((grade) => [
+        grade,
+        catalogStats(part, grade),
+      ]),
+    ),
+  }));
+}
+
 function catalog(config) {
   const paid = config.enabled,
     acceptingNewBounties = paid && config.acceptingNewBounties;
   return {
+    paymentHealth: config.paymentHealth,
+    settlementCapacity: settlementCapacity(config.paymentHealth),
     mode: "tempo-mainnet",
     apiVersion: config.escrowVersion === "6"
       ? "6.0-held-entry-escrow"
@@ -697,7 +771,10 @@ function catalog(config) {
       description: "Official paid matches use a bounded headless simulation budget; unrestricted builds remain available in the free sandbox.",
     },
     startingCredits: 0,
-    parts: PARTS.map((part) => ({ ...part, ...PART_GUIDANCE[part.id] })),
+    // Keep the historical top-level fields for existing builders.  Their HP
+    // is the authored base value, while combat spawns use partSpec (including
+    // the global HP scale and grade modifiers), so publish both explicitly.
+    parts: catalogParts(),
     arenas: ARENAS,
     defaultRules: DEFAULT_RULES,
     examples: PRESETS.map((machine) => packChallenge(machine, "foundry", 0)),
@@ -728,6 +805,8 @@ function catalog(config) {
 }
 
 const discovery = (config) => ({
+  paymentHealth: config.paymentHealth,
+  settlementCapacity: settlementCapacity(config.paymentHealth),
   name: "War Machines",
   version: config.escrowVersion === "6" ? "6.0" : config.escrowVersion === "5" ? "5.0" : config.agentBountyMppEnabled ? "4.0" : "3.2",
   mode: "tempo-mainnet",
@@ -1178,10 +1257,11 @@ async function bountyRow(db, bountyId) {
     .first();
   return check(row, "Bounty not found.", 404);
 }
-export async function bountyRelease(db, row) {
-  const saved = await readJournal(db, "bounty-release:" + row.id);
+export async function bountyRelease(db, row, { reconstruct = true } = {}) {
+  let saved = row.release_metadata ? safeJson(row.release_metadata) : null;
+  if (!saved) saved = await readJournal(db, "bounty-release:" + row.id);
   if (saved?.engineHash) return saved;
-  if (!row.terms_hash) return null;
+  if (!reconstruct || !row.terms_hash) return null;
   // Recover a historical engine only by matching the terms commitment. Never
   // relabel an old funded bounty with whichever engine happens to be running.
   const creator = await payoutAddress(db, row.owner);
@@ -1199,6 +1279,32 @@ export async function bountyRelease(db, row) {
   return null;
 }
 
+function safeJson(value) {
+  try {
+    return parse(value);
+  } catch {
+    return null;
+  }
+}
+
+async function persistBountyRelease(db, row, release, config) {
+  if (!release?.engineHash) return;
+  await db
+    .prepare(
+      "INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING",
+    )
+    .bind(
+      "bounty-release:" + row.id,
+      json({
+        engineHash: release.engineHash,
+        chainId: release.chainId || config?.chainId,
+        escrowAddress: release.escrowAddress || config?.escrowAddress,
+        escrowVersion: release.escrowVersion || release.termsVersion || config?.escrowVersion,
+      }),
+    )
+    .run();
+}
+
 async function requireCurrentBounty(db, row, config) {
   const release = await bountyRelease(db, row);
   check(release?.engineHash === CLIENT_ENGINE_HASH, "This bounty uses an older or unknown engine. New entries are closed; its owner can cancel and recreate it.", 409);
@@ -1213,26 +1319,41 @@ function releaseStatement(db, bountyId, saved, config) {
     .bind("bounty-release:" + bountyId, json({ engineHash: saved.engineHash, chainId: saved.chainId || config.chainId, escrowAddress: saved.escrowAddress || config.escrowAddress, escrowVersion: saved.escrowVersion || config.escrowVersion }));
 }
 
-async function bountyView(db, row, viewer = null, history = false, config = null) {
-  const owner = await db
-      .prepare("SELECT name FROM accounts WHERE id=?")
-      .bind(row.owner)
-      .first(),
+async function bountyView(db, row, viewer = null, history = false, config = null, options = {}) {
+  const owner = options.ownerName === undefined
+      ? await db.prepare("SELECT name FROM accounts WHERE id=?").bind(row.owner).first()
+      : { name: options.ownerName },
     quote = payoutQuote(
       row.reward_units,
       row.entry_units,
       row.platform_fee_bps ?? PLATFORM_FEE_BPS,
-    ),
-    count = await db
-      .prepare("SELECT COUNT(*) AS total FROM attempts WHERE bounty=?")
-      .bind(row.id)
-      .first();
+    );
+  const count = options.attempts === undefined
+    ? await db.prepare("SELECT COUNT(*) AS total FROM attempts WHERE bounty=?").bind(row.id).first()
+    : { total: options.attempts };
   const blueprint = parse(row.blueprint);
-  const release = await bountyRelease(db, row);
+  const release = options.release === undefined
+    ? await bountyRelease(db, row, { reconstruct: !options.list })
+    : options.release;
+  if (!options.list && release?.verifiedTerms)
+    await persistBountyRelease(db, row, release, config);
   const legacy = config?.escrowVersion === "6" && row.fee_policy_version !== escrowPolicy(config.escrowVersion);
   let complexityIssues = [];
   try { complexityIssues = paidComplexityIssues(unpackChallenge(blueprint).machine).issues; } catch { complexityIssues = ["The paid blueprint could not be replayed under the current catalog."]; }
-  const revealed = await canRevealDefender(db, row, viewer);
+  const revealed = options.revealed === undefined
+    ? await canRevealDefender(db, row, viewer)
+    : options.revealed;
+  const expired = !!row.expires && Number(row.expires) <= now();
+  const entryReasons = [];
+  if (legacy) entryReasons.push("Legacy escrow policy is read-only.");
+  if (!release?.engineHash) entryReasons.push("The committed engine metadata is unavailable; use the bounty detail or owner history for recovery.");
+  else if (release.engineHash !== CLIENT_ENGINE_HASH) entryReasons.push("New entry requires the current engine; existing attempts retain their committed version.");
+  if (complexityIssues.length) entryReasons.push(complexityIssues[0]);
+  if (row.status !== "open") entryReasons.push("This bounty is not idle and open.");
+  if (expired) entryReasons.push("This bounty has expired.");
+  if (viewer && row.owner === viewer) entryReasons.push("The creator cannot enter their own bounty.");
+  const canEnter = entryReasons.length === 0;
+  const paymentReady = !config?.enabled || !!config.paymentHealth?.ready && !!config.paymentHealth?.fresh;
   const value = {
     id: row.id,
     owner: row.owner,
@@ -1260,13 +1381,27 @@ async function bountyView(db, row, viewer = null, history = false, config = null
     escrowVersion: row.fee_policy_version?.split("-v").at(-1) || null,
     legacy,
     readOnly: legacy,
-    canEnter: !legacy && release?.engineHash === CLIENT_ENGINE_HASH && complexityIssues.length === 0 && row.status === "open",
+    canEnter,
     compatible: !legacy && release?.engineHash === CLIENT_ENGINE_HASH && complexityIssues.length === 0,
+    compatibilityState: !release?.engineHash
+      ? "metadata-unavailable"
+      : legacy
+        ? "legacy-read-only"
+        : release.engineHash === CLIENT_ENGINE_HASH && complexityIssues.length === 0
+          ? "current"
+          : "incompatible",
     compatibilityReason: legacy
       ? "Legacy V5 challenge — read-only"
       : release?.engineHash !== CLIENT_ENGINE_HASH
       ? "New entry requires the current engine; existing attempts retain their committed version."
       : complexityIssues[0] || null,
+    availability: {
+      enter: { allowed: canEnter, reasons: entryReasons },
+      payment: {
+        ready: paymentReady,
+        reason: paymentReady ? null : config?.paymentHealth?.reason || "Payment admission is unavailable.",
+      },
+    },
     activeAttempt: row.active_attempt,
     attempts: count.total,
     funded:
@@ -1448,6 +1583,7 @@ export async function mppCharge(
   // deployment into a fresh 402 challenge. Existing journals took the
   // recovery path above and remain available for receipt reconciliation.
   if (monetary) {
+    await refreshPaymentAdmission(db, config);
     check(config.acceptingNewBounties, config.settlementReason || "Paid bounty admission is temporarily unavailable.", 503);
     requireV6PaymentAdmission(config);
   }
@@ -2750,40 +2886,47 @@ const settlementTypedData = (config, payload) => ({
   primaryType: "Settlement",
   message: settlementMessage(payload),
 });
-async function rpc(config, method, params) {
-  let reply;
+export async function rpc(config, method, params, options = {}) {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timeoutMs = options.timeoutMs ?? 2_500;
+  const abort = () => controller.abort();
+  options.signal?.addEventListener("abort", abort, { once: true });
+  let timer;
   try {
-    reply = await fetch(config.rpcUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: json({ jsonrpc: "2.0", id: 1, method, params }),
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(Error("Tempo RPC deadline exceeded."));
+      }, timeoutMs);
     });
-  } catch {
-    fail(
-      503,
-      "Tempo RPC could not be reached. Retry the saved request; do not submit another wallet payment.",
-    );
+    const query = (async () => {
+      const response = await fetch(config.rpcUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: json({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: controller.signal,
+      });
+      check(response.ok, "Tempo RPC is unavailable. Retry without sending a different transaction.", 503);
+      let value;
+      try { value = await response.json(); }
+      catch { fail(502, "Tempo RPC returned an invalid response. Retry the saved request; do not submit another wallet payment."); }
+      check(value && typeof value === "object" && Object.hasOwn(value, "result") && !value.error,
+        value?.error?.message || "Tempo RPC returned an invalid response.", 502);
+      return value.result;
+    })();
+    return await Promise.race([query, deadline]);
+  } catch (error) {
+    if (error.status) throw error;
+    fail(503, /deadline|abort/i.test(String(error?.message || error))
+      ? "Tempo RPC timed out. Retry the saved request; do not submit another wallet payment."
+      : "Tempo RPC could not be reached. Retry the saved request; do not submit another wallet payment.");
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abort);
+    if (Date.now() - started >= 500)
+      console.info("Tempo RPC slow", { method, elapsedMs: Date.now() - started });
   }
-  check(
-    reply.ok,
-    "Tempo RPC is unavailable. Retry without sending a different transaction.",
-    503,
-  );
-  let value;
-  try {
-    value = await reply.json();
-  } catch {
-    fail(
-      502,
-      "Tempo RPC returned an invalid response. Retry the saved request; do not submit another wallet payment.",
-    );
-  }
-  check(
-    !value.error,
-    value.error?.message || "Tempo RPC rejected the request.",
-    502,
-  );
-  return value.result;
 }
 async function pathUsdBalance(config, address) {
   const data = encodeFunctionData({
@@ -3165,6 +3308,7 @@ export async function mppCreateBounty(db, config, request, body, key, internal =
   }
   if (!existingJournal && (!state || state.phase === "quoted")) {
     enforcePaidComplexity(unpackChallenge(blueprint).machine);
+    await refreshPaymentAdmission(db, config);
     requireV6PaymentAdmission(config);
   }
   if (!existingJournal && (!state || state.phase === "quoted"))
@@ -3533,6 +3677,7 @@ export async function mppEnterBounty(db, config, request, bountyId, body, key, i
     if (denied) return denied;
   }
   if (!existingJournal && (!state || state.phase === "quoted")) {
+    await refreshPaymentAdmission(db, config);
     requireV6PaymentAdmission(config);
   }
   if (!existingJournal && (!state || state.phase === "quoted"))
@@ -3975,7 +4120,6 @@ export function boundedUnits(value, allowZero = false) {
 }
 async function directCreateIntent(db, auth, body, key, config) {
   requireScope(auth, "create");
-  check(config.acceptingNewBounties, config.settlementReason, 503);
   fields(body, [
     "title",
     "blueprint",
@@ -4024,6 +4168,8 @@ async function directCreateIntent(db, auth, body, key, config) {
       };
     return directPlanFromCreate(config, hold);
   }
+  await refreshPaymentAdmission(db, config);
+  check(config.acceptingNewBounties, config.settlementReason, 503);
   const count = await db
     .prepare(
       "SELECT COUNT(*) AS total FROM bounties WHERE owner=? AND status IN ('open','busy')",
@@ -4113,7 +4259,6 @@ function directPlanFromCreate(config, hold) {
 }
 async function directEntryIntent(db, auth, bountyId, body, key, config) {
   requireScope(auth, "enter");
-  check(config.acceptingNewBounties, config.settlementReason, 503);
   fields(body, [
     "maxEntry",
     "maxPlatformFeeBps",
@@ -4169,6 +4314,8 @@ async function directEntryIntent(db, auth, bountyId, body, key, config) {
       };
     return directPlanFromEntry(config, hold, row);
   }
+  await refreshPaymentAdmission(db, config);
+  check(config.acceptingNewBounties, config.settlementReason, 503);
   await requireCurrentBounty(db, row, config);
   const created = now();
   await db
@@ -5912,19 +6059,24 @@ export async function recoverAgentBountyPayments(db, config) {
   }
 }
 
-export async function runAutomaticSettlement(env) {
-  const config = runtimeConfig(env, "https://service.internal");
-  if (!config.enabled || !config.automaticSettlementReady || !env.DB) return;
+export async function acquireSettlementRunnerLease(db, at = now()) {
   // Fetch requests can overlap in a stateless Worker. Claim one short-lived
   // runner lease so two invocations cannot write the same D1 rows together.
-  const runnerExpiry = now() + 30_000;
-  const runner = await env.DB
+  const runner = await db
     .prepare(
       "INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(json_extract(payment_kv.value,'$.expires') AS INTEGER)<?",
     )
-    .bind(SETTLEMENT_RUNNER_KEY, json({ expires: runnerExpiry }), now())
+    .bind(SETTLEMENT_RUNNER_KEY, json({ expires: at + 30_000 }), at)
     .run();
-  if (runner.meta.changes !== 1) return;
+  return runner.meta.changes === 1;
+}
+
+export async function runAutomaticSettlement(env, reason = "scheduled") {
+  const config = runtimeConfig(env, "https://service.internal");
+  if (!config.enabled || !config.automaticSettlementReady || !env.DB) return;
+  await purgePreV6Bounties(env.DB, config);
+  console.info("Automatic settlement invoked", { reason });
+  if (!await acquireSettlementRunnerLease(env.DB)) return;
   try {
     await recoverAgentBountyPayments(env.DB, config);
     await repairMislabeledBounties(env.DB, config, hash => receipt(config, hash));
@@ -6025,26 +6177,126 @@ export async function runAutomaticSettlement(env) {
     }
   } catch (error) {
     console.error("War Machines V3 automatic settlement:", error);
+    throw error;
   }
+}
+
+const BOARD_LIMIT_DEFAULT = 50;
+const BOARD_LIMIT_MAX = 100;
+const BOARD_STATUS_RANK = "CASE b.status WHEN 'open' THEN 0 WHEN 'busy' THEN 1 WHEN 'completed' THEN 2 WHEN 'claimed' THEN 2 ELSE 3 END";
+
+function boardPageRequest(url) {
+  const scope = url.searchParams.get("scope") || "public";
+  check(["public", "mine", "history", "saved"].includes(scope), "scope must be public, mine, history, or saved.");
+  const rawLimit = url.searchParams.get("limit");
+  const limit = rawLimit === null ? BOARD_LIMIT_DEFAULT : Number(rawLimit);
+  check(Number.isInteger(limit) && (rawLimit === null || String(limit) === rawLimit) && limit >= 1 && limit <= BOARD_LIMIT_MAX, `limit must be an integer from 1 to ${BOARD_LIMIT_MAX}.`);
+  const rawCursor = url.searchParams.get("cursor");
+  if (!rawCursor) return { scope, limit, cursor: null };
+  let cursor;
+  try {
+    const normalized = rawCursor.replace(/-/g, "+").replace(/_/g, "/");
+    cursor = JSON.parse(atob(normalized + "=".repeat((4 - normalized.length % 4) % 4)));
+  } catch {
+    fail(400, "cursor must be a board cursor returned by this endpoint.");
+  }
+  check(cursor && cursor.scope === scope && Number.isInteger(cursor.rank) && Number.isFinite(cursor.updated) && typeof cursor.id === "string" && cursor.id.length > 0 && cursor.id.length <= 200, "cursor must be a board cursor returned by this endpoint.");
+  return { scope, limit, cursor };
+}
+
+function boardCursor(scope, row) {
+  return btoa(JSON.stringify({ scope, rank: Number(row.status_rank), updated: Number(row.updated), id: row.id }))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function boardPage(db, url, auth, config) {
+  const page = boardPageRequest(url);
+  let where, bindings;
+  const completedAfter = now() - COMPLETED_BOUNTY_BOARD_MS;
+  if (page.scope === "public") {
+    where = "b.entry_units IS NOT NULL AND b.fee_policy_version=? AND b.listed=1 AND ((b.status='open' AND (b.expires IS NULL OR b.expires=0 OR b.expires>?)) OR b.status='busy' OR (b.status IN ('completed','claimed') AND b.updated>=?))";
+    bindings = [escrowPolicy(config.escrowVersion), now(), completedAfter];
+  } else {
+    requireScope(auth, "read");
+    if (page.scope === "mine") {
+      where = "b.entry_units IS NOT NULL AND b.owner=?";
+      bindings = [auth.account];
+    } else if (page.scope === "history") {
+      where = "b.entry_units IS NOT NULL AND (b.owner=? OR EXISTS (SELECT 1 FROM attempts owned_attempt WHERE owned_attempt.bounty=b.id AND owned_attempt.account=?))";
+      bindings = [auth.account, auth.account];
+    } else {
+      where = "b.entry_units IS NOT NULL AND bookmark.account=?";
+      bindings = [auth.account];
+    }
+  }
+  if (page.cursor) {
+    where += ` AND (${BOARD_STATUS_RANK} > ? OR (${BOARD_STATUS_RANK} = ? AND (b.updated < ? OR (b.updated = ? AND b.id < ?))))`;
+    bindings.push(page.cursor.rank, page.cursor.rank, page.cursor.updated, page.cursor.updated, page.cursor.id);
+  }
+  const bookmarkJoin = page.scope === "saved" ? "JOIN bookmarks bookmark ON bookmark.bounty=b.id" : "";
+  const rows = await db.prepare(
+    `SELECT b.*, owner.name AS owner_name, COALESCE(attempt_count.total,0) AS attempt_total,
+      release.value AS release_metadata, ${BOARD_STATUS_RANK} AS status_rank
+     FROM bounties b JOIN accounts owner ON owner.id=b.owner ${bookmarkJoin}
+     LEFT JOIN (SELECT bounty,COUNT(*) AS total FROM attempts GROUP BY bounty) attempt_count ON attempt_count.bounty=b.id
+     LEFT JOIN payment_kv release ON release.key=('bounty-release:' || b.id)
+     WHERE ${where}
+     ORDER BY status_rank ASC,b.updated DESC,b.id DESC LIMIT ?`,
+  ).bind(...bindings, page.limit).all();
+  const revealed = await revealedBounties(db, rows.results, auth?.account);
+  const items = await Promise.all(rows.results.map((row) => bountyView(db, row, auth?.account, false, config, {
+    list: true,
+    ownerName: row.owner_name,
+    attempts: Number(row.attempt_total),
+    release: safeJson(row.release_metadata),
+    revealed: revealed.has(row.id),
+  })));
+  const last = rows.results.at(-1);
+  return { items, nextCursor: last && rows.results.length === page.limit ? boardCursor(page.scope, last) : null, limit: page.limit };
+}
+
+function boardHeaders(url, page) {
+  if (!page.nextCursor) return { "x-page-limit": String(page.limit) };
+  const next = new URL(url);
+  next.searchParams.set("cursor", page.nextCursor);
+  return { "x-page-limit": String(page.limit), "x-next-cursor": page.nextCursor, link: `<${next.pathname}${next.search}>; rel="next"` };
+}
+
+// Sites packages a fetch Worker and D1, but does not supply a Cron Trigger in
+// its hosting manifest. These dynamic payment views can wake due jobs when a
+// player returns; the scheduled handler remains authoritative where a host
+// actually configures it. No request-driven path can run with zero traffic.
+export function settlementWakeupRequest(method, url) {
+  const path = url.pathname;
+  if (method === "POST")
+    return /^\/api\/bounties(?:\/[^/]+(?:\/attempts|\/cancel|\/timeout-forfeit|\/expire)?)?$/.test(path) ||
+      /^\/api\/escrow\/intents\/[^/]+\/confirm$/.test(path) ||
+      /^\/api\/attempts\/[^/]+\/(?:deploy|forfeit|retry|settlement-confirm)$/.test(path);
+  if (method !== "GET") return false;
+  return /^\/api\/attempts\/[a-f0-9-]{36}$/.test(path) || path === "/api/me/attempts" ||
+    /^\/api\/bounties\/[a-f0-9-]{36}$/.test(path) ||
+    path === "/api/bounties" && ["mine", "history"].includes(url.searchParams.get("scope"));
 }
 
 export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
   const url = new URL(request.url),
     path = url.pathname,
     config = runtimeConfig(env, url.origin);
-  if (config.automaticSettlementReady && request.method === "GET")
-    ctx.waitUntil(runAutomaticSettlement(env));
-  const checksAdmission = path === "/.well-known/war-machines.json" || path === "/api/health" || path === "/api/rules" ||
-    (request.method === "POST" && (path === "/api/bounties" || /^\/api\/bounties\/[^/]+\/attempts$/.test(path)));
-  if (checksAdmission && env.DB && config.enabled) {
-    config.paymentHealth = await paymentHealth(
-      env.DB,
-      config,
-      async address => pathUsdToUnits(await pathUsdBalance(config, address), { allowZero: true }),
-      async (method, params) => rpc(config, method, params),
-    );
-    config.acceptingNewBounties = config.acceptingNewBounties && config.paymentHealth.ready;
-    if (!config.paymentHealth.ready) config.settlementReason = config.paymentHealth.reason;
+  // These observations are intentionally nonblocking. A fresh server check
+  // still runs inside each new paid admission path before funds are requested.
+  const publicConfigRead = request.method === "GET" &&
+    ["/.well-known/war-machines.json", "/api/rules", "/api/health"].includes(path);
+  config.paymentHealth = publicConfigRead && env.DB
+    ? await persistedPaymentHealthSnapshot(env.DB, config)
+    : paymentHealthSnapshot(config);
+  config.acceptingNewBounties = !!config.acceptingNewBounties &&
+    config.paymentHealth.ready && config.paymentHealth.fresh;
+  if (!config.acceptingNewBounties && config.enabled)
+    config.settlementReason = config.paymentHealth.reason;
+  if (publicConfigRead && env.DB && config.enabled && !config.paymentHealth.fresh && ctx?.waitUntil) {
+    ctx.waitUntil(refreshPaymentAdmission(env.DB, { ...config }).catch(error => {
+      console.error("Background payment readiness refresh failed", error);
+    }));
   }
   if (path === "/.well-known/war-machines.json" && request.method === "GET")
     return response(discovery(config));
@@ -6058,11 +6310,31 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       mainnetFetch(subrequest, env, ctx, serveStaticAsset),
     );
   if (!path.startsWith("/api/")) return serveStaticAsset(request);
+  if (request.method === "GET" && path === "/api/rules")
+    return response(catalog(config));
+  if (request.method === "GET" && path === "/api/openapi.json")
+    return response(mainnetOpenApi);
+  if (request.method === "GET" && path === "/api/health")
+    return response({
+      ok: config.paymentHealth.ready && config.paymentHealth.fresh,
+      paymentHealth: config.paymentHealth,
+      settlementCapacity: settlementCapacity(config.paymentHealth),
+      app: "war-machines",
+      mode: "tempo-mainnet",
+      paymentsEnabled: !!config.acceptingNewBounties,
+      directEscrow: !!config.directEscrow,
+      mppAgentApi: !!(config.agentBountyMppEnabled && config.acceptingNewBounties),
+      activation: config.enabled ? config.acceptingNewBounties ? "ready" : "recovery-only" : "locked",
+      engineHash: CLIENT_ENGINE_HASH,
+    });
   try {
     check(env.DB, "D1 storage is unavailable.");
     const db = env.DB,
       method = request.method;
+    await purgePreV6Bounties(db, config);
     await archivePreV5Bounties(db, config);
+    if (config.automaticSettlementReady && settlementWakeupRequest(method, url) && ctx?.waitUntil)
+      ctx.waitUntil(runAutomaticSettlement(env, method === "POST" ? "payment-api" : "payment-read"));
     check(
       ["GET", "POST", "PATCH", "PUT", "DELETE"].includes(method),
       "Method not allowed.",
@@ -6088,28 +6360,6 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       if (access.response) return access.response;
       auth = access.auth;
     }
-    if (path === "/api/rules" && method === "GET")
-      return response(catalog(config));
-    if (path === "/api/openapi.json" && method === "GET")
-      return response(mainnetOpenApi);
-    if (path === "/api/health" && method === "GET")
-      return response({
-        ok: config.paymentHealth?.ready ?? false,
-        paymentHealth: config.paymentHealth || null,
-        app: "war-machines",
-        mode: "tempo-mainnet",
-        paymentsEnabled: !!config.acceptingNewBounties,
-        directEscrow: !!config.directEscrow,
-        mppAgentApi: !!(
-          config.agentBountyMppEnabled && config.acceptingNewBounties
-        ),
-        activation: config.enabled
-          ? config.acceptingNewBounties
-            ? "ready"
-            : "recovery-only"
-          : "locked",
-        engineHash: CLIENT_ENGINE_HASH,
-      });
     if (path === "/api/blueprints/validate" && method === "POST")
       return response(await inspection(db, body, auth?.account));
     if (path === "/api/practice" && method === "POST")
@@ -6324,19 +6574,11 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       return response({ deleted: true, id: match[1] });
     }
     if (path === "/api/me/bookmarks" && method === "GET") {
-      const rows = await db
-        .prepare(
-          "SELECT bounty FROM bookmarks WHERE account=? ORDER BY created DESC LIMIT 200",
-        )
-        .bind(requireAuth(auth).account)
-        .all();
-      return response(
-        await Promise.all(
-          rows.results.map(async (row) =>
-            bountyView(db, await bountyRow(db, row.bounty), auth.account, true),
-          ),
-        ),
-      );
+      requireScope(auth, "read");
+      const savedUrl = new URL(url);
+      savedUrl.searchParams.set("scope", "saved");
+      const page = await boardPage(db, savedUrl, auth, config);
+      return response(page.items, 200, boardHeaders(savedUrl, page));
     }
     match = path.match(/^\/api\/me\/bookmarks\/([a-f0-9-]{36})$/);
     if (match && ["PUT", "DELETE"].includes(method)) {
@@ -6357,27 +6599,8 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       return response({ saved: method === "PUT", bounty: match[1] });
     }
     if (path === "/api/bounties" && method === "GET") {
-      const completedAfter = now() - COMPLETED_BOUNTY_BOARD_MS,
-        account = auth?.account || "",
-        currentPolicy = escrowPolicy(config.escrowVersion),
-        legacyPolicy = config.escrowVersion === "6" ? escrowPolicy("5") : currentPolicy;
-      const rows = await db
-        .prepare(
-          config.escrowVersion === "6"
-            ? "SELECT * FROM bounties WHERE entry_units IS NOT NULL AND ((fee_policy_version=? AND (owner=? OR (listed=1 AND (status IN ('open','busy') OR (status IN ('completed','claimed') AND updated>=?))))) OR (fee_policy_version IN (?,?) AND escrow_bounty_id IS NOT NULL)) ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'busy' THEN 1 WHEN 'completed' THEN 2 WHEN 'claimed' THEN 2 ELSE 3 END, updated DESC LIMIT 100"
-            : "SELECT * FROM bounties WHERE entry_units IS NOT NULL AND fee_policy_version=? AND (owner=? OR (listed=1 AND (status IN ('open','busy') OR (status IN ('completed','claimed') AND updated>=?)))) ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'busy' THEN 1 WHEN 'completed' THEN 2 WHEN 'claimed' THEN 2 ELSE 3 END, updated DESC LIMIT 100",
-        )
-        .bind(
-          ...(config.escrowVersion === "6"
-            ? [currentPolicy, account, completedAfter, escrowPolicy("4"), legacyPolicy]
-            : [currentPolicy, account, completedAfter]),
-        )
-        .all();
-      return response(
-        await Promise.all(
-          rows.results.map((row) => bountyView(db, row, auth?.account, false, config)),
-        ),
-      );
+      const page = await boardPage(db, url, auth, config);
+      return response(page.items, 200, boardHeaders(url, page));
     }
     if (path === "/api/bounties" && method === "POST") {
       const key = request.headers.get("idempotency-key");

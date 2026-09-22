@@ -102,6 +102,44 @@ body[data-page="home"] .portal-footer { border-top: 0; margin-top: 0; }
 .part-card strong { font-size: 13px; min-height: 32px; }
 .part-card .price { font-size: 12px; }
 .part-card .part-role { font-size: 10px; letter-spacing: 0; }
+
+/* Role and price occupy distinct tracks. At narrow card widths the role may
+   truncate, but it can never sit underneath the price. */
+.part-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-items: start;
+  justify-items: center;
+  padding: 8px 7px 7px;
+}
+.part-card .part-role {
+  position: static;
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.part-card .price {
+  position: static;
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  white-space: nowrap;
+}
+.part-card .sprite {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  align-self: center;
+}
+.part-card strong {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  align-self: end;
+}
 .selection-kicker { font-size: 11px; letter-spacing: .4px; }
 .selection-details { min-height: 0; max-height: 190px; overflow: auto; padding: 12px; scrollbar-width: thin; }
 .selection-details h3 { font-size: 14px; margin-bottom: 6px; }

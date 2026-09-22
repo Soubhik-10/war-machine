@@ -35,6 +35,7 @@
 import { PART_GUIDANCE } from "./part-guidance.mjs";
 import { createPortal } from "./portal.mjs";
 import { createBountyUI } from "./bounties.mjs";
+import { createHashRouter } from "./routes.mjs";
 import { TERRAIN_INFO } from "./data.mjs";
 import {
   Battle,
@@ -62,6 +63,7 @@ import {
   stressTestAsync,
   pickModule,
 } from "./engineering.mjs";
+import { AudioDirector, readAudioPreference } from "./audio.mjs";
 const $ = (s) => document.querySelector(s),
   $$ = (s) => [...document.querySelectorAll(s)],
   app = $("#app"),
@@ -70,7 +72,7 @@ const partGuide = (p) =>
   // Resource bands are shared with the simulation so the HUD and report agree.
   PART_GUIDANCE[p.id] || { role: p.cat.toUpperCase(), quick: p.desc };
 function partMetricRows(part) {
-  const p = partSpec({ id: part.id }),
+  const p = partSpec(part),
     rows = [["DURABILITY", `${Math.round(p.hp)} HP`], ["MASS", `${Math.round(p.mass)} t`]];
   if (p.damage && p.rate)
     rows.push(["DPS", `${(p.damage * (p.pellets || 1) / p.rate).toFixed(1)}`]);
@@ -123,7 +125,7 @@ let machine = clone(PRESETS[0]),
   brush = "#5cbab4",
   history = [],
   view = "workshop",
-  sound = false;
+  sound = readAudioPreference().enabled;
 let builderRenderer = null,
   arenaRenderer = null,
   thumbRenderer = null,
@@ -151,10 +153,10 @@ let arenaId = "foundry",
   matchSource = null,
   lastLogCount = 0,
   inspectMode = false,
-  battleMode = "auto",
-  audioCtx = null,
-  soundCooldowns = new Map(),
-  soundSeenEffects = new WeakSet();
+  battleMode = "auto";
+const audioDirector = new AudioDirector();
+// UI confirmation reuses the context created by the user-gesture audio director.
+let audioCtx = null;
 let arenaIdleRAF = 0,
   modalCleanup = null,
   replaceFitted = false,
@@ -162,6 +164,8 @@ let arenaIdleRAF = 0,
   bountyClock = 0;
 let portal = null,
   bountyUI = null,
+  routeRouter = null,
+  routeRestoring = false,
   bountyContext = null,
   replayRestore = null,
   officialReceipt = null,
@@ -187,7 +191,7 @@ const applyGraphicsProfile = (next) => {
           : next.maxPixelRatio;
   }
   lastArenaRender = 0;
-  benchDirty = true;
+  invalidateBench();
 };
 document.documentElement.dataset.graphicsTier = graphicsProfile.tier;
 window.warMachinesGraphics = {
@@ -258,7 +262,7 @@ function snapshot() {
 }
 function changed() {
   save();
-  benchDirty = true;
+  invalidateBench();
   updateReadout();
   renderInspector();
 }
@@ -268,10 +272,14 @@ function setNav() {
     el.classList.toggle("active", el.dataset.view === view),
   );
 }
+function go(route, options) {
+  routeRouter?.navigate(route, options);
+}
 function stopBattle() {
   running = false;
   paused = false;
   cancelAnimationFrame(raf);
+  audioDirector.clear({ stop: true, stale: true });
 }
 function cleanupView() {
   document.body.classList.remove("official-replay");
@@ -298,6 +306,35 @@ function sprite(p) {
   return `<canvas class="sprite" width="160" height="160" data-sprite="${p.id}" aria-hidden="true"></canvas>`;
 }
 const thumbnailCache = new Map();
+const thumbnailJobs = new Map();
+let thumbnailRAF = 0;
+function thumbnailKey(machineOrPart) {
+  return JSON.stringify({
+    subject: machineOrPart,
+    hull: typeof machineOrPart === "string" ? machine.paint : undefined,
+    quality: graphicsProfile.tier,
+    ratio: graphicsProfile.tier === "high" ? 2 : graphicsProfile.maxPixelRatio,
+    yaw: typeof machineOrPart === "string" ? -2.3 : -2.55,
+    elevation: 0.62,
+  });
+}
+function scheduleThumbnailWork() {
+  if (thumbnailRAF) return;
+  thumbnailRAF = requestAnimationFrame(() => {
+    thumbnailRAF = 0;
+    const deadline = performance.now() + 6;
+    for (const [canvas, subject] of thumbnailJobs) {
+      thumbnailJobs.delete(canvas);
+      if (canvas.isConnected) renderThumbnail(canvas, subject);
+      if (performance.now() >= deadline) break;
+    }
+    if (thumbnailJobs.size) scheduleThumbnailWork();
+  });
+}
+function queueThumbnail(canvas, machineOrPart) {
+  thumbnailJobs.set(canvas, machineOrPart);
+  scheduleThumbnailWork();
+}
 function renderLargePreview(canvas, machineOrPart) {
   if (
     typeof machineOrPart === "string" ||
@@ -342,8 +379,12 @@ function renderLargePreview(canvas, machineOrPart) {
 function renderThumbnail(canvas, machineOrPart) {
   try {
     if (renderLargePreview(canvas, machineOrPart)) return;
-    const cacheKey = JSON.stringify(machineOrPart);
+    const cacheKey = thumbnailKey(machineOrPart);
     let cached = thumbnailCache.get(cacheKey);
+    if (cached) {
+      thumbnailCache.delete(cacheKey);
+      thumbnailCache.set(cacheKey, cached);
+    }
     if (!cached) {
       thumbCanvas ||= document.createElement("canvas");
       thumbCanvas.width = thumbCanvas.height = 220;
@@ -398,21 +439,21 @@ function renderThumbnail(canvas, machineOrPart) {
   }
 }
 function renderSprites() {
-  $$("[data-sprite]").forEach((c) => renderThumbnail(c, c.dataset.sprite));
+  $$("[data-sprite]").forEach((c) => queueThumbnail(c, c.dataset.sprite));
 }
 function drawThumbnails() {
   const saved = savedBlueprints();
   $$("[data-thumb]").forEach((c) => {
     const [type, id] = c.dataset.thumb.split(":");
     const m = type === "saved" ? saved[+id] : PRESETS[+id];
-    if (m) renderThumbnail(c, m);
+    if (m) queueThumbnail(c, m);
   });
 }
 function workshop() {
+  if (!routeRestoring) return go({ name: "workshop" });
   restoreReplay();
   cleanupView();
   view = "workshop";
-  if (!challenge) window.history.replaceState(null, "", "#workshop");
   setNav();
   hover = null;
   focus = machine.modules.some((m) => keyOf(m) === focus) ? focus : null;
@@ -460,8 +501,7 @@ function workshop() {
   };
   updateReadout();
   renderInspector();
-  benchDirty = true;
-  startBenchAnimation();
+  invalidateBench();
   renderContractContext();
   window.scrollTo(0, 0);
 }
@@ -591,22 +631,27 @@ function setBuildMode(next) {
   );
   renderParts();
   renderInspector();
-  benchDirty = true;
+  invalidateBench();
 }
-function renderParts() {
-  if (!$("#parts-list")) return;
-  $("#parts-list").innerHTML = PARTS.filter(
+function renderParts({ rebuild = false } = {}) {
+  const list = $("#parts-list");
+  if (!list) return;
+  const signature = `${category}:${layer}`;
+  if (rebuild || list.dataset.signature !== signature) {
+    list.dataset.signature = signature;
+    list.innerHTML = PARTS.filter(
     (p) => p.id !== "core" && (category === "All" || p.cat === category),
   )
     .map((p) => {
       const guide = partGuide(p);
+      const effective = partSpec({ id: p.id, z: layer });
       const metrics = partMetricRows(p)
         .map(([label, value]) => `${label}: ${value}`)
         .join(" · ");
-      return `<button class="part-card ${selected === p.id && mode === "place" ? "active" : ""}" data-part="${p.id}" title="${esc(`${guide.role} · ${metrics}. ${p.desc}`)}" aria-label="${esc(p.name + ". " + guide.role + ". " + metrics)}"><span class="price">${p.cost + layer * 12} ¢</span><span class="part-role">${esc(guide.role)}</span>${sprite(p)}<strong>${p.name}</strong></button>`;
+      return `<button class="part-card ${selected === p.id && mode === "place" ? "active" : ""}" data-part="${p.id}" title="${esc(`${guide.role} · ${metrics}. ${p.desc}`)}" aria-label="${esc(p.name + ". " + guide.role + ". " + metrics)}"><span class="price">${effective.cost} ¢</span><span class="part-role">${esc(guide.role)}</span>${sprite(p)}<strong>${p.name}</strong></button>`;
     })
     .join("");
-  $$("[data-part]").forEach(
+    $$("[data-part]").forEach(
     (b) =>
       (b.onclick = () => {
         selected = b.dataset.part;
@@ -614,9 +659,19 @@ function renderParts() {
         if (innerWidth < 641)
           $(".bench").scrollIntoView({ behavior: "smooth", block: "start" });
       }),
-  );
-  const p = BY_ID[selected],
-    guide = partGuide(p);
+    );
+    renderSprites();
+  } else {
+    // The common selection path keeps existing canvases, listeners and focus.
+    $$('[data-part]').forEach((card) => {
+      const active = card.dataset.part === selected && mode === "place";
+      card.classList.toggle("active", active);
+      card.setAttribute("aria-pressed", String(active));
+    });
+  }
+  const base = BY_ID[selected],
+    p = partSpec({ id: selected, z: layer }),
+    guide = partGuide(base);
   $("#selection-details").innerHTML =
     `<span class="selection-kicker">AT A GLANCE · ${esc(guide.role)}</span><h3>${p.name}</h3><p class="part-quick">${esc(guide.quick)}</p><p>${p.desc}</p><div class="part-tags"><span>${p.hp} HP</span><span>${p.mass} t</span><span>${p.ground ? "Ground only" : p.support ? "Supports stacking" : "Upper mount ready"}</span></div>`;
   $("#install-hint").textContent =
@@ -628,7 +683,6 @@ function renderParts() {
           ? "Tap a part to remove it"
           : "Tap a fitted part to customize it";
   $("#level-label").textContent = ["CHASSIS", "UPPER DECK", "TOWER"][layer];
-  renderSprites();
 }
 function budgetError(next) {
   if (next.modules.length > MAX_MODULES)
@@ -653,7 +707,7 @@ function placeCell(c, forcedMode = mode) {
   if (forcedMode === "place" && existing && !replaceFitted) {
     focus = keyOf(existing);
     renderInspector();
-    benchDirty = true;
+    invalidateBench();
     toast(
       "Part selected. Use its inspector, or enable Replace parts to swap it.",
     );
@@ -662,7 +716,7 @@ function placeCell(c, forcedMode = mode) {
   if (forcedMode === "inspect" || existing?.id === "core") {
     focus = existing ? keyOf(existing) : null;
     renderInspector();
-    benchDirty = true;
+    invalidateBench();
     return;
   }
   if (forcedMode === "paint") {
@@ -918,18 +972,17 @@ function renderError(canvas, error) {
   console.error(error);
 }
 function startBenchAnimation() {
-  cancelAnimationFrame(benchRAF);
-  let previous = 0;
-  const loop = (t) => {
-    if (view !== "workshop") return;
-    if (benchDirty || (!reducedMotion && t - previous > 85)) {
-      drawBuilder();
-      benchDirty = false;
-      previous = t;
-    }
-    benchRAF = requestAnimationFrame(loop);
-  };
-  benchRAF = requestAnimationFrame(loop);
+  if (benchRAF || view !== "workshop") return;
+  benchRAF = requestAnimationFrame(() => {
+    benchRAF = 0;
+    if (view !== "workshop" || !benchDirty) return;
+    drawBuilder();
+    benchDirty = false;
+  });
+}
+function invalidateBench() {
+  benchDirty = true;
+  startBenchAnimation();
 }
 function cellFromEvent(e) {
   const gap = LAYER_HEIGHT + (exploded ? 0.7 : 0),
@@ -1001,7 +1054,7 @@ function bindWorkshop() {
           t.classList.toggle("active", t === b),
         );
         hover = null;
-        benchDirty = true;
+        invalidateBench();
         renderParts();
       }),
   );
@@ -1015,11 +1068,11 @@ function bindWorkshop() {
   $("#mirror").onchange = (e) => (mirror = e.target.checked);
   $("#full-stack").onchange = (e) => {
     fullStack = e.target.checked;
-    benchDirty = true;
+    invalidateBench();
   };
   $("#explode").onchange = (e) => {
     exploded = e.target.checked;
-    benchDirty = true;
+    invalidateBench();
   };
   $("#clear-btn").onclick = () =>
     showModal(
@@ -1049,7 +1102,7 @@ function bindWorkshop() {
       snapshot();
       machine[k] = e.target.value;
       save();
-      benchDirty = true;
+      invalidateBench();
     };
   }
   $("#range").oninput = (e) => {
@@ -1067,7 +1120,7 @@ function bindWorkshop() {
           t.classList.toggle("active", t === b),
         );
         save();
-        benchDirty = true;
+        invalidateBench();
       }),
   );
   for (const [id, prop] of [
@@ -1079,14 +1132,14 @@ function bindWorkshop() {
       snapshot();
       machine[prop] = e.target.value;
       save();
-      benchDirty = true;
+      invalidateBench();
     };
   $("#unit-number").onchange = (e) => {
     snapshot();
     machine.number = clamp(Math.round(+e.target.value) || 7, 1, 99);
     e.target.value = machine.number;
     save();
-    benchDirty = true;
+    invalidateBench();
   };
   $$("[data-camera]").forEach(
     (b) =>
@@ -1111,19 +1164,19 @@ function bindWorkshop() {
           benchCamera.drag = benchCamera.drag === "pan" ? "orbit" : "pan";
           b.classList.toggle("active", benchCamera.drag === "pan");
         }
-        benchDirty = true;
+        invalidateBench();
       }),
   );
   const c = $("#builder");
   bindCamera(c, benchCamera, {
     change: () => {
       hover = null;
-      benchDirty = true;
+      invalidateBench();
     },
     tap: builderTap,
     hover: (e) => {
       hover = e ? cellFromEvent(e) : null;
-      benchDirty = true;
+      invalidateBench();
     },
   });
   c.onkeydown = (e) => {
@@ -1147,7 +1200,7 @@ function bindWorkshop() {
       if (e.key === "Enter" || e.key === " ") placeCell(cursor);
       if (["Delete", "Backspace"].includes(e.key)) placeCell(cursor, "remove");
       hover = null;
-      benchDirty = true;
+      invalidateBench();
     }
   };
   $("#blueprints-btn").onclick = blueprints;
@@ -1160,7 +1213,7 @@ function rotate() {
   rotation = (rotation + 1) % 4;
   if ($("#rotate-btn"))
     $("#rotate-btn").textContent = "↻ " + rotation * 90 + "°";
-  benchDirty = true;
+  invalidateBench();
 }
 function undo() {
   if (history.length) {
@@ -1396,19 +1449,18 @@ function matchIssues() {
   ];
 }
 function loadChallenge(c) {
+  if (!routeRestoring)
+    return go({
+      name: "challenge",
+      value: encodeChallenge(
+        packChallenge(c.machine, c.arena, c.seed, c.rules, c.objective || "reactor"),
+      ),
+    });
   restoreReplay();
   bountyContext = null;
   officialReceipt = null;
   if (!challenge) preChallengeRules = clone(rules);
   challenge = c;
-  window.history.replaceState(
-    null,
-    "",
-    location.pathname +
-      location.search +
-      "#challenge=" +
-      encodeChallenge(packChallenge(c.machine, c.arena, c.seed, c.rules, c.objective || "reactor")),
-  );
   rules = clone(c.rules);
   battleMode = rules.combat;
   arenaId = c.arena;
@@ -1422,7 +1474,7 @@ function loadChallenge(c) {
   );
 }
 function arenaView() {
-  if (!challenge) window.history.replaceState(null, "", "#arena");
+  if (!routeRestoring && !challenge) return go({ name: "arena" });
   cleanupView();
   document.body.classList.toggle("official-replay", !!officialReceipt);
   view = "arena";
@@ -1631,6 +1683,7 @@ function startBattle(replay = false) {
       mode: matchSource.mode,
       swapSpawns: !!matchSource.swapSpawns,
       objective: matchSource.objective || "reactor",
+      observeEvents: true,
       ...(replay ? { commands: matchSource.commands || [] } : {}),
     },
   );
@@ -1640,6 +1693,7 @@ function startBattle(replay = false) {
   lastArenaRender = 0;
   accumulator = 0;
   lastLogCount = 0;
+  audioDirector.reset();
   $("#fight-overlay").hidden = true;
   $("#pause-btn").disabled = false;
   $("#pause-btn").textContent = "Ⅱ Pause";
@@ -1648,7 +1702,6 @@ function startBattle(replay = false) {
   $("#seed-btn").disabled = true;
   $$("[data-enemy]").forEach((b) => (b.disabled = true));
   $("#mirror-rival").disabled = true;
-  if (sound) initAudio();
   $("#arena-canvas").focus({ preventScroll: true });
   raf = requestAnimationFrame(frame);
 }
@@ -1677,7 +1730,7 @@ function startArenaIdle() {
 let hudTime = 0;
 function frame(t) {
   if (!running || view !== "arena") return;
-  if (document.hidden) { lastFrame = t; raf = requestAnimationFrame(frame); return; }
+  if (document.hidden) { audioDirector.clear({ stale: true }); lastFrame = t; raf = requestAnimationFrame(frame); return; }
   if (!lastFrame) lastFrame = t;
   const delta = Math.min((t - lastFrame) / 1000, 0.12);
   lastFrame = t;
@@ -1690,6 +1743,7 @@ function frame(t) {
       accumulator -= DT;
     }
   }
+  syncBattleSound();
   if (
     battle.result ||
     !lastArenaRender ||
@@ -1710,7 +1764,6 @@ function frame(t) {
 }
 function updateHUD() {
   if (!battle || !$("#your-hp")) return;
-  syncBattleSound();
   for (const [i, id] of ["your", "enemy"].entries()) {
     const v = battle.vehicles[i],
       core = v.modules.find((m) => m.id === "core");
@@ -2028,7 +2081,6 @@ function finishBattle() {
       localStorage.setItem("wm-wins-v2", JSON.stringify(wins));
     } catch {}
   }
-  playBattleSfx(won ? "win" : draw ? "draw" : "loss");
   const advice = battleAdvice(battle).notes[0];
   const overlay = $("#fight-overlay");
   overlay.hidden = false;
@@ -2278,7 +2330,8 @@ function showStressTest() {
 function jumpReplay(target) {
   if (!matchSource) return;
   cancelAnimationFrame(raf);
-  battle = new Battle(matchSource.a, matchSource.b, matchSource.arena, matchSource.seed, { mode: matchSource.mode, swapSpawns: !!matchSource.swapSpawns, commands: matchSource.commands || [] });
+  battle = new Battle(matchSource.a, matchSource.b, matchSource.arena, matchSource.seed, { mode: matchSource.mode, swapSpawns: !!matchSource.swapSpawns, commands: matchSource.commands || [], observeEvents: true });
+  audioDirector.reset();
   while (!battle.result && battle.time + DT / 2 < target) battle.step();
   running = false;
   paused = true;
@@ -2306,13 +2359,10 @@ function showBattleReportEnhanced() {
     $(".replay-timeline")?.insertAdjacentHTML("beforebegin", `<section class="destroyed-report"><h3>What disabled each part</h3>${destroyed.length ? `<div class="replay-timeline">${destroyed.map(e => `<div><b>${e.time.toFixed(1)}s</b><span>${esc(e.text)}</span><small>Cause: ${esc(e.cause)}</small></div>`).join("")}</div>` : '<p class="hint">No parts were destroyed in this run.</p>'}</section>`);
   });
 }
-function initAudio() {
-  try {
-    audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === "suspended") audioCtx.resume();
-  } catch {
-    sound = false;
-  }
+async function initAudio() {
+  const ready = await audioDirector.resumeFromGesture();
+  audioCtx = ready ? audioDirector.context : null;
+  return ready;
 }
 function beep(hz, duration, volume, type = "sine") {
   if (!sound || !audioCtx) return;
@@ -2532,33 +2582,15 @@ function playBattleEventSfx(event) {
 }
 function syncBattleSound() {
   if (!battle) return;
-  const timeline = battle.timeline || [];
-  if (!sound) {
-    battle.soundTimelineCursor = timeline.length;
-    return;
-  }
-  const cursor = battle.soundTimelineCursor || 0;
-  for (const event of timeline.slice(cursor)) playBattleEventSfx(event);
-  battle.soundTimelineCursor = timeline.length;
-  for (const effect of battle.effects || []) {
-    if (soundSeenEffects.has(effect)) continue;
-    soundSeenEffects.add(effect);
-    if (effect.type === "muzzle") playWeaponSfx(effect.weapon, effect.scale);
-    else if (effect.type === "beam") playWeaponSfx(effect.weapon || "laser", effect.scale);
-    else if (effect.type === "hit" || effect.type === "reactive") playBattleSfx("impact", effect.scale);
-    else if (effect.type === "blast") playBattleSfx("explosion", effect.scale);
-    else if (effect.type === "intercept") playBattleSfx("intercept", effect.scale);
-    else if (effect.type === "emp") playBattleSfx("emp", effect.scale);
-    else if (effect.type === "shield") playBattleSfx("shield", effect.scale);
-    else if (effect.type === "vent") playBattleSfx("vent", effect.scale);
-  }
-  if (battle.result && !battle.soundResult) {
-    battle.soundResult = true;
-    playBattleSfx(battle.result.winner === 0 ? "win" : battle.result.winner < 0 ? "draw" : "loss");
-  }
+  const events = typeof battle.combatEventsSince === "function"
+    ? battle.combatEventsSince(audioDirector.lastSeq)
+    : [];
+  audioDirector.ingest(events);
+  audioDirector.drain({ speed, hidden: document.hidden });
 }
 function historyReplace() {
-  window.history.replaceState(null, "", location.pathname + location.search);
+  // Route transitions are committed by the router. This remains for legacy
+  // callers that only need to clear a share hash before choosing a screen.
 }
 function manual() {
   showModal(
@@ -2579,10 +2611,10 @@ function manual() {
   );
 }
 function rulesView() {
+  if (!routeRestoring) return go({ name: "rules" });
   restoreReplay();
   cleanupView();
   view = "rules";
-  window.history.replaceState(null, "", "#rules");
   setNav();
   app.innerHTML = `<div class="page-heading rules-heading"><div><span class="eyebrow">FIELD MANUAL / COMBAT RULES</span><h1>HOW MATCHES WORK.</h1><p>Build the machine, choose its behavior, then watch the deterministic simulation resolve the fight.</p></div><div class="heading-actions"><button id="rules-workshop">Open workshop</button><button id="rules-arena" class="primary">Run a test battle</button></div></div>
   <div class="rules-page">
@@ -2644,7 +2676,6 @@ function prepareContract(b) {
   challenge.seed = seed;
   battleMode = "auto";
   mirrorOpponent = false;
-  window.history.replaceState(null, "", "#bounty=" + b.id);
 }
 function renderTerrainKey(arena) {
   const node = $(".arena-legend");
@@ -2771,6 +2802,7 @@ function renderContractContext() {
   }
 }
 bountyUI = createBountyUI({
+  navigate: go,
   show() {
     restoreReplay();
     cleanupView();
@@ -2848,6 +2880,11 @@ try {
     document.documentElement.dataset.theme = theme;
 } catch {}
 portal = createPortal({
+  syncRoute(next) {
+    if (routeRestoring) return false;
+    go({ name: next });
+    return true;
+  },
   show(next) {
     restoreReplay();
     cleanupView();
@@ -2919,17 +2956,28 @@ $("#manual-btn").onclick = () => {
   manual();
 };
 $("#sound-btn").onclick = () => {
-  sound = !sound;
-  if (sound) {
-    initAudio();
-    beep(400, 0.1, 0.06);
+  if (sound && audioDirector.status !== "listening") {
+    initAudio().then((ready) => {
+      $("#sound-state").textContent = ready ? "ON" : "BLOCKED";
+      $("#sound-btn").setAttribute("aria-label", ready ? "Disable battle sound effects" : "Sound is blocked; try enabling again");
+      if (ready) beep(400, 0.1, 0.06);
+    });
+    return;
   }
-  $("#sound-state").textContent = sound ? "ON" : "OFF";
+  sound = !sound;
+  audioDirector.setPreference({ enabled: sound });
+  if (sound) initAudio().then((ready) => {
+    $("#sound-state").textContent = ready ? "ON" : "BLOCKED";
+    $("#sound-btn").setAttribute("aria-label", ready ? "Disable battle sound effects" : "Sound is blocked; try enabling again");
+    if (ready) beep(400, 0.1, 0.06);
+  });
+  $("#sound-state").textContent = sound ? "BLOCKED" : "OFF";
   $("#sound-btn").setAttribute(
     "aria-label",
-    sound ? "Disable battle sound effects" : "Enable battle sound effects",
+    sound ? "Sound is blocked; try enabling again" : "Enable battle sound effects",
   );
 };
+$("#sound-state").textContent = sound ? "BLOCKED" : "OFF";
 document.addEventListener("keydown", (e) => {
   if (e.target.matches("input,textarea,select") || $("#modal").open) return;
   if (view === "workshop") {
@@ -2947,76 +2995,56 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden && running && !paused) togglePause();
 });
 window.addEventListener("resize", () => {
-  benchDirty = true;
+  invalidateBench();
   drawArena();
 });
 document.addEventListener("fullscreenchange", () => drawArena());
-window.addEventListener("hashchange", () => {
-  if (location.hash === "#home" || location.hash === "") {
-    portal.home();
-    return;
-  }
-  if (location.hash === "#agents") {
-    portal.agents();
-    return;
-  }
-  if (location.hash === "#workshop") {
-    workshop();
-    return;
-  }
-  if (location.hash === "#arena") {
-    arenaView();
-    return;
-  }
-  if (location.hash === "#rules") {
-    rulesView();
-    return;
-  }
-  if (location.hash === "#bounties" || location.hash.startsWith("#bounty=")) {
-    void bountyUI.open(
-      location.hash.startsWith("#bounty=") ? location.hash.slice(8) : undefined,
-    );
-    return;
-  }
-  if (location.hash.startsWith("#challenge=")) {
-    try {
-      loadChallenge(decodeChallenge(location.hash.slice(11)));
-    } catch (e) {
-      toast(e.message);
+function renderRoute(route) {
+  routeRestoring = true;
+  try {
+    if (route.name === "home") return portal.home();
+    if (route.name === "agents") return portal.agents();
+    if (route.name === "workshop") return workshop();
+    if (route.name === "arena") return arenaView();
+    if (route.name === "rules") return rulesView();
+    if (route.name === "anchor") {
+      if (view !== "rules") rulesView();
+      requestAnimationFrame(() => document.getElementById(route.value)?.scrollIntoView());
+      return;
     }
+    if (route.name === "bounties") return void bountyUI.open(undefined, { restore: true });
+    if (route.name === "bounty") return void bountyUI.open(route.value, { restore: true });
+    if (route.name === "challenge") {
+      try {
+        return loadChallenge(decodeChallenge(route.value));
+      } catch (error) {
+        toast(error.message || "That challenge link is invalid.");
+        return go({ name: "workshop" }, { replace: true });
+      }
+    }
+    if (route.name === "build") {
+      try {
+        const imported = decodeChallenge(route.value);
+        machine = imported.machine;
+        rules = imported.rules;
+        arenaId = imported.arena;
+        seed = imported.seed;
+        battleMode = rules.combat;
+        save();
+        return workshop();
+      } catch (error) {
+        toast(error.message || "That build link is invalid.");
+        return go({ name: "workshop" }, { replace: true });
+      }
+    }
+    app.innerHTML = '<section class="panel empty"><h1>Route not found</h1><p>This link is not a War Machines screen.</p><button id="route-home" class="primary">Return home</button></section>';
+    $("#route-home").onclick = () => go({ name: "home" }, { replace: true });
+  } finally {
+    routeRestoring = false;
   }
-});
-const initialRoute = location.hash;
-if (initialRoute.startsWith("#build=")) {
-  try {
-    const imported = decodeChallenge(initialRoute.slice(7));
-    machine = imported.machine;
-    rules = imported.rules;
-    arenaId = imported.arena;
-    seed = imported.seed;
-    battleMode = rules.combat;
-    save();
-    historyReplace();
-  } catch (e) {
-    toast(e.message);
-  }
-  workshop();
-} else if (initialRoute.startsWith("#challenge=")) {
-  try {
-    loadChallenge(decodeChallenge(initialRoute.slice(11)));
-  } catch (e) {
-    workshop();
-    toast(e.message);
-  }
-} else if (initialRoute === "#bounties" || initialRoute.startsWith("#bounty="))
-  void bountyUI.open(
-    initialRoute.startsWith("#bounty=") ? initialRoute.slice(8) : undefined,
-  );
-else if (initialRoute === "#workshop") workshop();
-else if (initialRoute === "#arena") arenaView();
-else if (initialRoute === "#rules") rulesView();
-else if (initialRoute === "#agents") portal.agents();
-else portal.home();
+}
+routeRouter = createHashRouter({ render: renderRoute });
+routeRouter.start();
 if (document.modelContext?.registerTool) {
   const lifecycle = new AbortController();
   const toolList = [

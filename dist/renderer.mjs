@@ -15,21 +15,29 @@ export const WORLD_LIGHT_TARGET=Object.freeze([0,0,0]);
 export function worldLight(){return {eye:[...WORLD_LIGHT_EYE],target:[...WORLD_LIGHT_TARGET]};}
 const moduleCache=new Map(),turretPoses=new WeakMap();
 function visualAim(module,time){const goal=module.aim??(module.r||0)*Math.PI/2,previous=turretPoses.get(module);let angle=goal;if(previous){const dt=Math.max(0,Math.min(.1,time-previous.time)),delta=Math.atan2(Math.sin(goal-previous.angle),Math.cos(goal-previous.angle));angle=previous.angle+delta*(1-Math.exp(-dt*18));}turretPoses.set(module,{time,angle});return angle;}
-export const VERTEX_STRIDE=14;
+// The engine's recoil pulse is normalized; these curves are visual-only and
+// keep continuous energy weapons from sharing a cannon's mechanical kick.
+const weaponRecoil=(id,pulse=0)=>{const r=Math.max(0,Math.min(1,pulse));if(id==='cannon')return Math.sqrt(r);if(id==='mortar')return r*.62;if(id==='rocket')return r*.38;if(id==='machinegun'||id==='shredder'||id==='flak')return r*.22;if(id==='gatling')return r*.12;if(id==='railgun')return r*.08;return 0;};
+// Vertex layout deliberately keeps light emission and coverage separate. Opaque
+// geometry defaults to opacity 1; scene effects opt into an alpha or additive
+// pass and supply a real opacity envelope.
+export const VERTEX_STRIDE=15;
 export class Geometry{
- constructor(){this.vertices=[];this.origin=[0,0,0];this.angle=0;this.scale=1;this.material=0;}
+ constructor(){this.vertices=[];this.effectVertices=[];this.additiveVertices=[];this.origin=[0,0,0];this.angle=0;this.scale=1;this.material=0;this.pass='opaque';}
  transform(p){const [x,y,z]=p.map(v=>v*this.scale),c=Math.cos(this.angle),s=Math.sin(this.angle);return [this.origin[0]+x*c-z*s,this.origin[1]+y,this.origin[2]+x*s+z*c];}
- tri(a,b,c,color,glow=0){const n=norm(cross(sub(b,a),sub(c,a))),an=this.angle,normal=[n[0]*Math.cos(an)-n[2]*Math.sin(an),n[1],n[0]*Math.sin(an)+n[2]*Math.cos(an)],col=rgb(color);const material=color===RUBBER?3:[STEEL,DARK,SILVER].includes(color)?2:this.material;for(const p of [a,b,c]){const uv=Math.abs(n[1])>.6?[p[0],p[2]]:Math.abs(n[0])>Math.abs(n[2])?[p[2],p[1]]:[p[0],p[1]];this.vertices.push(...this.transform(p),...normal,...col,glow,...uv,p[1],material);}}
- quad(a,b,c,d,color,glow=0){this.tri(a,b,c,color,glow);this.tri(a,c,d,color,glow);}
- box(x,y,z,w,h,d,color,glow=0){const a=x-w/2,b=x+w/2,l=y-h/2,t=y+h/2,f=z-d/2,k=z+d/2;this.quad([a,t,f],[a,t,k],[b,t,k],[b,t,f],color,glow);this.quad([a,l,k],[a,l,f],[b,l,f],[b,l,k],color,glow);this.quad([a,l,f],[a,t,f],[b,t,f],[b,l,f],color,glow);this.quad([b,l,k],[b,t,k],[a,t,k],[a,l,k],color,glow);this.quad([a,l,k],[a,t,k],[a,t,f],[a,l,f],color,glow);this.quad([b,l,f],[b,t,f],[b,t,k],[b,l,k],color,glow);}
- cylinder(a,b,r,color,segments=12,glow=0){const axis=norm(sub(b,a)),u=norm(cross(axis,Math.abs(axis[1])>.9?[1,0,0]:[0,1,0])),v=cross(axis,u);for(let i=0;i<segments;i++){const make=(p,ang)=>p.map((n,k)=>n+r*(u[k]*Math.cos(ang)+v[k]*Math.sin(ang)));const t=i*Math.PI*2/segments,t2=(i+1)*Math.PI*2/segments,p=make(a,t),q=make(a,t2),s=make(b,t),r2=make(b,t2);this.quad(p,s,r2,q,color,glow);this.tri(a,p,q,color,glow);this.tri(b,r2,s,color,glow);}}
+ beginEffects(mode='alpha'){this.pass=mode==='additive'?'additive':'effect';return this;}
+ endEffects(){this.pass='opaque';return this;}
+ tri(a,b,c,color,emissive=0,opacity=null){const n=norm(cross(sub(b,a),sub(c,a))),an=this.angle,normal=[n[0]*Math.cos(an)-n[2]*Math.sin(an),n[1],n[0]*Math.sin(an)+n[2]*Math.cos(an)],col=rgb(color),out=this.pass==='additive'?this.additiveVertices:this.pass==='effect'?this.effectVertices:this.vertices,alpha=opacity==null?(this.pass==='opaque'?1:Math.max(0,Math.min(1,emissive))):Math.max(0,Math.min(1,opacity));const material=color===RUBBER?3:[STEEL,DARK,SILVER].includes(color)?2:this.material;for(const p of [a,b,c]){const uv=Math.abs(n[1])>.6?[p[0],p[2]]:Math.abs(n[0])>Math.abs(n[2])?[p[2],p[1]]:[p[0],p[1]];out.push(...this.transform(p),...normal,...col,emissive,alpha,...uv,p[1],material);}}
+ quad(a,b,c,d,color,emissive=0,opacity=null){this.tri(a,b,c,color,emissive,opacity);this.tri(a,c,d,color,emissive,opacity);}
+ box(x,y,z,w,h,d,color,emissive=0,opacity=null){const a=x-w/2,b=x+w/2,l=y-h/2,t=y+h/2,f=z-d/2,k=z+d/2;this.quad([a,t,f],[a,t,k],[b,t,k],[b,t,f],color,emissive,opacity);this.quad([a,l,k],[a,l,f],[b,l,f],[b,l,k],color,emissive,opacity);this.quad([a,l,f],[a,t,f],[b,t,f],[b,l,f],color,emissive,opacity);this.quad([b,l,k],[b,t,k],[a,t,k],[a,l,k],color,emissive,opacity);this.quad([a,l,k],[a,t,k],[a,t,f],[a,l,f],color,emissive,opacity);this.quad([b,l,f],[b,t,f],[b,t,k],[b,l,k],color,emissive,opacity);}
+ cylinder(a,b,r,color,segments=12,emissive=0,opacity=null){const axis=norm(sub(b,a)),u=norm(cross(axis,Math.abs(axis[1])>.9?[1,0,0]:[0,1,0])),v=cross(axis,u);for(let i=0;i<segments;i++){const make=(p,ang)=>p.map((n,k)=>n+r*(u[k]*Math.cos(ang)+v[k]*Math.sin(ang)));const t=i*Math.PI*2/segments,t2=(i+1)*Math.PI*2/segments,p=make(a,t),q=make(a,t2),s=make(b,t),r2=make(b,t2);this.quad(p,s,r2,q,color,emissive,opacity);this.tri(a,p,q,color,emissive,opacity);this.tri(b,r2,s,color,emissive,opacity);}}
  bevel(x,y,z,w,h,d,color){const a=w/2,b=d/2,e=.1,lo=y-h/2,hi=y+h/2;this.box(x,y-h*.12,z,w,h*.76,d,shade(color,.86));this.quad([x-a,hi-e,z-b],[x-a+e,hi,z-b+e],[x+a-e,hi,z-b+e],[x+a,hi-e,z-b],color);this.quad([x+a,hi-e,z+b],[x+a-e,hi,z+b-e],[x-a+e,hi,z+b-e],[x-a,hi-e,z+b],color);this.quad([x-a,hi-e,z+b],[x-a+e,hi,z+b-e],[x-a+e,hi,z-b+e],[x-a,hi-e,z-b],color);this.quad([x+a,hi-e,z-b],[x+a-e,hi,z-b+e],[x+a-e,hi,z+b-e],[x+a,hi-e,z+b],color);this.box(x,hi-.025,z,w-.2,.05,d-.2,color);}
- ring(x,y,z,r,width,color,glow=0,segments=40){for(let i=0;i<segments;i++){const a=i*Math.PI*2/segments,b=(i+1)*Math.PI*2/segments;this.quad([x+Math.cos(a)*r,y,z+Math.sin(a)*r],[x+Math.cos(b)*r,y,z+Math.sin(b)*r],[x+Math.cos(b)*(r-width),y,z+Math.sin(b)*(r-width)],[x+Math.cos(a)*(r-width),y,z+Math.sin(a)*(r-width)],color,glow);}}
- sphere(x,y,z,r,color,glow=0){for(let j=0;j<5;j++)for(let i=0;i<10;i++){const p=(a,b)=>[x+r*Math.cos(a)*Math.sin(b),y+r*Math.cos(b),z+r*Math.sin(a)*Math.sin(b)],a=i*Math.PI/5,b=(i+1)*Math.PI/5,c=j*Math.PI/5,d=(j+1)*Math.PI/5;this.quad(p(a,c),p(a,d),p(b,d),p(b,c),color,glow);}}
+ ring(x,y,z,r,width,color,emissive=0,segments=40,opacity=null){for(let i=0;i<segments;i++){const a=i*Math.PI*2/segments,b=(i+1)*Math.PI*2/segments;this.quad([x+Math.cos(a)*r,y,z+Math.sin(a)*r],[x+Math.cos(b)*r,y,z+Math.sin(b)*r],[x+Math.cos(b)*(r-width),y,z+Math.sin(b)*(r-width)],[x+Math.cos(a)*(r-width),y,z+Math.sin(a)*(r-width)],color,emissive,opacity);}}
+ sphere(x,y,z,r,color,emissive=0,opacity=null){for(let j=0;j<5;j++)for(let i=0;i<10;i++){const p=(a,b)=>[x+r*Math.cos(a)*Math.sin(b),y+r*Math.cos(b),z+r*Math.sin(a)*Math.sin(b)],a=i*Math.PI/5,b=(i+1)*Math.PI/5,c=j*Math.PI/5,d=(j+1)*Math.PI/5;this.quad(p(a,c),p(a,d),p(b,d),p(b,c),color,emissive,opacity);}}
  mark(number,x,y,z,color){const glyphs=['1111110','0110000','1101101','1111001','0110011','1011011','1011111','1110000','1111111','1111011'];for(const [i,digit] of String(number).padStart(2,'0').split('').entries()){const ox=x+(i-.5)*.2,segments=[[0,-.13,.11,.025],[.065,-.065,.022,.11],[.065,.065,.022,.11],[0,.13,.11,.025],[-.065,.065,.022,.11],[-.065,-.065,.022,.11],[0,0,.11,.025]];segments.forEach(([dx,dz,w,h],j)=>{if(glyphs[+digit][j]==='1')this.box(ox+dx,y,z+dz,w,.007,h,color);});}}
- cachedModule(m,paint,phase=0){const animated=['wheel','winterwheel','dunewheel','heater','gyro','track','cooler','interceptor','gatling','core','reactor','hover','shield'].includes(m.id),phaseStep=animated?Math.floor(((phase%(Math.PI*2)+Math.PI*2)%(Math.PI*2))*8)/8:0,aim=Math.round((m.turretDelta||0)*80)/80,recoil=Math.round((m.recoil||0)*5)/5,color=Array.isArray(paint)?paint.map(n=>Math.round(n*40)/40):paint,key=JSON.stringify([m.id,color,m.finish,m.accent,m.glow,m.pattern,m.number,m.u,m.reactiveSpent,phaseStep,aim,recoil]);let vertices=moduleCache.get(key);if(!vertices){const local=new Geometry();local.module({...m,turretDelta:aim,recoil},color,phaseStep);vertices=new Float32Array(local.vertices);moduleCache.set(key,vertices);if(moduleCache.size>160)moduleCache.delete(moduleCache.keys().next().value);}const c=Math.cos(this.angle),s=Math.sin(this.angle),[ox,oy,oz]=this.origin;for(let i=0;i<vertices.length;i+=VERTEX_STRIDE){const x=vertices[i],y=vertices[i+1],z=vertices[i+2],nx=vertices[i+3],ny=vertices[i+4],nz=vertices[i+5];this.vertices.push(ox+x*c-z*s,oy+y,oz+x*s+z*c,nx*c-nz*s,ny,nx*s+nz*c,vertices[i+6],vertices[i+7],vertices[i+8],vertices[i+9],vertices[i+10],vertices[i+11],vertices[i+12],vertices[i+13]);}}
+ cachedModule(m,paint,phase=0){const animated=['wheel','winterwheel','dunewheel','heater','gyro','track','cooler','interceptor','gatling','core','reactor','hover','shield'].includes(m.id),phaseStep=animated?Math.floor(((phase%(Math.PI*2)+Math.PI*2)%(Math.PI*2))*8)/8:0,aim=Math.round((m.turretDelta||0)*80)/80,recoil=Math.round((m.recoil||0)*5)/5,color=Array.isArray(paint)?paint.map(n=>Math.round(n*40)/40):paint,key=JSON.stringify([m.id,color,m.finish,m.accent,m.glow,m.pattern,m.number,m.u,m.reactiveSpent,phaseStep,aim,recoil]);let vertices=moduleCache.get(key);if(!vertices){const local=new Geometry();local.module({...m,turretDelta:aim,recoil},color,phaseStep);vertices=new Float32Array(local.vertices);moduleCache.set(key,vertices);if(moduleCache.size>160)moduleCache.delete(moduleCache.keys().next().value);}const c=Math.cos(this.angle),s=Math.sin(this.angle),[ox,oy,oz]=this.origin;for(let i=0;i<vertices.length;i+=VERTEX_STRIDE){const x=vertices[i],y=vertices[i+1],z=vertices[i+2],nx=vertices[i+3],ny=vertices[i+4],nz=vertices[i+5];this.vertices.push(ox+x*c-z*s,oy+y,oz+x*s+z*c,nx*c-nz*s,ny,nx*s+nz*c,vertices[i+6],vertices[i+7],vertices[i+8],vertices[i+9],vertices[i+10],vertices[i+11],vertices[i+12],vertices[i+13],vertices[i+14]);}}
  module(m,paint,phase=0){const oldMaterial=this.material,oldOrigin=this.origin;this.material=m.finish==='alloy'?1:0;const id=m.id,col=rgb(paint),baseAngle=this.angle,accent=m.accent||'#eac57b',light=m.glow||TEAL;if(!['wheel','winterwheel','dunewheel','track'].includes(id)){this.box(0,.31,0,.99,.27,.99,DARK);this.bevel(0,.49,0,.98,.2,.98,shade(col,.6));for(const x of [-.37,.37])for(const z of [-.37,.37])this.box(x,.61,z,.065,.045,.065,SILVER);}
- if(BY_ID[id]?.rate&&m.recoil)this.origin=this.transform([0,0,m.recoil*.17]);
+ const recoil=weaponRecoil(id,m.recoil);m={...m,recoil};if(BY_ID[id]?.rate&&recoil)this.origin=this.transform([0,0,recoil*.17]);
  if(id==='frame'){this.box(0,.68,0,.86,.13,.16,STEEL);this.box(0,.68,0,.16,.13,.86,STEEL);this.box(0,.61,0,.40,.05,.40,DARK);}
  if(id==='core'){this.bevel(0,.83,0,.83,.67,.92,col);this.box(0,1.19,.06,.53,.13,.5,shade(col,1.15));this.box(0,.92,-.47,.62,.23,.04,light,.8);this.box(-.435,.87,0,.035,.18,.4,light,.5);this.box(.435,.87,0,.035,.18,.4,light,.5);this.cylinder([.31,1.18,.25],[.31,1.71,.25],.017,SILVER,6);this.box(0,1.275,.04,.15,.045,.36,accent);this.sphere(.31,1.74,.25,.045,light,.55+.4*Math.sin(phase*2));}
  if(id==='armor'){this.bevel(0,.78,0,.97,.52,.96,col);this.box(0,1.055,0,.57,.035,.57,shade(col,1.12));if(m.pattern==='racing')for(const x of [-.15,.15])this.box(x,1.076,0,.095,.012,.57,accent);if(m.pattern==='hazard')for(let i=-2;i<=2;i++)this.box(i*.13,1.077,.17,.08,.012,.19,i%2?DARK:accent);if(m.pattern==='camo')this.box(-.1,1.078,.05,.3,.013,.22,shade(accent,.65));for(const x of [-.31,.31])this.box(x,1.02,0,.035,.04,.64,STEEL);}
@@ -91,13 +99,13 @@ export class Geometry{
 }
 const VS=`#version 300 es
 precision highp float;
-in vec3 aPosition;in vec3 aNormal;in vec3 aColor;in float aGlow;in vec4 aSurface;
+in vec3 aPosition;in vec3 aNormal;in vec3 aColor;in float aGlow;in float aOpacity;in vec4 aSurface;
 uniform mat4 uVP;
-out vec3 vPosition;out vec3 vNormal;out vec3 vColor;out float vGlow;out vec4 vSurface;
-void main(){vPosition=aPosition;vNormal=aNormal;vColor=aColor;vGlow=aGlow;vSurface=aSurface;gl_Position=uVP*vec4(aPosition,1.0);}`;
+out vec3 vPosition;out vec3 vNormal;out vec3 vColor;out float vGlow;out float vOpacity;out vec4 vSurface;
+void main(){vPosition=aPosition;vNormal=aNormal;vColor=aColor;vGlow=aGlow;vOpacity=aOpacity;vSurface=aSurface;gl_Position=uVP*vec4(aPosition,1.0);}`;
 const FS=`#version 300 es
 precision highp float;
-in vec3 vPosition;in vec3 vNormal;in vec3 vColor;in float vGlow;in vec4 vSurface;
+in vec3 vPosition;in vec3 vNormal;in vec3 vColor;in float vGlow;in float vOpacity;in vec4 vSurface;
 uniform vec3 uViewDir;uniform vec3 uLightDir;out vec4 fragColor;
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
@@ -125,7 +133,7 @@ void main(){
  color+=mix(vec3(.60,.72,.78),albedo,metal*.55)*spec*mix(.08,.6,1.0-rough);
  color+=vec3(.5,.72,.83)*rim;color=mix(color,vColor*1.18,clamp(vGlow,0.0,1.0));
  if(mat>6.5&&mat<7.5)color+=albedo*.24;
- fragColor=vec4(pow(max(color,vec3(0.0)),vec3(.87)),1.0);
+ fragColor=vec4(pow(max(color,vec3(0.0)),vec3(.87)),vOpacity);
 }`;
 export class Renderer{
  constructor(canvas,{preserveDrawingBuffer=false,maxPixelRatio=1.5}={}){
@@ -154,7 +162,7 @@ export class Renderer{
   this.staticVertices=null;
   this.upload=new Float32Array(0);
   this.maxPixelRatio=maxPixelRatio;
-  this.attributes=[['aPosition',3,0],['aNormal',3,12],['aColor',3,24],['aGlow',1,36],['aSurface',4,40]].map(([name,size,offset])=>[gl.getAttribLocation(this.program,name),size,offset]);
+  this.attributes=[['aPosition',3,0],['aNormal',3,12],['aColor',3,24],['aGlow',1,36],['aOpacity',1,40],['aSurface',4,44]].map(([name,size,offset])=>[gl.getAttribLocation(this.program,name),size,offset]);
   this.uniforms=Object.fromEntries(['uVP','uViewDir','uLightDir'].map(name=>[name,gl.getUniformLocation(this.program,name)]));
   this.params=null;
  }
@@ -187,14 +195,31 @@ export class Renderer{
    }
    gl.drawArrays(gl.TRIANGLES,0,geo.staticVertices.length/VERTEX_STRIDE);
   }
-  setup(this.buffer);
-  if(this.upload.length<geo.vertices.length){
-   this.upload=new Float32Array(Math.max(1024,2**Math.ceil(Math.log2(geo.vertices.length))));
-   gl.bufferData(gl.ARRAY_BUFFER,this.upload.byteLength,gl.DYNAMIC_DRAW);
-  }
-  this.upload.set(geo.vertices);
-  if(geo.vertices.length)gl.bufferSubData(gl.ARRAY_BUFFER,0,this.upload,0,geo.vertices.length);
-  gl.drawArrays(gl.TRIANGLES,0,geo.vertices.length/VERTEX_STRIDE);
+  // Solids write depth. Alpha and additive effects retain depth testing so a
+  // wall can occlude them, but do not write depth themselves. Transparent
+  // triangles are back-to-front sorted per frame; this is an intentionally
+  // bounded approximation for intersecting effects at the fixed isometric
+  // camera, not a claim of order-independent transparency.
+  const upload=vertices=>{
+   setup(this.buffer);
+   if(this.upload.length<vertices.length){
+    this.upload=new Float32Array(Math.max(1024,2**Math.ceil(Math.log2(vertices.length))));
+    gl.bufferData(gl.ARRAY_BUFFER,this.upload.byteLength,gl.DYNAMIC_DRAW);
+   }
+   this.upload.set(vertices);
+   if(vertices.length)gl.bufferSubData(gl.ARRAY_BUFFER,0,this.upload,0,vertices.length);
+   gl.drawArrays(gl.TRIANGLES,0,vertices.length/VERTEX_STRIDE);
+  };
+  gl.disable(gl.BLEND);gl.depthMask(true);upload(geo.vertices);
+  const sortEffects=vertices=>{
+   if(vertices.length<=VERTEX_STRIDE*3)return vertices;
+   const triangles=[];
+   for(let i=0;i<vertices.length;i+=VERTEX_STRIDE*3){const d=(vertices[i]*eye[0]+vertices[i+1]*eye[1]+vertices[i+2]*eye[2]+vertices[i+VERTEX_STRIDE]*eye[0]+vertices[i+VERTEX_STRIDE+1]*eye[1]+vertices[i+VERTEX_STRIDE+2]*eye[2]+vertices[i+VERTEX_STRIDE*2]*eye[0]+vertices[i+VERTEX_STRIDE*2+1]*eye[1]+vertices[i+VERTEX_STRIDE*2+2]*eye[2])/3;triangles.push([i,d]);}
+   triangles.sort((a,b)=>b[1]-a[1]);const sorted=new Float32Array(vertices.length);for(let n=0;n<triangles.length;n++)sorted.set(vertices.slice(triangles[n][0],triangles[n][0]+VERTEX_STRIDE*3),n*VERTEX_STRIDE*3);return sorted;
+  };
+  const alpha=sortEffects(geo.effectVertices||[]);if(alpha.length){gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);upload(alpha);}
+  const additive=sortEffects(geo.additiveVertices||[]);if(additive.length){gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);gl.depthMask(false);upload(additive);}
+  gl.depthMask(true);gl.disable(gl.BLEND);
  }
  ray(clientX,clientY){const p=this.params;if(!p)return null;const f=norm(sub(p.target,p.eye)),right=norm(cross(f,[0,1,0])),up=cross(right,f),sx=((clientX-p.r.left)/p.r.width*2-1)*p.halfX,sy=(1-(clientY-p.r.top)/p.r.height*2)*p.halfY;return {origin:p.eye.map((v,i)=>v+right[i]*sx+up[i]*sy),direction:f};}
  pick(clientX,clientY,height=.5){const ray=this.ray(clientX,clientY);if(!ray||Math.abs(ray.direction[1])<1e-9)return null;const t=(height-ray.origin[1])/ray.direction[1];return {x:ray.origin[0]+ray.direction[0]*t,z:ray.origin[2]+ray.direction[2]*t};}

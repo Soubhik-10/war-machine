@@ -4,13 +4,18 @@ import { unpackChallenge as unpackCurrentChallenge } from '../dist/data.mjs';
 import { CLIENT_ENGINE_HASH } from '../dist/release.mjs';
 import { Battle as LegacyBattle } from './engines/4b762a9b76ba071b27799113a0aafb5b8a04a7a02e21a445e60295f3c82ca365.mjs';
 import { unpackChallenge as unpackLegacyChallenge } from './engines/data.mjs';
+import { Battle as E62Battle } from './engines/e62d2be3ff92293eb4ebb0a2357a039833ebf3a782ddff2d71dee367de1c5cf1/engine.mjs';
+import { unpackChallenge as unpackE62Challenge } from './engines/e62d2be3ff92293eb4ebb0a2357a039833ebf3a782ddff2d71dee367de1c5cf1/data.mjs';
 
 export const LEGACY_ENGINE_HASH = '4b762a9b76ba071b27799113a0aafb5b8a04a7a02e21a445e60295f3c82ca365';
+export const E62_ENGINE_HASH = 'e62d2be3ff92293eb4ebb0a2357a039833ebf3a782ddff2d71dee367de1c5cf1';
+// This advertised value covered both its original sources and later changed
+// deployed sources. A record's engineHash alone cannot select either safely.
+export const AMBIGUOUS_ENGINE_HASH = 'd65afc7a4429e15908beddef95eeba568d23a92d3870d5be844950c87e3b519c';
 export const ENGINE_EVALUATORS = Object.freeze({
-  [CLIENT_ENGINE_HASH]: Object.freeze({ Battle, unpackChallenge: unpackCurrentChallenge }),
-  // Keep the audited evaluator authoritative while the generated release stamp
-  // still carries the same hash during a local build transition.
+  ...(CLIENT_ENGINE_HASH === AMBIGUOUS_ENGINE_HASH ? {} : {[CLIENT_ENGINE_HASH]: Object.freeze({ Battle, unpackChallenge: unpackCurrentChallenge })}),
   [LEGACY_ENGINE_HASH]: Object.freeze({ Battle: LegacyBattle, unpackChallenge: unpackLegacyChallenge }),
+  [E62_ENGINE_HASH]: Object.freeze({ Battle: E62Battle, unpackChallenge: unpackE62Challenge }),
 });
 
 export const CHAIN_ID = 4217;

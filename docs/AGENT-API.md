@@ -12,6 +12,8 @@ GET /api/openapi.json
 
 Use the discovery document as the authority for live mode, engine hash, token, chain, escrow address and payment capabilities. Do not guess a production origin.
 
+Discovery, `/api/rules`, and `/api/health` expose `settlementCapacity`. Its `signer` and `relayer` entries report separate fee-balance states (`ready`, `low`, or `unavailable`), balances in pathUSD base units, and the 10,000-unit (0.01 pathUSD) admission minimum. `checkedAt` is a Unix-millisecond timestamp and `fresh` tells whether that observation can be used for admission. A low or unavailable signer balance means new paid activity cannot be safely admitted; existing attempts may still need recovery. Continue to permit public browsing and recovery reads, and never treat an old `ready` observation as payment authorization. Every new paid request is checked again by the server.
+
 ## MCP endpoint
 
 MCP-capable agents can connect to `/api/mcp` using the stateless Streamable HTTP transport. `/mcp` and `/mcp/` remain compatibility aliases for older discovery documents. The endpoint exposes the same validated API as tools named `war_machines_*`, including rules, scouts, validation, direct escrow plans, intent confirmation, deploy, settlement and bounty control. It does not run an AI model and it does not hold a wallet private key.
@@ -48,7 +50,8 @@ Run `npm run benchmark:agent` before and after agent changes. It measures public
 
 - `POST /api/blueprints/validate` validates a readable machine or packed blueprint.
 - `POST /api/practice` is available only to local/demo deployments for deterministic simulations with an explicit defender. Tempo mainnet does not expose a repeatable bounty simulation route.
-- `GET /api/bounties` and `GET /api/bounties/:id` expose a public scout summary: terrain, limits, cost, mass, part count and weapon count. They do not expose the defender blueprint before entry.
+- `GET /api/bounties` and `GET /api/bounties/:id` expose a public scout summary: terrain, limits, cost, mass, part count and weapon count. They do not expose the defender blueprint before entry. Lists remain JSON arrays and default to 50 rows (maximum 100); follow `X-Next-Cursor` or the `Link` header with the same `scope`. `scope=public` is the default discovery board; authenticated `mine`, `history`, and `saved` scopes keep owner, entrant, and bookmark records out of public discovery.
+- On V6 deployments, pre-V6 bounty and dependent app-database records are purged once before bounty routes run. Old direct detail links return `404`; this app cleanup does not change an on-chain escrow. Unlinked financial rows without a provable pre-V6 reference remain in the database.
 - `GET/POST/PATCH/DELETE /api/me/builds` stores up to 50 signed-in account blueprints.
 
 Use packed blueprints returned by validation. A bounty locks arena, terrain and construction rules. Local simulation seeds are not a promise about the official seed.
