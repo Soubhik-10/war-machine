@@ -8058,6 +8058,33 @@ body[data-page="home"] main { max-width: 1320px; }
 body[data-page="home"] .portal-footer { border-top: 0; margin-top: 0; }
 .theme-picker > span { font-size: 11px; }
 
+/* Stack the home hero before either half gets cramped in a portrait viewport. */
+@media (max-width: 980px) {
+  body[data-page="home"] .portal-hero {
+    grid-template-columns: 1fr;
+    max-width: 760px;
+    margin-inline: auto;
+  }
+  body[data-page="home"] .hero-copy > p { max-width: 52ch; }
+}
+@media (min-width: 981px) and (min-height: 800px) {
+  body[data-page="home"] main { padding-bottom: 16px; }
+  body[data-page="home"] .portal-hero {
+    min-height: min(680px, calc(100dvh - 270px));
+    align-items: stretch;
+  }
+  body[data-page="home"] .hero-copy { align-self: center; }
+  body[data-page="home"] .hero-display {
+    display: flex;
+    flex-direction: column;
+  }
+  body[data-page="home"] #hero-machine {
+    flex: 1 1 auto;
+    min-height: 240px;
+    height: auto;
+  }
+}
+
 /* Workshop: aligned rails and a dominant canvas, with optional setup below. */
 .workspace { display: grid; grid-template-columns: 236px minmax(0, 1fr) 300px; gap: var(--space-2); align-items: start; }
 .workspace > .bench { height: var(--workbench-height); align-self: start; }
@@ -8582,7 +8609,7 @@ body[data-page="home"] .portal-footer { border-top: 0; margin-top: 0; }
   .front-bar select,
   .front-bar .toggle { justify-self: start; }
 }
-`,"text/css; charset=utf-8","9acac1afa2db68c1"],"/part-guidance.mjs":[`// Presentation copy only. This stays separate from data.mjs so wording changes
+`,"text/css; charset=utf-8","4016499dbbf423a4"],"/part-guidance.mjs":[`// Presentation copy only. This stays separate from data.mjs so wording changes
 // do not alter the authoritative simulation or invalidate active contracts.
 export const PART_GUIDANCE=Object.freeze({
  core:{role:'REQUIRED COMMAND',quick:'One is mandatory. If it dies, your machine loses.'},
