@@ -8129,9 +8129,9 @@ body[data-page="home"] .portal-footer { border-top: 0; margin-top: 0; }
 .contract-content .contract-footer { margin-top: auto; padding-top: 12px; }
 .contract-content .card-fee { margin-bottom: 12px; }
 .contract-grid > .bounty-empty { grid-column: 1 / -1; }
-.contract-detail { gap: 16px; align-items: start; }
+.contract-detail { gap: 16px; align-items: stretch; }
 .defender-card > canvas, .defender-card > .sealed-defender { height: clamp(280px, 26vw, 380px); min-height: 280px; }
-.defender-card { align-self: start; }
+.defender-card { align-self: stretch; }
 .defender-caption, .contract-terms { padding: 24px; }
 .defender-caption h2, .contract-terms > h2 { font-size: 30px; }
 .defender-card .bounty-actions { padding: 0 24px 24px; }
@@ -8473,7 +8473,7 @@ body[data-page="home"] .portal-footer { border-top: 0; margin-top: 0; }
   .front-bar select,
   .front-bar .toggle { justify-self: start; }
 }
-`,"text/css; charset=utf-8","28ae8486882acefc"],"/part-guidance.mjs":[`// Presentation copy only. This stays separate from data.mjs so wording changes
+`,"text/css; charset=utf-8","9acac1afa2db68c1"],"/part-guidance.mjs":[`// Presentation copy only. This stays separate from data.mjs so wording changes
 // do not alter the authoritative simulation or invalidate active contracts.
 export const PART_GUIDANCE=Object.freeze({
  core:{role:'REQUIRED COMMAND',quick:'One is mandatory. If it dies, your machine loses.'},

@@ -247,9 +247,9 @@ body[data-page="home"] .portal-footer { border-top: 0; margin-top: 0; }
 .contract-content .contract-footer { margin-top: auto; padding-top: 12px; }
 .contract-content .card-fee { margin-bottom: 12px; }
 .contract-grid > .bounty-empty { grid-column: 1 / -1; }
-.contract-detail { gap: 16px; align-items: start; }
+.contract-detail { gap: 16px; align-items: stretch; }
 .defender-card > canvas, .defender-card > .sealed-defender { height: clamp(280px, 26vw, 380px); min-height: 280px; }
-.defender-card { align-self: start; }
+.defender-card { align-self: stretch; }
 .defender-caption, .contract-terms { padding: 24px; }
 .defender-caption h2, .contract-terms > h2 { font-size: 30px; }
 .defender-card .bounty-actions { padding: 0 24px 24px; }
