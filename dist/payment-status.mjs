@@ -72,7 +72,11 @@ export function paymentStatus(attempt) {
   const payment = paymentOf(attempt),
     result = resultOf(attempt),
     technical = isTechnical(attempt),
-    settled = isSettled(attempt);
+    settled = isSettled(attempt),
+    failsafe =
+      v6(attempt) && Number(payment.failsafeDeadline || 0) > 0
+        ? ` If it is still unsettled at ${new Date(Number(payment.failsafeDeadline)).toLocaleTimeString()}, the entry is refunded and the challenge reopens automatically.`
+        : "";
   if (paymentIsRefunded(attempt)) {
     const entry = result.entry ?? payment.entry ?? payment.entryAmount;
     return {
@@ -117,28 +121,28 @@ export function paymentStatus(attempt) {
     return {
       label: "Settlement submitted — awaiting finality",
       detail:
-        "A settlement transaction was submitted. Wait for the finalized receipt before treating the result as Paid, Draw settled, or Loss settled.",
+        "A settlement transaction was submitted. Wait for the finalized receipt before treating the result as Paid, Draw settled, or Loss settled." + failsafe,
     };
   }
   if (attempt?.status === "awaiting-signatures") {
     return {
       label: "Result ready — awaiting signature",
       detail:
-        "The battle result is recorded and waiting for the configured settlement signer. It is not a missing result and does not require another entry payment.",
+        "The battle result is recorded and waiting for the configured settlement signer. It is not a missing result and does not require another entry payment." + failsafe,
     };
   }
   if (attempt?.status === "ready-to-settle") {
     return {
       label: "Result signed — settlement pending",
       detail:
-        "The battle result is recorded and waiting for the escrow settlement. It is not a missing result and does not require another entry payment.",
+        "The battle result is recorded and waiting for the escrow settlement. It is not a missing result and does not require another entry payment." + failsafe,
     };
   }
   if (["queued", "running"].includes(attempt?.status)) {
     return {
       label: "Result processing",
       detail:
-        "The official replay is complete or being finalized. Payment status will update after the escrow result is verified.",
+        "The official replay is complete or being finalized. Payment status will update after the escrow result is verified." + failsafe,
     };
   }
   if (attempt?.status === "engineering") {

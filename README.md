@@ -76,7 +76,7 @@ See `PLAYTEST.md` for browser matches and verification. Earlier playtest notes a
 
 New equipment: Frostbite stud tires, Dune paddle tires, Storm insulation, Thermal regulators, Vector stabilizers and the Needle flechette cannon. Permafrost cuts generation to 65%; Sunscar adds 7 ambient heat/s; Brineworks lanes drain 8 energy/s. Cooling, mobility, protection and active system costs now depend on the chosen climate. Mixed running gear scales proportionally; adding one tread does not protect every wheel.
 
-Creators choose direct pathUSD entry and gross reward amounts, plus a duration of up to 8,760 hours (zero means no deadline). The contract enforces the selected amounts, single active attempt, exit paths and fixed 2.5% fee. These are independent from construction credits and build limits.
+Creators choose direct pathUSD entry and gross reward amounts, plus a duration of up to 8,760 hours (zero means no deadline). Open bounties can remain available indefinitely. Once a V6 bounty is entered, its result must settle or the 15-minute failsafe refunds the held entry and reopens the bounty. The contract enforces the selected amounts, single active attempt, exit paths and fixed 2.5% fee. These are independent from construction credits and build limits.
 
 Wallet sign-in, cross-platform Tempo CLI setup, native MPP bounty routes and direct escrow calls are described in [Tempo setup](docs/TEMPO-SETUP.md) and [Tempo mainnet operations](docs/TEMPO-MAINNET.md). The escrow and payouts use 6-decimal pathUSD. Native MPP may accept an operator-allowlisted Tempo stablecoin by atomically swapping it into pathUSD before the relayer forwards the bounty call; the contract never holds arbitrary input tokens.
 

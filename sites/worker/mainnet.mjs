@@ -63,6 +63,7 @@ import { handleMcpRequest } from "../../server/mcp.mjs";
 
 const now = () => Date.now(),
   COMPLETED_BOUNTY_BOARD_MS = 10 * 60 * 1000,
+  ACTIVE_ATTEMPT_FAILSAFE_MS = 15 * 60 * 1000,
   PAID_SIMULATION_MAX_MODULES = 128,
   PAID_SIMULATION_MAX_WEAPONS = 24,
   id = () => crypto.randomUUID(),
@@ -791,7 +792,7 @@ function catalog(config) {
         "Public scouts expose only cost, mass, part count, weapon count, arena and limits. A confirmed entry reveals the exact defender to that challenger only.",
       timeout:
         config.escrowVersion === "6"
-          ? "Missing settlement finality after the two-minute grace is a technical refund: V6 returns the held entry to the challenger and reopens the bounty. No sponsored retry is available on V6."
+          ? "Open bounties may remain available indefinitely. Once entered, a V6 attempt must settle or the 15-minute failsafe returns the held entry to the challenger and reopens the bounty."
           : "Missing the counter-build deadline is a loss. The entry was paid to the bounty creator when you entered and the bounty reopens after timeout. An unresolved settlement infrastructure timeout is technical and unlocks one sponsored retry instead.",
       payments: paid
         ? acceptingNewBounties
@@ -835,6 +836,8 @@ const discovery = (config) => ({
         acceptingNewBounties: !!config.acceptingNewBounties,
         escrowVersion: config.escrowVersion,
         settlementGraceSeconds: config.settlementGraceSeconds,
+        activeAttemptFailsafeSeconds:
+          config.escrowVersion === "6" ? ACTIVE_ATTEMPT_FAILSAFE_MS / 1000 : null,
         technicalRetry: {
           available: !!config.technicalRetryEnabled,
           route: "/api/attempts/{id}/retry",
@@ -918,7 +921,9 @@ const discovery = (config) => ({
       "The defender blueprint is not served until this account has a confirmed escrow entry.",
     results: "deterministic replay; one trusted escrow signer attestation required",
     timeout:
-      "counter-build expiry settles as a loss; entry goes to bounty creator",
+      config.escrowVersion === "6"
+        ? "Open bounties have no forced lifetime. After entry, an unsettled V6 attempt is refunded and the bounty reopens by the 15-minute failsafe."
+        : "counter-build expiry settles as a loss; entry goes to bounty creator",
     officialSeed: "server chosen",
   },
 });
@@ -2333,6 +2338,14 @@ async function attemptView(db, attemptId, viewer) {
     deadline:
       record?.deadline ||
       Math.floor(Number(bounty.escrow_attempt_deadline || 0) / 1000),
+    failsafeDeadline:
+      escrowVersion === 6
+        ? activeAttemptFailsafeAt(
+            attempt.created,
+            Number(bounty.escrow_attempt_deadline || 0),
+            ESCROW_SETTLEMENT_GRACE_SECONDS,
+          )
+        : null,
     finalized: done && !!attempt.escrow_settlement_tx,
     refundStatus: storedResult?.refundStatus || null,
     refundStatusVerified: storedResult?.refundStatusVerified === true,
@@ -2764,6 +2777,8 @@ const TOKEN_TRANSFER_ABI = parseAbi([
   "function transfer(address to,uint256 amount) returns (bool)",
 ]);
 const ESCROW_ABI = parseAbi([
+  "function getBounty(uint256 bountyId) view returns ((address creator,address challenger,uint128 reward,uint128 entry,uint64 expiresAt,uint64 attemptDeadline,uint64 attemptNonce,uint8 status,bytes32 termsHash))",
+  "function attemptWindow() view returns (uint64)",
   "function approve(address spender,uint256 amount) returns (bool)",
   "function createBounty(bytes32 termsHash,uint128 reward,uint128 entry,uint64 expiresAt) returns (uint256)",
   "function createBountyFor(address creator,bytes32 termsHash,uint128 reward,uint128 entry,uint64 expiresAt) returns (uint256)",
@@ -5537,6 +5552,18 @@ export async function sendV3Settlement(env, config, attempt, payload) {
   return saved.hash;
 }
 
+export function activeAttemptFailsafeAt(
+  enteredAt,
+  escrowDeadline,
+  settlementGraceSeconds = 0,
+) {
+  const entered = Number(enteredAt || 0),
+    deadline = Number(escrowDeadline || 0),
+    grace = Number(settlementGraceSeconds || 0) * 1000;
+  if (!entered || !deadline) return 0;
+  return Math.max(entered + ACTIVE_ATTEMPT_FAILSAFE_MS, deadline + grace);
+}
+
 export function automaticTimeoutState(attempt, bounty, at = now(), config = null) {
   if (
     !["engineering", "queued", "awaiting-signatures", "ready-to-settle"].includes(
@@ -5550,6 +5577,14 @@ export function automaticTimeoutState(attempt, bounty, at = now(), config = null
   if (!escrowDeadline || at < escrowDeadline) return "signable-loss";
   const grace = Number(config?.settlementGraceSeconds || 0) * 1000;
   if (at < escrowDeadline + grace) return "settlement-grace";
+  if (config?.escrowVersion === "6") {
+    const failsafeAt = activeAttemptFailsafeAt(
+      attempt.created,
+      escrowDeadline,
+      config.settlementGraceSeconds,
+    );
+    if (failsafeAt && at < failsafeAt) return "settlement-grace";
+  }
   return "onchain-finalizer";
 }
 
@@ -5606,6 +5641,299 @@ const timeoutReceiptPending = (error) =>
   /not confirmed yet|awaiting finality|awaiting canonical finality/i.test(
     String(error?.message || error),
   );
+
+async function readV6EscrowBounty(config, escrowBountyId) {
+  const data = encodeFunctionData({
+      abi: ESCROW_ABI,
+      functionName: "getBounty",
+      args: [BigInt(escrowBountyId)],
+    }),
+    encoded = await rpc(config, "eth_call", [
+      { to: config.escrowAddress, data },
+      "latest",
+    ]);
+  check(
+    typeof encoded === "string" && /^0x[0-9a-fA-F]{576}$/.test(encoded),
+    "Tempo RPC returned an invalid V6 bounty record.",
+    502,
+  );
+  return {
+    creator: topicAddress(bytesWord(encoded, 0)),
+    challenger: topicAddress(bytesWord(encoded, 1)),
+    reward: word(encoded, 2),
+    entry: word(encoded, 3),
+    expiresAt: word(encoded, 4),
+    attemptDeadline: word(encoded, 5),
+    attemptNonce: word(encoded, 6),
+    status: Number(word(encoded, 7)),
+    termsHash: bytesWord(encoded, 8),
+  };
+}
+
+async function readV6AttemptWindow(config) {
+  const data = encodeFunctionData({
+      abi: ESCROW_ABI,
+      functionName: "attemptWindow",
+    }),
+    encoded = await rpc(config, "eth_call", [
+      { to: config.escrowAddress, data },
+      "latest",
+    ]);
+  return Number(word(encoded));
+}
+
+async function latestChainTimeMs(config) {
+  const block = await rpc(config, "eth_getBlockByNumber", ["latest", false]);
+  check(block?.timestamp, "Tempo RPC did not return the latest block time.", 502);
+  return Number(BigInt(block.timestamp)) * 1000;
+}
+
+function assertOrphanedV6Scope(row, chain, creator) {
+  check(
+    chain.creator.toLowerCase() === creator.toLowerCase() &&
+      chain.reward === BigInt(row.reward_units) &&
+      chain.entry === BigInt(row.entry_units) &&
+      chain.expiresAt === BigInt(Math.floor(Number(row.expires || 0) / 1000)) &&
+      (!row.terms_hash ||
+        chain.termsHash.toLowerCase() === row.terms_hash.toLowerCase()),
+    "The on-chain V6 bounty does not match its saved terms.",
+    409,
+  );
+}
+
+const orphanedV6JournalKey = (escrowBountyId, nonce) =>
+  `automatic-v6-orphan-timeout:${escrowBountyId}:${nonce}`;
+
+async function confirmOrphanedV6Timeout(db, config, saved) {
+  const receiptValue = await confirmOrBroadcast(
+      config,
+      saved.hash,
+      saved.raw,
+      Number(saved.validBefore || 0),
+    ),
+    log = eventLog(receiptValue, config, ESCROW_EVENTS.timedOutRefunded);
+  check(
+    log.topics?.length === 4 &&
+      BigInt(log.topics[1]).toString() === saved.escrowBountyId &&
+      BigInt(log.topics[2]).toString() === saved.nonce &&
+      topicAddress(log.topics[3]).toLowerCase() === saved.challenger.toLowerCase() &&
+      topicAddress(bytesWord(log.data, 0)).toLowerCase() === saved.creator.toLowerCase() &&
+      word(log.data, 1) === BigInt(saved.entry),
+    "The V6 failsafe refund does not match the orphaned attempt.",
+    409,
+  );
+  const row = await bountyRow(db, saved.rowId);
+  check(
+    String(row.escrow_bounty_id) === saved.escrowBountyId,
+    "The saved bounty no longer matches the V6 failsafe journal.",
+    409,
+  );
+  let attempt = row.active_attempt
+    ? await db.prepare("SELECT * FROM attempts WHERE id=?").bind(row.active_attempt).first()
+    : null;
+  if (attempt) {
+    check(
+      (await payoutAddress(db, attempt.account)).toLowerCase() ===
+        saved.challenger.toLowerCase(),
+      "The active database attempt belongs to a different challenger.",
+      409,
+    );
+  }
+  const account = attempt
+      ? attempt.account
+      : await accountForTempoAddress(db, saved.challenger),
+    attemptId = attempt?.id || saved.attemptId,
+    pendingHold = await db
+      .prepare(
+        "SELECT provider_ref,body FROM payment_holds WHERE account=? AND bounty=? AND purpose IN ('direct-entry','mpp-entry') ORDER BY updated DESC LIMIT 1",
+      )
+      .bind(account, row.id)
+      .first();
+  let entryTransactionHash = validHash(pendingHold?.provider_ref)
+    ? pendingHold.provider_ref
+    : null;
+  if (!entryTransactionHash && pendingHold?.body) {
+    try {
+      const body = parse(pendingHold.body);
+      entryTransactionHash = validHash(body.relayTransactionHash)
+        ? body.relayTransactionHash
+        : null;
+    } catch {}
+  }
+  const updated = now(),
+    result = {
+      ...(attempt?.result ? parse(attempt.result) : {}),
+      outcome: "technical-refund",
+      reason: "unsettled-attempt-failsafe",
+      entry: display(row.entry_units),
+      grossReward: "0",
+      payout: "0",
+      platformFee: "0",
+      platformFeeBps: row.platform_fee_bps ?? PLATFORM_FEE_BPS,
+      net: "0",
+      payoutStatus: "technical-refund",
+      escrowVersion: 6,
+      refundStatus: "verified",
+      refundStatusVerified: true,
+      verifiedAt: updated,
+      recoveryTransactionHash: saved.hash,
+    },
+    statements = [];
+  if (attempt) {
+    statements.push(
+      db
+        .prepare(
+          "UPDATE attempts SET status='technical-refund',result=?,escrow_settlement_tx=?,updated=? WHERE id=? AND status IN ('engineering','queued','awaiting-signatures','ready-to-settle')",
+        )
+        .bind(json(result), saved.hash, updated, attemptId),
+    );
+  } else {
+    statements.push(
+      db
+        .prepare(
+          "INSERT OR IGNORE INTO attempts (id,bounty,account,blueprint,seed,status,result,error,created,updated,escrow_entry_tx,escrow_settlement_tx,build_deadline,build_requested_seconds,participant_name,show_address) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .bind(
+          attemptId,
+          row.id,
+          account,
+          json(null),
+          0,
+          "technical-refund",
+          json(result),
+          null,
+          Number(saved.enteredAt),
+          updated,
+          entryTransactionHash,
+          saved.hash,
+          Number(saved.deadline),
+          0,
+          null,
+          0,
+        ),
+    );
+  }
+  statements.push(
+    db
+      .prepare(
+        "UPDATE bounties SET status='open',active_attempt=NULL,escrow_attempt_deadline=NULL,updated=? WHERE id=?",
+      )
+      .bind(updated, row.id),
+    db
+      .prepare(
+        "UPDATE payment_holds SET status='accepted',provider_ref=?,updated=? WHERE account=? AND bounty=? AND purpose IN ('direct-entry','mpp-entry') AND status IN ('awaiting-onchain','awaiting-relay','relay-prepared','recovery-required')",
+      )
+      .bind(attemptId, updated, account, row.id),
+    db
+      .prepare(
+        "UPDATE settlement_jobs SET state='complete',tx_hash=?,error_code=NULL,next_run=0,lease=NULL,lease_until=0,updated=? WHERE attempt=?",
+      )
+      .bind(saved.hash, updated, attemptId),
+    db
+      .prepare("UPDATE payment_kv SET value=? WHERE key=?")
+      .bind(json({ ...saved, complete: true, completedAt: updated }), saved.key),
+  );
+  await db.batch(statements);
+}
+
+async function beginOrphanedV6Timeout(db, env, config, row, chain, enteredAt) {
+  const key = orphanedV6JournalKey(
+    row.escrow_bounty_id,
+    chain.attemptNonce.toString(),
+  );
+  let saved = await readJournal(db, key);
+  if (!saved) {
+    const attemptId = id(),
+      prepared = await prepareV3Timeout(
+        env,
+        config,
+        row.escrow_bounty_id,
+        attemptId,
+        "reopenTimedOutAttempt",
+      );
+    saved = {
+      key,
+      rowId: row.id,
+      escrowBountyId: String(row.escrow_bounty_id),
+      nonce: chain.attemptNonce.toString(),
+      creator: chain.creator,
+      challenger: chain.challenger,
+      entry: chain.entry.toString(),
+      enteredAt,
+      deadline: Number(chain.attemptDeadline) * 1000,
+      attemptId,
+      hash: prepared.hash,
+      raw: prepared.raw,
+      validBefore: prepared.validBefore,
+      createdAt: now(),
+    };
+    await db
+      .prepare("INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING")
+      .bind(key, json(saved))
+      .run();
+    saved = await readJournal(db, key);
+  }
+  check(
+    saved.rowId === row.id &&
+      saved.escrowBountyId === String(row.escrow_bounty_id) &&
+      saved.nonce === chain.attemptNonce.toString() &&
+      saved.challenger.toLowerCase() === chain.challenger.toLowerCase(),
+    "A different V6 attempt owns this failsafe journal.",
+    409,
+  );
+  if (!saved.complete) await confirmOrphanedV6Timeout(db, config, saved);
+}
+
+export async function recoverOrphanedV6Attempts(db, env, config) {
+  if (config.escrowVersion !== "6" || !config.automaticSettlementReady) return;
+  const unfinished = (
+    await db
+      .prepare(
+        "SELECT value FROM payment_kv WHERE key LIKE 'automatic-v6-orphan-timeout:%' AND COALESCE(json_extract(value,'$.complete'),0)=0 ORDER BY key LIMIT 10",
+      )
+      .all()
+  ).results;
+  for (const item of unfinished) {
+    try {
+      await confirmOrphanedV6Timeout(db, config, parse(item.value));
+    } catch (error) {
+      console.error("War Machines V6 orphaned-attempt receipt recovery:", error);
+    }
+  }
+  const rows = (
+    await db
+      .prepare(
+        "SELECT * FROM bounties WHERE fee_policy_version=? AND escrow_bounty_id IS NOT NULL AND status IN ('open','busy') AND active_attempt IS NULL ORDER BY updated LIMIT 10",
+      )
+      .bind(escrowPolicy("6"))
+      .all()
+  ).results;
+  if (!rows.length) return;
+  const [attemptWindowSeconds, chainNow] = await Promise.all([
+    readV6AttemptWindow(config),
+    latestChainTimeMs(config),
+  ]);
+  check(attemptWindowSeconds > 0, "The V6 attempt window is invalid.", 502);
+  for (const row of rows) {
+    try {
+      const chain = await readV6EscrowBounty(config, row.escrow_bounty_id),
+        creator = await payoutAddress(db, row.owner);
+      assertOrphanedV6Scope(row, chain, creator);
+      if (chain.status !== 2 || chain.attemptDeadline === 0n) continue;
+      const enteredAt =
+          (Number(chain.attemptDeadline) - attemptWindowSeconds) * 1000,
+        failsafeAt = activeAttemptFailsafeAt(
+          enteredAt,
+          Number(chain.attemptDeadline) * 1000,
+          config.settlementGraceSeconds,
+        );
+      if (!failsafeAt || chainNow < failsafeAt) continue;
+      await beginOrphanedV6Timeout(db, env, config, row, chain, enteredAt);
+    } catch (error) {
+      console.error("War Machines V6 orphaned-attempt failsafe:", error);
+    }
+  }
+}
 
 async function confirmTechnicalReopen(db, holdId, hash, config) {
   const hold = await db
@@ -6079,6 +6407,7 @@ export async function runAutomaticSettlement(env, reason = "scheduled") {
   if (!await acquireSettlementRunnerLease(env.DB)) return;
   try {
     await recoverAgentBountyPayments(env.DB, config);
+    await recoverOrphanedV6Attempts(env.DB, env, config);
     await repairMislabeledBounties(env.DB, config, hash => receipt(config, hash));
     await reopenDefendedBounties(env.DB, config);
     v3SettlementAccount(env, config);

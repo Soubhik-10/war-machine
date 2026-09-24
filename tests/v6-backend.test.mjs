@@ -8,6 +8,7 @@ import { encodeAbiParameters, keccak256, stringToHex } from "viem";
 import {
   runtimeConfig,
   assertV6MigrationReady,
+  activeAttemptFailsafeAt,
   automaticTimeoutState,
   validateEscrowAttestation,
   mainnetFetch,
@@ -249,7 +250,29 @@ test("V6 settlement signatures use the version 6 domain and never offer V5 techn
   const recovered = await validateEscrowAttestation(config, payload, [signature]);
   assert.equal(recovered.length, 1);
   assert.equal(config.technicalRetryEnabled, false);
-  assert.equal(automaticTimeoutState({ status: "engineering", build_deadline: 1 }, { escrow_attempt_deadline: Date.now() - 121000 }, Date.now(), config), "onchain-finalizer");
+  const stamp = Date.now();
+  assert.equal(
+    activeAttemptFailsafeAt(stamp - 14 * 60_000, stamp - 3 * 60_000, 120),
+    stamp + 60_000,
+  );
+  assert.equal(
+    automaticTimeoutState(
+      { status: "engineering", build_deadline: 1, created: stamp - 14 * 60_000 },
+      { escrow_attempt_deadline: stamp - 3 * 60_000 },
+      stamp,
+      config,
+    ),
+    "settlement-grace",
+  );
+  assert.equal(
+    automaticTimeoutState(
+      { status: "engineering", build_deadline: 1, created: stamp - 16 * 60_000 },
+      { escrow_attempt_deadline: stamp - 3 * 60_000 },
+      stamp,
+      config,
+    ),
+    "onchain-finalizer",
+  );
 });
 
 test("V6 rejects the known V5 escrow address before it can accept funds", () => {
