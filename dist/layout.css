@@ -618,3 +618,128 @@ body[data-page="home"] .portal-footer { border-top: 0; margin-top: 0; }
   .front-bar select,
   .front-bar .toggle { justify-self: start; }
 }
+
+/* Keep the bounty controls grouped and give interrupted payments a clear recovery surface. */
+.bounty-heading {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(0, 1.45fr);
+  align-items: center;
+  gap: clamp(18px, 3vw, 42px);
+  padding-bottom: 18px;
+  border-bottom: 1px solid #263f4b;
+}
+.bounty-heading-copy { min-width: 0; }
+.bounty-heading .heading-actions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.bounty-heading-nav,
+.bounty-heading-wallet {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.bounty-heading-nav { justify-content: flex-start; }
+.bounty-heading-wallet #credits-btn {
+  max-width: 310px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bounty-board-actions {
+  align-items: center;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #263f4b;
+  margin-bottom: 14px;
+}
+.bounty-board-actions .guide-reopen { margin-left: auto; }
+.payment-recovery-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px 24px;
+  margin: 0 0 18px;
+  padding: 18px 20px;
+  border: 1px solid #a77935;
+  border-left: 4px solid var(--gold);
+  border-radius: 10px;
+  background: linear-gradient(110deg, #302718 0%, #18232a 72%);
+  color: var(--text);
+  box-shadow: 0 10px 30px #0002;
+}
+.payment-recovery-card.has-transaction { border-left-color: #8fc3a3; }
+.payment-recovery-copy { min-width: 0; }
+.payment-recovery-copy .eyebrow { color: var(--gold); }
+.payment-recovery-copy h2 { margin: 5px 0 6px; font-size: clamp(18px, 2vw, 22px); }
+.payment-recovery-copy p { max-width: 75ch; color: #c2cbc8; line-height: 1.5; }
+.payment-recovery-facts {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.payment-recovery-facts > div {
+  min-width: 112px;
+  padding: 8px 11px;
+  border: 1px solid #40505a;
+  border-radius: 7px;
+  background: #0d1820a8;
+}
+.payment-recovery-facts small,
+.payment-recovery-transaction > small { display: block; font-size: 10px; letter-spacing: .8px; }
+.payment-recovery-facts b { display: block; margin-top: 4px; overflow-wrap: anywhere; font-size: 14px; }
+.payment-recovery-transaction,
+.payment-recovery-attach {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid #384a53;
+  border-radius: 7px;
+  background: #0b151c99;
+}
+.payment-recovery-transaction code {
+  display: block;
+  margin-top: 7px;
+  color: #d6e2e2;
+  font: 13px/1.5 'Courier New', monospace;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.payment-recovery-links { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-top: 8px; }
+.payment-recovery-links a { color: #f3c77e; font-size: 14px; }
+.payment-recovery-links button,
+.payment-recovery-actions button { min-height: 40px; }
+.payment-recovery-attach label { display: block; margin-bottom: 7px; font-size: 14px; }
+.payment-recovery-attach > div { display: flex; gap: 9px; }
+.payment-recovery-attach input { min-width: 0; font: 14px 'Courier New', monospace; }
+.payment-recovery-attach > small { display: block; margin-top: 7px; letter-spacing: 0; line-height: 1.5; }
+.payment-recovery-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+@media (max-width: 1000px) {
+  .bounty-heading { grid-template-columns: 1fr; gap: 14px; }
+  .bounty-heading .heading-actions { grid-template-columns: auto minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .bounty-heading .heading-actions { grid-template-columns: 1fr; }
+  .bounty-heading-nav { justify-content: flex-start; }
+  .bounty-heading-wallet { justify-content: flex-start; }
+  .payment-recovery-card { grid-template-columns: 1fr; gap: 12px; padding: 16px; }
+  .payment-recovery-facts { justify-content: flex-start; }
+  .payment-recovery-transaction,
+  .payment-recovery-attach { grid-column: 1; }
+  .payment-recovery-actions { justify-content: flex-start; }
+}
+@media (max-width: 480px) {
+  .bounty-heading-wallet { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); width: 100%; }
+  .bounty-heading-wallet #credits-btn { grid-column: 1 / -1; max-width: none; width: 100%; }
+  .bounty-heading-wallet button { min-width: 0; font-size: 12px; }
+  .bounty-board-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .bounty-board-actions .guide-reopen { grid-column: 1 / -1; margin: 0; }
+  .payment-recovery-attach > div { align-items: stretch; flex-direction: column; }
+  .payment-recovery-attach button { width: 100%; }
+}

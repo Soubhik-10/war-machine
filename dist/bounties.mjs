@@ -594,7 +594,17 @@ export function createBountyUI(adapter) {
     const capacityNotice = runtime.paid && capacity && capacity.fresh === true && !capacity.ready
       ? `<div class="notice settlement-capacity-warning" role="alert"><strong>Settlement capacity warning</strong><p>${esc(settlementCapacityDescription(capacity))}</p></div>`
       : "";
-    return `<div class="page-heading bounty-heading"><div><span class="eyebrow">WAR MACHINES BOUNTIES / ${season}</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><button id="contracts-home">All bounties</button>${me ? '<button id="build-vault">Build vault</button>' : ""}<button id="credits-btn" title="${esc(walletTitle)}" aria-label="${esc(walletTitle ? "Connected Tempo Wallet " + walletTitle : account)}">${esc(account)}</button>${runtime.paid && me ? '<button id="swap-pathusd" title="Swap a supported Tempo stablecoin into pathUSD">Swap to pathUSD</button><button id="disconnect-wallet" class="danger" title="Clear this browser’s Tempo Wallet connection">Disconnect</button>' : ""}</div></div>${capacityNotice}${pending ? `<div class="notice" role="status" aria-live="polite"><strong>Payment request saved.</strong> ${pending.transactionHash ? "The same transaction will be confirmed; no new wallet payment will be sent." : "No wallet charge has been recorded yet; recover with the saved idempotency key or discard this request."} <button id="recover-request">Recover request</button><button id="discard-request">Discard request</button></div>` : ""}`;
+    const paymentRecovery = pending
+      ? (() => {
+          const creating = pending.path === "/bounties",
+            amount = creating ? pending.body.reward : pending.body.entry,
+            hasHash = !!pending.transactionHash,
+            hasIntent = !!pending.intentId,
+            hash = pending.transactionHash;
+          return `<section class="payment-recovery-card ${hasHash ? "has-transaction" : ""}" role="status" aria-live="polite"><div class="payment-recovery-copy"><span class="eyebrow">PAYMENT RECOVERY</span><h2>${hasHash ? "Transaction submitted · awaiting confirmation" : "Payment request saved"}</h2><p>${hasHash ? "Resume confirmation for this exact transaction. Recovering will not request another wallet payment." : hasIntent ? "No transaction hash is saved here. If you approved a wallet transaction, copy its hash from wallet activity and attach it below." : "No wallet transaction is recorded for this request yet. Recover it or safely discard the saved request."}</p></div><div class="payment-recovery-facts"><div><small>REQUEST</small><b>${creating ? "Create bounty" : "Enter bounty"}</b></div>${amount !== undefined && amount !== null ? `<div><small>AMOUNT</small><b>${esc(amount)} pathUSD</b></div>` : ""}${hasIntent ? `<div><small>INTENT</small><b>${esc(pending.intentId)}</b></div>` : ""}</div>${hasHash ? `<div class="payment-recovery-transaction"><small>WALLET TRANSACTION</small><code>${esc(hash)}</code><div class="payment-recovery-links"><a href="https://explore.tempo.xyz/tx/${hash}" target="_blank" rel="noopener noreferrer">Open in Tempo Explorer ↗</a><button id="copy-pending-hash" type="button">Copy transaction hash</button></div></div>` : hasIntent ? `<form id="attach-pending-hash" class="payment-recovery-attach"><label for="pending-transaction-hash">Existing transaction hash</label><div><input id="pending-transaction-hash" name="transactionHash" inputmode="text" autocomplete="off" spellcheck="false" placeholder="0x…" aria-describedby="pending-hash-help"><button class="primary" type="submit">Confirm existing transaction</button></div><small id="pending-hash-help">This checks a transaction you already sent. It does not submit or sign a new payment.</small></form>` : ""}<div class="payment-recovery-actions"><button id="recover-request" class="primary">${hasHash ? "Retry confirmation" : "Recover request"}</button>${!hasHash && !hasIntent ? '<button id="discard-request" type="button">Discard request</button>' : ""}</div></section>`;
+        })()
+      : "";
+    return `<div class="page-heading bounty-heading"><div class="bounty-heading-copy"><span class="eyebrow">WAR MACHINES BOUNTIES / ${season}</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><div class="bounty-heading-nav"><button id="contracts-home">All bounties</button>${me ? '<button id="build-vault">Build vault</button>' : ""}</div><div class="bounty-heading-wallet"><button id="credits-btn" title="${esc(walletTitle)}" aria-label="${esc(walletTitle ? "Connected Tempo Wallet " + walletTitle : account)}">${esc(account)}</button>${runtime.paid && me ? '<button id="swap-pathusd" title="Swap a supported Tempo stablecoin into pathUSD">Swap to pathUSD</button><button id="disconnect-wallet" class="danger" title="Clear this browser’s Tempo Wallet connection">Disconnect</button>' : ""}</div></div></div>${capacityNotice}${paymentRecovery}`;
   }
   function wireHeader() {
     if ($("#contracts-home")) $("#contracts-home").onclick = () => open();
@@ -621,12 +631,46 @@ export function createBountyUI(adapter) {
           if (p.path.endsWith("/attempts")) await attempt(r.id);
           else await open(r.id);
         });
+    if ($("#copy-pending-hash"))
+      $("#copy-pending-hash").onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(pendingOutbox()?.transactionHash || "");
+          adapter.toast("Transaction hash copied.");
+        } catch {
+          adapter.toast("Copy failed. Select the transaction hash to copy it.");
+        }
+      };
+    if ($("#attach-pending-hash"))
+      $("#attach-pending-hash").onsubmit = (event) => {
+        event.preventDefault();
+        const hash = $("#pending-transaction-hash")?.value.trim();
+        if (!validHash(hash)) {
+          adapter.toast("Paste a valid 0x transaction hash (32 bytes).");
+          return;
+        }
+        const request = pendingOutbox();
+        if (!request?.intentId || request.transactionHash) {
+          adapter.toast("This request is no longer waiting for a transaction hash.");
+          return;
+        }
+        request.transactionHash = hash;
+        save(OUTBOX_KEY, request);
+        void act($("#attach-pending-hash button[type=submit]"), async () => {
+          const result = await mutate(request.path, request.body);
+          await refreshMe();
+          if (request.path.endsWith("/attempts")) await attempt(result.id);
+          else await open(result.id);
+        });
+      };
     if ($("#discard-request"))
       $("#discard-request").onclick = () => {
+        const request = pendingOutbox();
+        if (request?.transactionHash || request?.intentId) {
+          adapter.toast("This request may involve a wallet transaction. Recover it before discarding.");
+          return;
+        }
         clearOutbox();
-        adapter.toast(
-          "Interrupted request discarded. No wallet transaction was sent.",
-        );
+        adapter.toast("Saved request discarded. You can start a new request.");
         void open();
       };
   }
