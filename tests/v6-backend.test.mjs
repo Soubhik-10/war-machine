@@ -397,6 +397,45 @@ test("V6 MPP entry rejects a legacy V5 bounty before charging", async () => {
   }
 });
 
+test("V6 bounties remain enterable when their saved engine predates the current app", async () => {
+  const db = new D1Fixture();
+  await db.migrate();
+  const stamp = Date.now();
+  const bountyId = "77777777-7777-4777-8777-777777777777";
+  const sessionToken = "stale-engine-viewer";
+  db.sqlite.exec(`
+    INSERT INTO accounts (id,token_hash,name,balance,created,payout_address)
+      VALUES ('stale-owner','stale-owner-token','Stale owner',0,${stamp},'${creator}'),
+             ('stale-viewer','stale-viewer-token','Stale viewer',0,${stamp},'${challenger}');
+    INSERT INTO sessions (id,token_hash,account,expires,created)
+      VALUES ('stale-engine-session','${createHash("sha256").update(sessionToken).digest("hex")}','stale-viewer',${stamp + 3600000},${stamp});
+    INSERT INTO bounties (id,owner,title,blueprint,entry,reward,status,listed,created,updated,entry_units,reward_units,reserve_units,escrow_bounty_id,fee_policy_version,platform_fee_bps)
+      VALUES ('${bountyId}','stale-owner','Stale engine, current escrow','${blueprintJson}',0,0,'open',1,${stamp},${stamp},'10000','1000000','1000000','77','pathusd-direct-escrow-v6',250);
+    INSERT INTO payment_kv (key,value) VALUES
+      ('bounty-release:${bountyId}','{"engineHash":"${"f".repeat(64)}","chainId":4217,"escrowAddress":"${V6_ESCROW}","escrowVersion":"6"}');
+  `);
+  const pending = [];
+  const ctx = { waitUntil(work) { pending.push(work); } };
+  try {
+    const response = await mainnetFetch(
+      new Request(`https://foundry.example/api/bounties/${bountyId}`, {
+        headers: { cookie: "wm_session=" + sessionToken },
+      }),
+      { ...base, WM_BOUNTY_ESCROW_VERSION: "6", WM_ALLOW_ESCROW_V6: "true", DB: db },
+      ctx,
+    );
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.canEnter, true);
+    assert.equal(body.compatible, true);
+    assert.equal(body.compatibilityState, "current");
+    assert.equal(body.versions.hash, "f".repeat(64));
+  } finally {
+    await Promise.allSettled(pending);
+    db.close();
+  }
+});
+
 test("V6 timeout refund validates event amount, creator, challenger, and nonce", async () => {
   const wrongCases = [
     ["entry amount", { entry: 9999n }],

@@ -1312,7 +1312,10 @@ async function persistBountyRelease(db, row, release, config) {
 
 async function requireCurrentBounty(db, row, config) {
   const release = await bountyRelease(db, row);
-  check(release?.engineHash === CLIENT_ENGINE_HASH, "This bounty uses an older or unknown engine. New entries are closed; its owner can cancel and recreate it.", 409);
+  // Engine releases are application history, not an escrow boundary. A
+  // bounty funded by this escrow remains playable after a frontend or engine
+  // deployment; only a different direct-escrow deployment makes it read-only.
+  check(row.fee_policy_version === escrowPolicy(config.escrowVersion), "This bounty belongs to an older escrow contract and is read-only on this deployment.", 409);
   check(!release.escrowAddress || (release.escrowAddress.toLowerCase() === config.escrowAddress.toLowerCase() && release.chainId === config.chainId), "This bounty belongs to a different escrow deployment.", 409);
   enforcePaidComplexity(unpackChallenge(parse(row.blueprint)).machine);
   return release;
@@ -1343,6 +1346,9 @@ async function bountyView(db, row, viewer = null, history = false, config = null
   if (!options.list && release?.verifiedTerms)
     await persistBountyRelease(db, row, release, config);
   const legacy = config?.escrowVersion === "6" && row.fee_policy_version !== escrowPolicy(config.escrowVersion);
+  const differentEscrow = !!release?.escrowAddress &&
+    (release.escrowAddress.toLowerCase() !== config?.escrowAddress?.toLowerCase() ||
+      release.chainId !== config?.chainId);
   let complexityIssues = [];
   try { complexityIssues = paidComplexityIssues(unpackChallenge(blueprint).machine).issues; } catch { complexityIssues = ["The paid blueprint could not be replayed under the current catalog."]; }
   const revealed = options.revealed === undefined
@@ -1351,8 +1357,7 @@ async function bountyView(db, row, viewer = null, history = false, config = null
   const expired = !!row.expires && Number(row.expires) <= now();
   const entryReasons = [];
   if (legacy) entryReasons.push("Legacy escrow policy is read-only.");
-  if (!release?.engineHash) entryReasons.push("The committed engine metadata is unavailable; use the bounty detail or owner history for recovery.");
-  else if (release.engineHash !== CLIENT_ENGINE_HASH) entryReasons.push("New entry requires the current engine; existing attempts retain their committed version.");
+  if (differentEscrow) entryReasons.push("This bounty belongs to a different escrow deployment.");
   if (complexityIssues.length) entryReasons.push(complexityIssues[0]);
   if (row.status !== "open") entryReasons.push("This bounty is not idle and open.");
   if (expired) entryReasons.push("This bounty has expired.");
@@ -1385,20 +1390,18 @@ async function bountyView(db, row, viewer = null, history = false, config = null
     versions: { hash: release?.engineHash || null },
     escrowVersion: row.fee_policy_version?.split("-v").at(-1) || null,
     legacy,
-    readOnly: legacy,
+    readOnly: legacy || differentEscrow,
     canEnter,
-    compatible: !legacy && release?.engineHash === CLIENT_ENGINE_HASH && complexityIssues.length === 0,
-    compatibilityState: !release?.engineHash
-      ? "metadata-unavailable"
-      : legacy
-        ? "legacy-read-only"
-        : release.engineHash === CLIENT_ENGINE_HASH && complexityIssues.length === 0
-          ? "current"
-          : "incompatible",
+    compatible: !legacy && !differentEscrow && complexityIssues.length === 0,
+    compatibilityState: legacy
+      ? "legacy-read-only"
+      : !differentEscrow && complexityIssues.length === 0
+        ? "current"
+        : "incompatible",
     compatibilityReason: legacy
       ? "Legacy V5 challenge — read-only"
-      : release?.engineHash !== CLIENT_ENGINE_HASH
-      ? "New entry requires the current engine; existing attempts retain their committed version."
+      : differentEscrow
+      ? "This bounty was funded on a different escrow deployment."
       : complexityIssues[0] || null,
     availability: {
       enter: { allowed: canEnter, reasons: entryReasons },
@@ -3794,7 +3797,7 @@ export async function mppEnterBounty(db, config, request, bountyId, body, key, i
     return refundAgentBountyPayment(db, config, operation, source, entry, "You cannot enter your own bounty.");
   if (!hold?.provider_ref) {
     try { await requireCurrentBounty(db, row, config); }
-    catch { return refundAgentBountyPayment(db, config, operation, source, entry, "This bounty's engine or escrow changed before entry."); }
+    catch { return refundAgentBountyPayment(db, config, operation, source, entry, "This bounty's escrow or eligibility changed before entry."); }
   }
   if (!hold?.provider_ref && (row.status !== "open" || (row.expires && row.expires <= now())))
     return refundAgentBountyPayment(db, config, operation, source, entry, "This bounty became unavailable before the entry was relayed.");
