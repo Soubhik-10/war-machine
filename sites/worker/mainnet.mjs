@@ -5577,17 +5577,21 @@ export function automaticTimeoutState(attempt, bounty, at = now(), config = null
   const buildDeadline = Number(attempt.build_deadline || 0);
   if (!buildDeadline || at < buildDeadline) return "build-window-open";
   const escrowDeadline = Number(bounty?.escrow_attempt_deadline || 0);
-  if (!escrowDeadline || at < escrowDeadline) return "signable-loss";
-  const grace = Number(config?.settlementGraceSeconds || 0) * 1000;
-  if (at < escrowDeadline + grace) return "settlement-grace";
+  // V6 has no counter-build forfeit. A build that is not settled after entry
+  // stays recoverable until the on-chain 15-minute failsafe reopens it.
   if (config?.escrowVersion === "6") {
     const failsafeAt = activeAttemptFailsafeAt(
       attempt.created,
       escrowDeadline,
       config.settlementGraceSeconds,
     );
-    if (failsafeAt && at < failsafeAt) return "settlement-grace";
+    return failsafeAt && at >= failsafeAt
+      ? "onchain-finalizer"
+      : "settlement-grace";
   }
+  if (!escrowDeadline || at < escrowDeadline) return "signable-loss";
+  const grace = Number(config?.settlementGraceSeconds || 0) * 1000;
+  if (at < escrowDeadline + grace) return "settlement-grace";
   return "onchain-finalizer";
 }
 
@@ -5906,9 +5910,12 @@ export async function recoverOrphanedV6Attempts(db, env, config) {
   const rows = (
     await db
       .prepare(
-        "SELECT * FROM bounties WHERE fee_policy_version=? AND escrow_bounty_id IS NOT NULL AND status IN ('open','busy') AND active_attempt IS NULL ORDER BY updated LIMIT 10",
+      "SELECT b.* FROM bounties b LEFT JOIN attempts active ON active.id=b.active_attempt WHERE b.fee_policy_version=? AND b.escrow_bounty_id IS NOT NULL AND b.status IN ('open','busy') AND (b.active_attempt IS NULL OR active.created<=?) ORDER BY b.updated LIMIT 10",
       )
-      .bind(escrowPolicy("6"))
+      .bind(
+        escrowPolicy("6"),
+        now() - ACTIVE_ATTEMPT_FAILSAFE_MS,
+      )
       .all()
   ).results;
   if (!rows.length) return;
@@ -6300,6 +6307,9 @@ export async function finalizeExpiredV3Builds(db, env, config) {
     const bounty = await bountyRow(db, attempt.bounty);
     const state = automaticTimeoutState(attempt, bounty, now(), config);
     if (state === "onchain-finalizer") {
+      // V6 recovery is strictly its escrow's reopen-and-refund failsafe.
+      // recoverOrphanedV6Attempts runs first and owns that transaction.
+      if (config.escrowVersion === "6") continue;
       try {
         if (technicalRetryEligible(config, attempt))
           await finalizeTechnicalSettlementTimeout(db, env, config, attempt, bounty);

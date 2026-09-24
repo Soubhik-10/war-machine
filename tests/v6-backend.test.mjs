@@ -266,6 +266,15 @@ test("V6 settlement signatures use the version 6 domain and never offer V5 techn
   );
   assert.equal(
     automaticTimeoutState(
+      { status: "engineering", build_deadline: stamp - 1, created: stamp - 4 * 60_000 },
+      { escrow_attempt_deadline: stamp + 60_000 },
+      stamp,
+      config,
+    ),
+    "settlement-grace",
+  );
+  assert.equal(
+    automaticTimeoutState(
       { status: "engineering", build_deadline: 1, created: stamp - 16 * 60_000 },
       { escrow_attempt_deadline: stamp - 3 * 60_000 },
       stamp,
