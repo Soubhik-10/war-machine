@@ -4,10 +4,10 @@ const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 export function readAudioPreference(store = globalThis.localStorage) {
   try {
     const raw = JSON.parse(store?.getItem("wm-audio-v1") || "null");
-    if (!raw || typeof raw !== "object") return { enabled: false, volume: 0.7 };
-    return { enabled: raw.enabled === true, volume: clamp(Number(raw.volume) || 0.7, 0, 1) };
+    if (!raw || typeof raw !== "object") return { enabled: true, volume: 0.85 };
+    return { enabled: raw.enabled === true, volume: clamp(Number(raw.volume) || 0.85, 0, 1) };
   } catch {
-    return { enabled: false, volume: 0.7 };
+    return { enabled: true, volume: 0.85 };
   }
 }
 
@@ -147,4 +147,137 @@ export class AudioDirector {
     this.tone(135, .09, .034, "square", 52); this.noise(.06, .021, 2900, 900);
   }
 
+}
+
+// Music streams on a separate path from combat SFX. Crossfades only run while
+// the game changes state, keeping audio work out of the animation frame loop.
+export class MusicDirector {
+  constructor({
+    Audio = globalThis.Audio,
+    tracks = {},
+    fadeMs = 650,
+    setTimer = (callback, delay) => globalThis.setInterval(callback, delay),
+    clearTimer = (timer) => globalThis.clearInterval(timer),
+    now = () => globalThis.performance?.now?.() ?? Date.now(),
+  } = {}) {
+    this.Audio = Audio;
+    this.tracks = tracks;
+    this.fadeMs = Math.max(0, fadeMs);
+    this.setTimer = setTimer;
+    this.clearTimer = clearTimer;
+    this.now = now;
+    this.preference = readAudioPreference();
+    this.media = new Map();
+    this.current = null;
+    this.pending = null;
+    this.holds = new Set();
+    this.fadeTimer = null;
+    this.transition = 0;
+  }
+  get enabled() { return this.preference.enabled; }
+  get status() {
+    if (!this.enabled) return "muted";
+    if (!this.current?.element || this.current.element.paused) return "blocked";
+    return "playing";
+  }
+  volumeFor(kind) {
+    return clamp((this.tracks[kind]?.gain ?? 0.5) * this.preference.volume, 0, 1);
+  }
+  elementFor(kind) {
+    if (this.media.has(kind)) return this.media.get(kind);
+    const spec = this.tracks[kind];
+    if (!spec || !this.Audio) return null;
+    const element = new this.Audio(spec.src);
+    element.preload = "auto";
+    element.loop = !!spec.loop;
+    element.playsInline = true;
+    element.volume = 0;
+    this.media.set(kind, element);
+    return element;
+  }
+  setPreference(next) {
+    this.preference = {
+      ...this.preference,
+      ...next,
+      enabled: !!next.enabled,
+      volume: clamp(Number(next.volume ?? this.preference.volume), 0, 1),
+    };
+    if (!this.enabled) this.stop();
+    else if (this.current) this.current.element.volume = this.volumeFor(this.current.kind);
+  }
+  async play(kind, { restart = false } = {}) {
+    if (!this.tracks[kind]) return false;
+    this.pending = kind;
+    if (!this.enabled || this.holds.size) return false;
+    const next = this.elementFor(kind);
+    if (!next) return false;
+    const token = ++this.transition;
+    if (restart || (!next.loop && next.ended)) {
+      try { next.currentTime = 0; } catch {}
+    }
+    if (this.current?.kind === kind) {
+      try {
+        await next.play();
+        if (token !== this.transition) return false;
+        next.volume = this.volumeFor(kind);
+        return true;
+      } catch { return false; }
+    }
+    try { await next.play(); } catch { return false; }
+    if (token !== this.transition || this.holds.size || !this.enabled) {
+      next.pause();
+      return false;
+    }
+    const previous = this.current?.element || null;
+    this.current = { kind, element: next };
+    this.crossfade(previous, next, this.volumeFor(kind), token);
+    return true;
+  }
+  async resumeFromGesture() {
+    if (!this.enabled || !this.pending) return false;
+    return this.play(this.pending);
+  }
+  hold(reason, active) {
+    if (active) this.holds.add(reason);
+    else this.holds.delete(reason);
+    if (this.holds.size) {
+      for (const element of this.media.values()) element.pause();
+      return;
+    }
+    if (this.enabled && this.pending) void this.play(this.pending);
+  }
+  crossfade(previous, next, target, token) {
+    if (this.fadeTimer) this.clearTimer(this.fadeTimer);
+    const fromStart = previous?.volume || 0;
+    const nextStart = next.volume || 0;
+    const finish = () => {
+      if (previous && previous !== next) { previous.volume = 0; previous.pause(); }
+      next.volume = target;
+      this.fadeTimer = null;
+    };
+    if (!this.fadeMs) { finish(); return; }
+    const started = this.now();
+    this.fadeTimer = this.setTimer(() => {
+      if (token !== this.transition) {
+        this.clearTimer(this.fadeTimer);
+        this.fadeTimer = null;
+        return;
+      }
+      const progress = clamp((this.now() - started) / this.fadeMs, 0, 1);
+      next.volume = nextStart + (target - nextStart) * progress;
+      if (previous && previous !== next) previous.volume = fromStart * (1 - progress);
+      if (progress >= 1) { this.clearTimer(this.fadeTimer); finish(); }
+    }, 40);
+  }
+  stop() {
+    this.transition++;
+    if (this.fadeTimer) this.clearTimer(this.fadeTimer);
+    this.fadeTimer = null;
+    for (const element of this.media.values()) {
+      element.pause();
+      element.volume = 0;
+      try { element.currentTime = 0; } catch {}
+    }
+    this.current = null;
+  }
 }

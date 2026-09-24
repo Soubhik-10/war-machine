@@ -1132,6 +1132,18 @@ test("static assets use validators while HTML stays immediately refreshable", as
     new Request("https://foundry.example/index.html"),
   );
   assert.equal(document.headers.get("cache-control"), "no-cache");
+
+  const music = serveStaticAsset(
+    new Request("https://foundry.example/audio/battle.ogg", {
+      headers: { range: "bytes=10-109" },
+    }),
+  );
+  assert.equal(music.status, 206);
+  assert.equal(music.headers.get("content-type"), "audio/ogg");
+  assert.equal(music.headers.get("accept-ranges"), "bytes");
+  assert.match(music.headers.get("content-range"), /^bytes 10-109\/\d+$/);
+  assert.equal(music.headers.get("content-length"), "100");
+  assert.equal((await music.arrayBuffer()).byteLength, 100);
 });
 
 test("Tempo RPC transport failures remain retry-safe payment errors", async () => {

@@ -63,7 +63,7 @@ import {
   stressTestAsync,
   pickModule,
 } from "./engineering.mjs";
-import { AudioDirector, readAudioPreference } from "./audio.mjs";
+import { AudioDirector, MusicDirector, readAudioPreference } from "./audio.mjs";
 const $ = (s) => document.querySelector(s),
   $$ = (s) => [...document.querySelectorAll(s)],
   app = $("#app"),
@@ -155,6 +155,14 @@ let arenaId = "foundry",
   inspectMode = false,
   battleMode = "auto";
 const audioDirector = new AudioDirector();
+const musicDirector = new MusicDirector({
+  tracks: {
+    general: { src: "./audio/general.ogg", loop: true, gain: 0.52 },
+    battle: { src: "./audio/battle.ogg", loop: true, gain: 0.42 },
+    victory: { src: "./audio/victory.ogg", loop: false, gain: 0.68 },
+    defeat: { src: "./audio/defeat.ogg", loop: false, gain: 0.64 },
+  },
+});
 // UI confirmation reuses the context created by the user-gesture audio director.
 let audioCtx = null;
 let arenaIdleRAF = 0,
@@ -271,6 +279,7 @@ function setNav() {
   $$("[data-view]").forEach((el) =>
     el.classList.toggle("active", el.dataset.view === view),
   );
+  queueMicrotask(syncMusic);
 }
 function go(route, options) {
   routeRouter?.navigate(route, options);
@@ -280,6 +289,7 @@ function stopBattle() {
   paused = false;
   cancelAnimationFrame(raf);
   audioDirector.clear({ stop: true, stale: true });
+  musicDirector.hold("battle-paused", false);
 }
 function cleanupView() {
   document.body.classList.remove("official-replay");
@@ -1715,6 +1725,8 @@ function startBattle(replay = false) {
   accumulator = 0;
   lastLogCount = 0;
   audioDirector.reset();
+  musicDirector.hold("battle-paused", false);
+  syncMusic({ restart: true });
   $("#fight-overlay").hidden = true;
   $("#pause-btn").disabled = false;
   $("#pause-btn").textContent = "Ⅱ Pause";
@@ -1729,6 +1741,7 @@ function startBattle(replay = false) {
 function togglePause() {
   if (!running) return;
   paused = !paused;
+  musicDirector.hold("battle-paused", paused);
   $("#pause-btn").textContent = paused ? "▶ Resume" : "Ⅱ Pause";
   lastFrame = 0;
   accumulator = 0;
@@ -2096,6 +2109,7 @@ function finishBattle() {
     won = r.winner === 0,
     draw = r.winner < 0,
     v = battle.vehicles[0];
+  syncMusic({ restart: true });
   if (won && !battle.replaying && matchSource.enemy !== null) {
     wins[matchSource.enemy] = true;
     try {
@@ -2371,6 +2385,7 @@ function jumpReplay(target) {
   while (!battle.result && battle.time + DT / 2 < target) battle.step();
   running = false;
   paused = true;
+  musicDirector.hold("battle-paused", true);
   $("#fight-overlay").hidden = true;
   closeModal();
   updateHUD();
@@ -2395,10 +2410,19 @@ function showBattleReportEnhanced() {
     $(".replay-timeline")?.insertAdjacentHTML("beforebegin", `<section class="destroyed-report"><h3>What disabled each part</h3>${destroyed.length ? `<div class="replay-timeline">${destroyed.map(e => `<div><b>${e.time.toFixed(1)}s</b><span>${esc(e.text)}</span><small>Cause: ${esc(e.cause)}</small></div>`).join("")}</div>` : '<p class="hint">No parts were destroyed in this run.</p>'}</section>`);
   });
 }
+function syncMusic({ restart = false } = {}) {
+  let cue = "general";
+  if (view === "arena" && running) cue = "battle";
+  else if (view === "arena" && battle?.result?.winner === 0) cue = "victory";
+  else if (view === "arena" && battle?.result?.winner === 1) cue = "defeat";
+  void musicDirector.play(cue, { restart });
+}
 async function initAudio() {
-  const ready = await audioDirector.resumeFromGesture();
-  audioCtx = ready ? audioDirector.context : null;
-  return ready;
+  const musicReadyPromise = musicDirector.resumeFromGesture();
+  const effectsReady = await audioDirector.resumeFromGesture();
+  const musicReady = await musicReadyPromise;
+  audioCtx = effectsReady ? audioDirector.context : null;
+  return effectsReady || musicReady;
 }
 function beep(hz, duration, volume, type = "sine") {
   if (!sound || !audioCtx) return;
@@ -2991,29 +3015,50 @@ $("#manual-btn").onclick = () => {
   if (running && !paused) togglePause();
   manual();
 };
+function setSoundUI(ready = false) {
+  const state = sound ? (ready ? "ON" : "BLOCKED") : "OFF";
+  $("#sound-state").textContent = state;
+  $("#sound-btn").setAttribute(
+    "aria-label",
+    sound
+      ? ready
+        ? "Disable music and sound effects"
+        : "Audio is blocked; click to enable music and sound effects"
+      : "Enable music and sound effects",
+  );
+}
+function audioIsPlaying() {
+  return audioDirector.status === "listening" || musicDirector.status === "playing";
+}
 $("#sound-btn").onclick = () => {
-  if (sound && audioDirector.status !== "listening") {
+  if (sound && !audioIsPlaying()) {
     initAudio().then((ready) => {
-      $("#sound-state").textContent = ready ? "ON" : "BLOCKED";
-      $("#sound-btn").setAttribute("aria-label", ready ? "Disable battle sound effects" : "Sound is blocked; try enabling again");
+      setSoundUI(ready);
       if (ready) beep(400, 0.1, 0.06);
     });
     return;
   }
   sound = !sound;
   audioDirector.setPreference({ enabled: sound });
+  musicDirector.setPreference({ enabled: sound });
   if (sound) initAudio().then((ready) => {
-    $("#sound-state").textContent = ready ? "ON" : "BLOCKED";
-    $("#sound-btn").setAttribute("aria-label", ready ? "Disable battle sound effects" : "Sound is blocked; try enabling again");
+    syncMusic();
+    setSoundUI(ready);
     if (ready) beep(400, 0.1, 0.06);
   });
-  $("#sound-state").textContent = sound ? "BLOCKED" : "OFF";
-  $("#sound-btn").setAttribute(
-    "aria-label",
-    sound ? "Sound is blocked; try enabling again" : "Enable battle sound effects",
-  );
+  setSoundUI(false);
 };
-$("#sound-state").textContent = sound ? "BLOCKED" : "OFF";
+setSoundUI(false);
+const unlockAudio = () => {
+  document.removeEventListener("pointerdown", unlockAudio, true);
+  document.removeEventListener("keydown", unlockAudio, true);
+  if (sound) initAudio().then(setSoundUI);
+};
+document.addEventListener("pointerdown", unlockAudio, true);
+document.addEventListener("keydown", unlockAudio, true);
+document.addEventListener("visibilitychange", () => {
+  musicDirector.hold("hidden", document.hidden);
+});
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && $("#builder-focus")?.classList.contains("theater")) {
     e.preventDefault();
