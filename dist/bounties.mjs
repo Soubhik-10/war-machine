@@ -1784,9 +1784,11 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
       const builds = await api("/me/builds");
       if (g !== generation) return;
       const card = (b) => {
-        const machine = unpackChallenge(b.blueprint, true).machine,
-          s = stats(machine);
-        return `<div class="vault-row"><div><strong>${esc(b.name)}</strong><small>${s.cost} build credits · ${s.parts} fitted parts · saved ${time(b.updated)}</small></div><div class="bounty-actions">${attemptId ? `<button class="primary" data-deploy-build="${b.id}">Use and submit</button>` : ""}<button data-load-build="${b.id}">Load</button><button data-export-build="${b.id}">Export</button><button data-delete-build="${b.id}">Delete</button></div></div>`;
+        const challenge = unpackChallenge(b.blueprint, true),
+          machine = challenge.machine,
+          s = stats(machine),
+          arena = ARENAS.find((item) => item.id === challenge.arena);
+        return `<article class="vault-row"><div class="vault-preview"><canvas data-vault-thumb="${esc(b.id)}" width="400" height="300" aria-label="${esc(machine.name)} 3D build preview"></canvas><span>3D BUILD</span></div><div class="vault-info"><div><strong>${esc(b.name)}</strong><small>Saved ${time(b.updated)} · ${esc(arena?.name || "Arena unknown")}</small></div><dl class="vault-stats"><div><dt>BUILD CREDITS</dt><dd>${s.cost.toLocaleString()}</dd></div><div><dt>MASS</dt><dd>${s.mass} t</dd></div><div><dt>FITTED PARTS</dt><dd>${s.parts}</dd></div><div><dt>WEAPONS</dt><dd>${s.weapons}</dd></div></dl><p class="vault-rules">${esc(rulesLabel(challenge.rules))}</p></div><div class="bounty-actions vault-actions">${attemptId ? `<button class="primary" data-deploy-build="${esc(b.id)}">Use and submit</button>` : ""}<button data-load-build="${esc(b.id)}">Load</button><button data-export-build="${esc(b.id)}">Export</button><button data-delete-build="${esc(b.id)}">Delete</button></div></article>`;
       };
       app.innerHTML =
         header(
@@ -1797,6 +1799,23 @@ const guide = `<section class="contract-hero" id="challenge-guide" ${guideDismis
         ) +
         `<section class="panel profile-form vault-panel"><span class="eyebrow">ACCOUNT BLUEPRINTS</span><h2>${builds.length} / 50 saved</h2><p>${attemptId ? "Use and submit checks the bounty’s locked limits and commits this saved machine. Deployment cannot be changed afterward." : "Save your current workshop machine, its arena and its construction rules. These builds are not public and do not affect a listed bounty."}</p><button class="primary" id="save-account-build" ${builds.length >= 50 ? "disabled" : ""}>Save current workshop build</button><p id="bounty-error" class="error-message"></p><div class="vault-list">${builds.length ? builds.map(card).join("") : '<p class="hint">No account builds yet. Your local blueprint library remains available without signing in.</p>'}</div></section>`;
       wireHeader();
+      const vaultThumbs = $$('[data-vault-thumb]');
+      let nextVaultThumb = 0;
+      const drawVaultThumbs = () => {
+        if (g !== generation) return;
+        const deadline = performance.now() + 6;
+        while (
+          nextVaultThumb < vaultThumbs.length &&
+          performance.now() < deadline
+        ) {
+          const canvas = vaultThumbs[nextVaultThumb++],
+            build = builds.find((row) => row.id === canvas.dataset.vaultThumb);
+          if (build) thumb(canvas, build.blueprint);
+        }
+        if (nextVaultThumb < vaultThumbs.length)
+          requestAnimationFrame(drawVaultThumbs);
+      };
+      requestAnimationFrame(drawVaultThumbs);
       $("#save-account-build")?.addEventListener("click", (e) =>
         act(e.currentTarget, async () => {
           const draft = adapter.getBuild(),
