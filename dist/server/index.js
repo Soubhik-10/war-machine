@@ -5301,6 +5301,7 @@ export class AudioDirector {
 }
 .vault-preview {
   position: relative;
+  aspect-ratio: 4 / 3;
   min-height: 164px;
   overflow: hidden;
   border: 1px solid #38505a;
@@ -5312,10 +5313,10 @@ export class AudioDirector {
     #101b20;
 }
 .vault-preview canvas {
-  display: block;
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: contain;
 }
 .vault-preview span {
   position: absolute;
@@ -5500,7 +5501,7 @@ body.official-replay .footer-note {
 .settlement-capacity-warning strong{display:block;font-size:1rem;letter-spacing:.04em;text-transform:uppercase}
 .settlement-capacity-warning p{margin:8px 0;line-height:1.45}
 .settlement-capacity-warning small{display:block;line-height:1.4;color:#ffe2b0}
-`,"text/css; charset=utf-8","f2a2521e55390d86"],"/bounties.mjs":[`import {
+`,"text/css; charset=utf-8","3a75302dd2c8b823"],"/bounties.mjs":[`import {
   paymentPanel,
   paymentBreakdown,
   paymentIsRefunded,
@@ -9319,7 +9320,12 @@ main{max-width:1500px;padding:34px clamp(18px,4vw,64px) 54px}
 .workspace{align-items:start}
 .workspace>.bench{align-self:start;height:max-content}
 .workspace>.bench>.bench-stage{flex:0 0 auto}
-`,"text/css; charset=utf-8","aa3b7c6e9479d565"],"/portal.mjs":[`import {PARTS,ARENAS,PRESETS,clone,packChallenge,stats} from './data.mjs';
+
+/* The footer turns feedback into a clear action without expanding the page. */
+.portal-footer .footer-idea-link{display:inline-flex;align-items:center;gap:9px;min-height:38px;padding:8px 12px;border:1px solid color-mix(in srgb,var(--portal-accent) 48%,var(--portal-line));border-radius:10px;background:color-mix(in srgb,var(--portal-accent) 10%,transparent);color:var(--portal-text);font:12px/1.2 Arial,sans-serif;text-decoration:none;transition:background .15s,border-color .15s}
+.portal-footer .footer-idea-link:hover{border-color:var(--portal-accent);background:color-mix(in srgb,var(--portal-accent) 18%,transparent)}
+.portal-footer .footer-idea-link span{color:var(--portal-accent);font:14px/1 monospace}
+`,"text/css; charset=utf-8","bffeae856aeb4789"],"/portal.mjs":[`import {PARTS,ARENAS,PRESETS,clone,packChallenge,stats} from './data.mjs';
 import {Renderer,Geometry} from './renderer.mjs';
 import {fittedSpan} from './camera.mjs';
 import {installAgentActivity} from './activity.mjs';
@@ -9332,7 +9338,7 @@ export function createPortal(adapter){
  function leave(){generation++;activityCleanup?.();activityCleanup=null;clearRenderers();}
  function themes(){return '<div class="theme-picker" aria-label="Interface color scheme"><span>COLORWAY</span>'+[['forge','Forge'],['glacier','Glacier'],['ember','Ember']].map(([id,name])=>\`<button data-theme-choice="\${id}" aria-label="\${name} color scheme" aria-pressed="\${(document.documentElement.dataset.theme||'forge')===id}"><i></i>\${name}</button>\`).join('')+'</div>';}
  function bindThemes(){document.querySelectorAll('[data-theme-choice]').forEach(b=>b.onclick=()=>{document.documentElement.dataset.theme=b.dataset.themeChoice;try{localStorage.setItem('wm-theme',b.dataset.themeChoice);}catch{}document.querySelectorAll('[data-theme-choice]').forEach(n=>n.setAttribute('aria-pressed',String(n===b)));});}
- function footer(){return \`<footer class="portal-footer"><span>WAR MACHINES<br><small>Independent engineers. One shared ruleset.</small></span>\${themes()}<a href="https://github.com/Soubhik-10/war-machine" target="_blank" rel="noopener">Source on GitHub \u2197</a></footer>\`;}
+ function footer(){return \`<footer class="portal-footer"><span>WAR MACHINES<br><small>Independent engineers. One shared ruleset.</small></span>\${themes()}<a class="footer-idea-link" href="https://github.com/Soubhik-10/war-machine/issues/new?template=idea.yml" target="_blank" rel="noopener">Suggest an idea <span aria-hidden="true">\u2197</span></a></footer>\`;}
  function start(view){if(adapter.syncRoute?.(view))return;activityCleanup?.();activityCleanup=null;clearRenderers();adapter.show(view);generation++;window.scrollTo(0,0);}
  function hero(){const canvas=$('#hero-machine');try{renderer=new Renderer(canvas,{maxPixelRatio:graphicsProfile.maxPixelRatio});const m=clone(PRESETS[9]);m.paint='#708c85';m.accent='#f4c973';m.glow='#acf2db';const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches,start=performance.now(),scene=new Geometry();let lastDraw=0;const draw=now=>{if(!renderer)return;if(graphicsProfile.tier!=='high'&&now-lastDraw<1000/graphicsProfile.renderHz){frame=requestAnimationFrame(draw);return;}lastDraw=now;const t=(now-start)/1000;scene.vertices.length=0;scene.origin=[0,0,0];scene.angle=0;scene.scale=1;scene.material=4;scene.bevel(0,-.2,0,8,.35,7,'#24312e');for(const x of [-3.7,3.7])scene.box(x,.005,0,.03,.02,6.7,'#c6a86d',.2);scene.machine(m,{phase:t*.2,time:t});renderer.render(scene,{target:[0,1.1,.3],yaw:-2.48+(reduced?0:Math.sin(t*.2)*.13),elevation:.63,span:9,bg:[0,0,0,0]});if(!reduced)frame=requestAnimationFrame(draw);};draw(start);}catch{canvas.hidden=true;$('.hero-machine-label').textContent='WRAITH \xB7 SHIELDED MISSILE PLATFORM';}}
  function home(){
@@ -9376,7 +9382,7 @@ export function createPortal(adapter){
  }
  return {home,agents,leave};
 }
-`,"text/javascript; charset=utf-8","7fbfaf286ed69c4a"],"/release.mjs":[`// Generated by scripts/stamp-release.mjs. Detects stale browser physics.
+`,"text/javascript; charset=utf-8","cf0d718b89f1ba90"],"/release.mjs":[`// Generated by scripts/stamp-release.mjs. Detects stale browser physics.
 export const CLIENT_ENGINE_HASH='a8005aabf2aaaebbb57daf51c1f043569ad8747dc38494ed17b8741fac96b1c5';
 `,"text/javascript; charset=utf-8","e33657b1443d8040"],"/renderer.mjs":[`import {BY_ID,partSpec,keyOf,connected,LAYER_HEIGHT,terrainAt} from './data.mjs';
 export {workshopScene,battleScene} from './scenes.mjs';

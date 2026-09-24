@@ -212,3 +212,8 @@ main{max-width:1500px;padding:34px clamp(18px,4vw,64px) 54px}
 .workspace{align-items:start}
 .workspace>.bench{align-self:start;height:max-content}
 .workspace>.bench>.bench-stage{flex:0 0 auto}
+
+/* The footer turns feedback into a clear action without expanding the page. */
+.portal-footer .footer-idea-link{display:inline-flex;align-items:center;gap:9px;min-height:38px;padding:8px 12px;border:1px solid color-mix(in srgb,var(--portal-accent) 48%,var(--portal-line));border-radius:10px;background:color-mix(in srgb,var(--portal-accent) 10%,transparent);color:var(--portal-text);font:12px/1.2 Arial,sans-serif;text-decoration:none;transition:background .15s,border-color .15s}
+.portal-footer .footer-idea-link:hover{border-color:var(--portal-accent);background:color-mix(in srgb,var(--portal-accent) 18%,transparent)}
+.portal-footer .footer-idea-link span{color:var(--portal-accent);font:14px/1 monospace}

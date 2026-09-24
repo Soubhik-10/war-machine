@@ -1,0 +1,45 @@
+name: Suggest an idea
+description: Propose an improvement to War Machines.
+title: "[Idea]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve War Machines. Clear, focused suggestions are easiest to evaluate.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the friction, missing capability, or opportunity you noticed.
+      placeholder: It is difficult to...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should change?
+      description: Explain the outcome and, if useful, how you imagine it working.
+      placeholder: Add or change...
+    validations:
+      required: true
+  - type: textarea
+    id: benefit
+    attributes:
+      label: Who would this help, and why?
+      placeholder: This would help builders because...
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context
+      description: Add mockups, examples, screenshots, or related links if they help explain the idea.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and did not find the same suggestion.
+          required: true
