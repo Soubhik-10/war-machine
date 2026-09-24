@@ -283,6 +283,7 @@ function stopBattle() {
 }
 function cleanupView() {
   document.body.classList.remove("official-replay");
+  $("#builder-focus")?.classList.remove("theater");
   if (officialRedirectTimer) {
     clearTimeout(officialRedirectTimer);
     officialRedirectTimer = 0;
@@ -474,11 +475,11 @@ function workshop() {
      "",
    )}<label class="toggle replace-toggle"><input id="replace-fitted" type="checkbox" ${replaceFitted ? "checked" : ""}> Replace parts</label><button id="rotate-btn" title="Rotate selected part (R)">↻ ${rotation * 90}°</button><button id="undo-btn" aria-label="Undo last change">↶ Undo</button></div>
  <div class="front-bar"><div><strong>▴ MACHINE FRONT</strong><small>This side faces the other machine in battle.</small></div><select id="machine-front" aria-label="Machine front">${frontNames.map((n, i) => `<option value="${i}" ${i === (machine.front || 0) ? "selected" : ""}>${n}</option>`).join("")}</select><label class="toggle"><input id="align-front" type="checkbox" checked> Turn mounts too</label></div><div class="level-bar"><span>BUILD LEVEL</span><div class="segmented">${["0 · Chassis", "1 · Deck", "2 · Tower"].map((text, i) => `<button data-level="${i}" class="${layer === i ? "active" : ""}">${text}</button>`).join("")}</div><label class="toggle"><input id="mirror" type="checkbox" ${mirror ? "checked" : ""}> Mirror</label></div>
- <div class="bench-stage"><div class="grid-caption"><span id="install-hint"></span><span id="level-label"></span></div><div class="builder-wrap"><canvas id="builder" width="900" height="680" tabindex="0" aria-label="3D assembly: tap to build, drag to orbit, scroll or pinch to zoom. Choose a build level for vertical stacking."></canvas></div>
- <div class="camera-controls"><button data-camera="iso" title="Reset and fit">⌖ Fit</button><button data-camera="front">Front</button><button data-camera="top">Top</button><button data-camera="side">Side</button><button data-camera="pan" title="Switch drag between orbit and pan">✥ Pan</button><button data-camera="in" aria-label="Zoom in">+</button><button data-camera="out" aria-label="Zoom out">−</button></div>
+ <div class="bench-stage" id="builder-focus"><div class="grid-caption"><span id="install-hint"></span><span id="level-label"></span></div><div class="builder-wrap"><canvas id="builder" width="900" height="680" tabindex="0" aria-label="3D assembly: tap to build, drag to orbit, scroll or pinch to zoom. Choose a build level for vertical stacking."></canvas></div>
+ <div class="camera-controls"><button data-camera="iso" title="Reset and fit">⌖ Fit</button><button data-camera="front">Front</button><button data-camera="top">Top</button><button data-camera="side">Side</button><button data-camera="pan" title="Switch drag between orbit and pan">✥ Pan</button><button data-camera="in" aria-label="Zoom in">+</button><button data-camera="out" aria-label="Zoom out">−</button><button id="builder-fullscreen-btn" title="Fullscreen builder" aria-label="Fullscreen builder">⛶</button></div>
  <div class="grid-caption bottom"><span>DRAG TO ORBIT · PINCH / SCROLL TO ZOOM</span><span>3 LEVELS</span></div></div>
  <div class="view-toggles"><label class="toggle"><input id="full-stack" type="checkbox" ${fullStack ? "checked" : ""}> Show upper levels</label><label class="toggle"><input id="explode" type="checkbox" ${exploded ? "checked" : ""}> Exploded view</label><button class="quiet" id="clear-btn">Clear machine</button></div><div class="bench-status" id="bench-status"></div></section>
- <aside class="right-column"><section class="panel"><div class="panel-head"><h3>Engineering limits</h3><small id="class-label">${rules.mode.toUpperCase()}</small></div><div class="stats-body" id="stats"></div></section><section class="panel engineering-panel"><div class="panel-head engineering-head"><div><small>BUILD CHECK</small><h3>Build report</h3></div><label class="climate-control"><span>Arena</span><select id="workshop-climate" class="workshop-climate" aria-label="Workshop terrain" ${challenge ? "disabled" : ""}>${ARENAS.map((a) => `<option value="${a.id}" ${a.id === arenaId ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></label></div><div id="engineering-summary"></div><div id="engineering-report"></div></section><section class="panel inspector-panel"><div class="panel-head"><h3>Part details</h3><small id="inspector-label">INSPECT</small></div><div id="inspector"></div></section></aside></div>
+ <aside class="right-column"><section class="panel limits-panel"><details class="workshop-disclosure limits-disclosure" id="limits-disclosure"><summary><span><strong>Engineering limits</strong><small id="class-label">${rules.mode.toUpperCase()}</small></span><span class="compact-limit" id="limit-compact"></span></summary><div class="stats-body" id="stats"></div></details></section><section class="panel engineering-panel"><div class="panel-head engineering-head"><div><small>BUILD CHECK</small><h3>Build report</h3></div><label class="climate-control"><span>Arena</span><select id="workshop-climate" class="workshop-climate" aria-label="Workshop terrain" ${challenge ? "disabled" : ""}>${ARENAS.map((a) => `<option value="${a.id}" ${a.id === arenaId ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></label></div><div id="engineering-summary"></div><details class="engineering-disclosure" id="engineering-disclosure"><summary><span>Open build findings</span><span id="engineering-count"></span></summary><div id="engineering-report"></div></details></section><section class="panel inspector-panel"><details class="workshop-disclosure inspector-disclosure" id="inspector-disclosure"><summary><span><strong>Part details</strong><small id="inspector-label">INSPECT</small></span></summary><div id="inspector"></div></details></section></aside></div>
  ${rulesPanel()}<div class="customization-row"><section class="panel"><div class="panel-head"><h3>Paint & identity</h3><small>MAKE IT YOURS</small></div><div class="custom-body"><div class="paint-row">${PAINTS.map((p) => `<button class="swatch ${machine.paint === p ? "active" : ""}" style="background:${p}" data-paint="${p}" aria-label="Hull paint ${p}"></button>`).join("")}</div><div class="custom-fields"><label class="color-field">Hull <input id="hull-color" type="color" value="${machine.paint}"></label><label class="color-field">Accent <input id="accent-color" type="color" value="${machine.accent || "#dbc58b"}"></label><label class="color-field">Lights <input id="glow-color" type="color" value="${machine.glow || "#6ef1dc"}"></label><label class="field"><span>Livery</span><select id="pattern">${PATTERNS.map((p) => `<option value="${p}">${p[0].toUpperCase() + p.slice(1)}</option>`).join("")}</select></label><label class="field"><span>Material finish</span><select id="finish"><option value="matte">Weathered paint</option><option value="alloy">Brushed alloy</option></select></label><label class="field"><span>Unit number</span><input id="unit-number" type="number" min="1" max="99" value="${machine.number || 7}"></label></div><p class="hint">Use Paint mode to color individual parts. Hull paint affects parts without a custom color.</p></div></section>
  <section class="panel"><div class="panel-head"><h3>Machine behavior</h3><small>CHOOSE BEFORE THE FIGHT</small></div><div class="tactics-body"><label class="field"><span>Movement</span><select id="tactic"><option value="balanced">Hold optimal range</option><option value="kite">Kite & retreat</option><option value="flank">Flank & circle</option><option value="ram">Ram & overwhelm</option></select></label><label class="field"><span>Target priority</span>${targetSelect("target")}</label><label class="field"><span>Range <b id="range-value">${machine.range} m</b></span><input type="range" id="range" min="80" max="600" step="10" value="${machine.range}"></label><label class="field"><span>Damage response</span><select id="stance"><option value="steady">Hold the line</option><option value="aggressive">Push when enemy weakens</option><option value="guarded">Protect the damaged side</option></select></label></div></section></div>
  <div class="deploy-bar"><div><h3>Ready to test.</h3><p>Choose how it moves, run a fight, and fix what breaks.</p></div><div class="deploy-actions"><button id="save-btn">Save blueprint</button><button class="primary" id="deploy-btn">Open the arena ↗</button></div></div><div class="footer-note"><span id="rules-footer">${rulesLabel(rules)}</span><span>R ROTATE / CTRL+Z UNDO / ARROWS + ENTER BUILD</span></div>`;
@@ -529,8 +530,6 @@ function organizeWorkshop() {
   $("#deploy-btn").textContent = "Test machine ↗";
   $("#deploy-btn").setAttribute("aria-describedby", "deploy-status");
   $(".deploy-bar p").id = "deploy-status";
-  const inspector = $(".inspector-panel");
-  $(".engineering-panel").before(inspector);
 }
 
 function rulesPanel() {
@@ -805,6 +804,11 @@ function updateReadout() {
     `${s.parts} / ${cap("parts")} FITTED PARTS + CORE`;
   $("#class-label").textContent = rules.mode.toUpperCase();
   $("#rules-footer").textContent = rulesLabel(rules);
+  const compactLimit = $("#limit-compact");
+  if (compactLimit) {
+    compactLimit.textContent = `${rules.credits === null ? "NO CREDIT CAP" : `${s.cost.toLocaleString()} / ${rules.credits.toLocaleString()} ¢`} · ${s.parts}/${cap("parts")} parts`;
+    compactLimit.classList.toggle("warn", !!issues.length);
+  }
   const powerFactor = s.energy ? clamp(s.power / s.energy, 0, 1) : 1,
     coolingFactor = s.heat ? clamp(s.cooling / s.heat, 0, 1) : 1,
     sustainedDps = s.dps * Math.max(0.2, powerFactor) * Math.max(0.2, coolingFactor),
@@ -828,8 +832,11 @@ function updateReadout() {
 }
 function renderInspector() {
   if (!$("#inspector")) return;
-  const m = machine.modules.find((m) => keyOf(m) === focus);
+  const m = machine.modules.find((m) => keyOf(m) === focus),
+    disclosure = $("#inspector-disclosure");
   if (mode === "paint") {
+    $("#inspector-label").textContent = "PAINT";
+    if (disclosure) disclosure.open = true;
     $("#inspector").innerHTML =
       `<div class="inspector-body"><h3>Paint brush</h3><p>Tap a part to give it a custom color. Your other parts keep their hull paint.</p><label class="color-field">Brush color <input type="color" id="brush-color" value="${brush}"></label><button id="reset-part-paints">Use hull color on every part</button></div>`;
     $("#brush-color").oninput = (e) => (brush = e.target.value);
@@ -841,6 +848,7 @@ function renderInspector() {
     return;
   }
   if (!m) {
+    $("#inspector-label").textContent = "INSPECT";
     $("#inspector").innerHTML =
       '<div class="inspector-body"><p>Select <strong>Inspect</strong>, then tap a fitted part to reinforce it, overclock it, rotate it, or give it a custom color.</p><div class="stack-guide"><strong>Build upward</strong><span>Fit a frame or deck → select Level 1 → place a turret above it. Add another supporting deck to reach Level 2.</span></div><p class="hint">Upper mounts cost +12 credits per level. Tall builds have slower steering.</p></div>';
     return;
@@ -853,8 +861,9 @@ function renderInspector() {
       base.power ||
       base.cooling ||
       base.shield
-    );
+  );
   $("#inspector-label").textContent = `LEVEL ${m.z || 0}`;
+  if (disclosure) disclosure.open = true;
   $("#inspector").innerHTML =
     `<div class="inspector-body"><h3>${p.name}</h3><p class="hint">${p.hp} HP · ${p.mass} t · ${p.cost} credits</p><label class="field"><span>Specification</span><select id="part-grade"><option value="stock">Standard</option><option value="reinforced">Reinforced: +35% HP</option>${tunable ? '<option value="tuned">Overclocked: +20% output</option>' : ""}</select></label><p class="hint" id="grade-detail">Reinforced: +30% cost, +25% mass. Overclocked: +35% cost, −15% HP; weapons generate 30% more heat.</p><div class="cost-breakdown"><span>Base ${base.cost} ¢</span><span>Upgrade ${Math.ceil(base.cost * GRADES[m.u || "stock"].cost) - base.cost} ¢</span><span>Mount ${(m.z || 0) * 12} ¢</span></div><label class="color-field">Part color <input type="color" id="part-color" value="${m.c || machine.paint}"></label><div class="inspector-actions"><button id="part-rotate">↻ Rotate ${m.r * 90}°</button><button id="part-reset-color">Hull color</button>${m.id !== "core" ? '<button id="part-replace">Replace with selected part</button><button id="part-remove">Remove</button><button id="remove-column">Remove stack</button>' : ""}</div></div>`;
   $("#part-grade").value = m.u || "stock";
@@ -1167,6 +1176,18 @@ function bindWorkshop() {
         invalidateBench();
       }),
   );
+  $("#builder-fullscreen-btn").onclick = async () => {
+    const stage = $("#builder-focus");
+    if (!stage) return;
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else if (stage.requestFullscreen) await stage.requestFullscreen();
+      else stage.classList.toggle("theater");
+    } catch {
+      stage.classList.toggle("theater");
+    }
+    requestAnimationFrame(invalidateBench);
+  };
   const c = $("#builder");
   bindCamera(c, benchCamera, {
     change: () => {
@@ -1494,7 +1515,7 @@ function arenaView() {
 <section class="combat-stage" id="combat-stage"><div class="arena-screen"><canvas id="arena-canvas" width="1200" height="800" tabindex="0" aria-label="Deterministic battle arena. Drag to orbit, pinch to zoom. Tap a part to inspect its condition."></canvas>
  <div id="damage-labels" class="damage-labels" aria-hidden="true"></div><div class="fight-hud"><div class="fighter-hud"><strong>${esc(machine.name)}</strong><div class="meter"><i id="your-hp" style="width:100%"></i></div><small id="your-systems">YOUR MACHINE · ${stats(machine).cost} ¢</small><div class="resource-meters"><span title="Heat"><i id="your-heat"></i></span><span title="Energy"><i id="your-energy"></i></span></div></div><div class="timer"><span id="fight-time">1:40</span><small id="fight-state">STANDBY</small></div><div class="fighter-hud"><strong>${esc(enemy.name)}</strong><div class="meter"><i id="enemy-hp" style="width:100%"></i></div><small id="enemy-systems">OPPONENT MACHINE · ${stats(enemy).cost} ¢</small><div class="resource-meters"><span title="Heat"><i id="enemy-heat"></i></span><span title="Energy"><i id="enemy-energy"></i></span></div></div></div>
  <div class="arena-corner"><span id="terrain-label">ROAD</span><span id="reactor-label">REACTOR NEUTRAL</span></div><div class="minimap-wrap"><canvas id="minimap" width="240" height="160" aria-label="Arena overview. Machine positions and objectives."></canvas><small>TACTICAL MAP</small></div>
- <div class="fight-overlay" id="fight-overlay"><div class="match-card"><small>${challenge ? "FRIEND CHALLENGE" : meta.rank + " PRACTICE MATCH"}</small><h2>${esc(enemy.name)}</h2><p>${esc(challenge ? "Build your machine to the same rules, then watch both machines fight." : meta.hint)}</p><div class="engineering-contract"><span class="auto-indicator"></span><div><strong>MACHINES FIGHT AUTOMATICALLY</strong><small>They use the movement, target and damage settings from the workshop.</small></div></div><button class="primary" id="start-battle">Start simulation ↗</button><p class="mode-note">UP TO 100 SECONDS · SAME SEED, SAME RESULT</p></div></div>
+ <div class="fight-overlay briefing-overlay" id="fight-overlay"><div class="match-card"><small>${challenge ? "FRIEND CHALLENGE" : meta.rank + " PRACTICE MATCH"}</small><h2>${esc(enemy.name)}</h2><p>${esc(challenge ? "Build your machine to the same rules, then watch both machines fight." : meta.hint)}</p><div class="engineering-contract"><span class="auto-indicator"></span><div><strong>MACHINES FIGHT AUTOMATICALLY</strong><small>They use the movement, target and damage settings from the workshop.</small></div></div><button class="primary" id="start-battle">Start simulation ↗</button><p class="mode-note">UP TO 100 SECONDS · SAME SEED, SAME RESULT</p></div></div>
  </div><div class="arena-camera-bar"><div class="camera-follow"><span>CAMERA</span><select id="camera-follow" aria-label="Camera follow"><option value="both">Frame both</option><option value="you">Follow you</option><option value="rival">Follow opponent</option><option value="free">Free camera</option></select></div><div class="group"><button data-fight-camera="left" aria-label="Orbit left">↶</button><button data-fight-camera="right" aria-label="Orbit right">↷</button><button data-fight-camera="fit">⌖ Fit</button><button data-fight-camera="in" aria-label="Zoom in">+</button><button data-fight-camera="out" aria-label="Zoom out">−</button><button id="theater-btn" title="Fullscreen arena">⛶</button></div></div>
  <div class="observation-deck"><div class="observation-heading"><span class="auto-indicator"></span><strong id="observation-status">SYSTEM STATUS</strong><span id="observation-hint">Behavior locked when the match starts</span></div><div class="weapons-monitor" id="weapons-monitor"></div><div class="system-readout" id="system-readout"></div></div>
  <div class="panel battle-toolbar"><div class="group"><button id="pause-btn" disabled>Ⅱ Pause</button><button id="replay-btn" disabled>↻ Replay</button><button id="inspect-btn">◎ Damage</button></div><div class="group"><span class="mode-note">SPEED</span>${[0.5, 1, 2, 4].map((s) => `<button data-speed="${s}" class="${speed === s ? "active" : ""}">${s}×</button>`).join("")}</div></div></section>
@@ -2083,6 +2104,7 @@ function finishBattle() {
   }
   const advice = battleAdvice(battle).notes[0];
   const overlay = $("#fight-overlay");
+  overlay.classList.remove("briefing-overlay");
   overlay.hidden = false;
   overlay.innerHTML = `<div class="match-card"><small>${officialReceipt ? "PAID REPLAY · " : ""}${esc(r.reason.toUpperCase())}</small><h2 style="color:${won ? "var(--gold)" : draw ? "var(--text)" : "var(--red)"}">${won ? "VICTORY." : draw ? "STALEMATE." : "OUTENGINEERED."}</h2><div class="result-grid"><div><strong>${r.time.toFixed(1)}s</strong><small>BATTLE TIME</small></div><div><strong>${r.damage[0]}</strong><small>DAMAGE</small></div><div><strong>${v.intercepts}</strong><small>INTERCEPTIONS</small></div></div><p>${esc(advice)}</p><p class="hint">Deterministic trial · ${v.pickups} caches · ${v.detached} part${v.detached === 1 ? "" : "s"} collapsed</p><div class="modal-footer"><button id="battle-report-btn">Battle report</button><button id="watch-replay">↻ Exact replay</button><button class="primary" id="result-tune">Refit machine</button></div><div class="result-extras"><button id="fight-again">${officialReceipt ? "Continue to result" : "Fight again"}</button><button id="inspect-wreck">Inspect wreckage</button></div></div>`;
   $("#battle-report-btn").onclick = showBattleReportEnhanced;
@@ -2116,7 +2138,6 @@ function renderEngineering() {
   const notes = engineeringReport(machine, rules, arenaId),
     errors = notes.filter((n) => n.level === "error").length,
     warnings = notes.filter((n) => n.level === "warn").length,
-    issues = errors + warnings,
     plural = (n, word) => n + " " + word + (n === 1 ? "" : "s"),
     headline = errors
       ? [
@@ -2129,14 +2150,22 @@ function renderEngineering() {
         ? plural(warnings, "tuning note")
         : "Ready for a trial",
     detail = errors
-      ? "Fix required issues before deploying; tuning notes improve reliability."
+      ? "Open the report and resolve the required items before testing."
       : warnings
-        ? "Select a finding to jump to the relevant parts."
+        ? "Open findings to jump to the parts that improve this build."
         : "Systems, structure, and selected terrain look sound.";
   if (summary)
     summary.innerHTML = `<span class="report-pulse ${errors ? "urgent" : warnings ? "caution" : "ready"}"></span><span><b>${headline}</b><small>${detail}</small></span>`;
-  node.innerHTML = notes
-    .map((n) => {
+  const count = $("#engineering-count");
+  if (count)
+    count.textContent = errors
+      ? plural(errors, "required fix")
+      : warnings
+        ? plural(warnings, "tuning note")
+        : "All clear";
+  const disclosure = $("#engineering-disclosure");
+  if (errors && disclosure) disclosure.open = true;
+  const renderNote = (n) => {
       const state =
           n.level === "good"
             ? "READY"
@@ -2149,8 +2178,15 @@ function renderEngineering() {
             ? "Review parts"
             : "Browse " + n.category.toLowerCase();
       return `<button class="engineering-note ${n.level}" data-engineering-category="${n.category}"><span class="engineering-icon" aria-hidden="true">${icon}</span><span class="engineering-copy"><span class="engineering-note-meta"><b>${esc(n.category)}</b><i>${state}</i></span><strong>${esc(n.text)}</strong><small>${action} <em>→</em></small></span></button>`;
-    })
-    .join("");
+    },
+    ordered = [
+      ...notes.filter((n) => n.level === "error"),
+      ...notes.filter((n) => n.level !== "error"),
+    ],
+    visibleCount = Math.min(ordered.length, errors ? Math.max(2, errors) : 2),
+    visibleNotes = ordered.slice(0, visibleCount),
+    moreNotes = ordered.slice(visibleCount);
+  node.innerHTML = `${visibleNotes.map(renderNote).join("")}${moreNotes.length ? `<details class="engineering-more"><summary>Show ${moreNotes.length} more ${moreNotes.length === 1 ? "finding" : "findings"}</summary><div>${moreNotes.map(renderNote).join("")}</div></details>` : ""}`;
   $$("[data-engineering-category]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -2979,6 +3015,12 @@ $("#sound-btn").onclick = () => {
 };
 $("#sound-state").textContent = sound ? "BLOCKED" : "OFF";
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && $("#builder-focus")?.classList.contains("theater")) {
+    e.preventDefault();
+    $("#builder-focus").classList.remove("theater");
+    invalidateBench();
+    return;
+  }
   if (e.target.matches("input,textarea,select") || $("#modal").open) return;
   if (view === "workshop") {
     if (e.key.toLowerCase() === "r") rotate();
@@ -2998,7 +3040,10 @@ window.addEventListener("resize", () => {
   invalidateBench();
   drawArena();
 });
-document.addEventListener("fullscreenchange", () => drawArena());
+document.addEventListener("fullscreenchange", () => {
+  if ($("#builder-focus")) invalidateBench();
+  if ($("#combat-stage")) drawArena();
+});
 function renderRoute(route) {
   routeRestoring = true;
   try {

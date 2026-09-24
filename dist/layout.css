@@ -438,3 +438,156 @@ body[data-page="home"] .portal-footer { border-top: 0; margin-top: 0; }
   .contract-search { grid-template-columns: 1fr 1fr; }
   .contract-search input[type="search"] { grid-column: 1 / -1; }
 }
+
+/* Workshop: surface only the decision-critical values until a player asks for detail. */
+.workshop-disclosure { overflow: hidden; }
+.workshop-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 62px;
+  padding: 11px 14px 11px 16px;
+  list-style: none;
+}
+.workshop-disclosure > summary::-webkit-details-marker { display: none; }
+.workshop-disclosure > summary > span:first-child { min-width: 0; flex: 1; }
+.workshop-disclosure > summary::after {
+  content: "+";
+  color: var(--gold);
+  font-size: 19px;
+  line-height: 1;
+}
+.workshop-disclosure[open] > summary::after { content: "−"; }
+.workshop-disclosure > summary strong { display: block; font-size: 15px; }
+.workshop-disclosure > summary small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .6px;
+}
+.limits-disclosure .compact-limit {
+  color: var(--gold);
+  font: 10px/1.4 monospace;
+  text-align: right;
+  white-space: nowrap;
+}
+.limits-disclosure .compact-limit.warn { color: var(--red); }
+.limits-disclosure .stats-body,
+.inspector-disclosure > #inspector { border-top: 1px solid var(--line); }
+
+.engineering-disclosure { border-top: 1px solid var(--line); }
+.engineering-disclosure > summary,
+.engineering-more > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 16px;
+  color: #b9d6ce;
+  font: 11px/1.3 monospace;
+  letter-spacing: .4px;
+  list-style: none;
+}
+.engineering-disclosure > summary::-webkit-details-marker,
+.engineering-more > summary::-webkit-details-marker { display: none; }
+.engineering-disclosure > summary::after,
+.engineering-more > summary::after {
+  content: "+";
+  color: var(--gold);
+  font-size: 17px;
+  line-height: 1;
+}
+.engineering-disclosure[open] > summary::after,
+.engineering-more[open] > summary::after { content: "−"; }
+#engineering-count { color: var(--gold); font-size: 10px; text-align: right; }
+.engineering-more { border-top: 1px solid var(--line); }
+.engineering-more > summary { min-height: 40px; padding-inline: 16px; color: var(--muted); }
+.engineering-more > div { border-top: 1px solid #36504a55; }
+
+/* Builder focus follows the arena's fullscreen behavior, including a CSS fallback. */
+#builder-focus:fullscreen,
+#builder-focus.theater {
+  width: 100%;
+  height: 100dvh;
+  min-height: 100dvh;
+  max-height: none;
+  background: radial-gradient(ellipse at 50% 45%, #395862 0%, #132129 66%);
+}
+#builder-focus.theater {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+#builder-focus:fullscreen .builder-wrap,
+#builder-focus.theater .builder-wrap {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  padding: 0;
+}
+#builder-focus:fullscreen .camera-controls,
+#builder-focus.theater .camera-controls,
+#builder-focus:fullscreen .grid-caption,
+#builder-focus.theater .grid-caption { z-index: 2; }
+
+/* The briefing should introduce a match without hiding both machines. */
+.fight-overlay.briefing-overlay {
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding: 20px;
+  pointer-events: none;
+  background: linear-gradient(90deg, #081216b8 0%, #0812165c 36%, transparent 74%);
+  backdrop-filter: none;
+}
+.fight-overlay.briefing-overlay .match-card {
+  width: min(350px, calc(100% - 40px));
+  max-width: 350px;
+  margin: 0;
+  padding: 20px;
+  text-align: left;
+  pointer-events: auto;
+}
+.fight-overlay.briefing-overlay .match-card h2 { margin: 5px 0; font-size: 29px; }
+.fight-overlay.briefing-overlay .match-card p { margin: 7px 0 12px; }
+.fight-overlay.briefing-overlay .engineering-contract { margin: 10px 0; }
+
+@media (max-width: 640px) {
+  .front-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .front-bar > div { grid-column: 1 / -1; min-width: 0; }
+  .front-bar select { width: 122px; }
+  .front-bar .toggle { width: auto; margin: 0; justify-self: end; white-space: nowrap; }
+  .workshop-disclosure > summary { min-height: 56px; padding: 10px 12px; }
+  .workshop-disclosure > summary strong { font-size: 14px; }
+  .limits-disclosure .compact-limit { font-size: 9px; }
+  .engineering-disclosure > summary { padding: 9px 14px; }
+  .fight-overlay.briefing-overlay {
+    align-items: flex-end;
+    justify-content: center;
+    padding: 10px;
+    background: linear-gradient(transparent 30%, #081216d9 86%);
+  }
+  .fight-overlay.briefing-overlay .match-card {
+    width: 100%;
+    max-width: none;
+    padding: 14px 16px;
+  }
+  .fight-overlay.briefing-overlay .match-card h2 { font-size: 24px; }
+  .fight-overlay.briefing-overlay .match-card p { margin: 5px 0 8px; }
+  .fight-overlay.briefing-overlay .engineering-contract,
+  .fight-overlay.briefing-overlay .mode-note { display: none; }
+  .fight-overlay.briefing-overlay .match-card .primary { width: 100%; min-height: 40px; }
+}
+
+@media (max-width: 360px) {
+  .front-bar { grid-template-columns: 1fr; }
+  .front-bar select,
+  .front-bar .toggle { justify-self: start; }
+}
