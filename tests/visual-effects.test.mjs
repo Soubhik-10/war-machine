@@ -30,3 +30,12 @@ test('reduced effects retain a bounded representative set',()=>{
  assert.ok(reduced.additiveVertices.length<full.additiveVertices.length);
  assert.ok(reduced.additiveVertices.every(Number.isFinite));
 });
+
+test('hot weapons and distinct impact classes produce bounded finite battle effects',()=>{
+ const cool=new Battle(PRESETS[0],PRESETS[1],'foundry',31),hot=new Battle(PRESETS[0],PRESETS[1],'foundry',31),weapon=hot.vehicles[0].modules.find(m=>m.id==='cannon');
+ hot.vehicles[0].heat=92;weapon.thermal=1;
+ hot.effects.push({x:560,y:400,h:20,type:'hit',weapon:'laser',color:'#ffffff',life:.16,max:.2,scale:1},{x:640,y:400,h:20,type:'blast',weapon:'rocket',color:'#ffffff',life:.4,max:.7,scale:1},{x:600,y:470,h:20,type:'hit',weapon:'cryo',color:'#ffffff',life:.16,max:.2,scale:1});
+ const coolScene=battleScene(cool),hotScene=battleScene(hot);
+ assert.ok(hotScene.additiveVertices.length>coolScene.additiveVertices.length);
+ assert.ok(hotScene.additiveVertices.every(Number.isFinite));
+});
