@@ -6,9 +6,11 @@ import { Battle as LegacyBattle } from './engines/4b762a9b76ba071b27799113a0aafb
 import { unpackChallenge as unpackLegacyChallenge } from './engines/data.mjs';
 import { Battle as E62Battle } from './engines/e62d2be3ff92293eb4ebb0a2357a039833ebf3a782ddff2d71dee367de1c5cf1/engine.mjs';
 import { unpackChallenge as unpackE62Challenge } from './engines/e62d2be3ff92293eb4ebb0a2357a039833ebf3a782ddff2d71dee367de1c5cf1/data.mjs';
+import { Battle as C804Battle } from './engines/c804997d4145a830c246f10c358522c36ad9d820a86b313f74b5ced8a37340c6/engine.mjs';
 
 export const LEGACY_ENGINE_HASH = '4b762a9b76ba071b27799113a0aafb5b8a04a7a02e21a445e60295f3c82ca365';
 export const E62_ENGINE_HASH = 'e62d2be3ff92293eb4ebb0a2357a039833ebf3a782ddff2d71dee367de1c5cf1';
+export const C804_ENGINE_HASH = 'c804997d4145a830c246f10c358522c36ad9d820a86b313f74b5ced8a37340c6';
 // This advertised value covered both its original sources and later changed
 // deployed sources. A record's engineHash alone cannot select either safely.
 export const AMBIGUOUS_ENGINE_HASH = 'd65afc7a4429e15908beddef95eeba568d23a92d3870d5be844950c87e3b519c';
@@ -16,6 +18,7 @@ export const ENGINE_EVALUATORS = Object.freeze({
   ...(CLIENT_ENGINE_HASH === AMBIGUOUS_ENGINE_HASH ? {} : {[CLIENT_ENGINE_HASH]: Object.freeze({ Battle, unpackChallenge: unpackCurrentChallenge })}),
   [LEGACY_ENGINE_HASH]: Object.freeze({ Battle: LegacyBattle, unpackChallenge: unpackLegacyChallenge }),
   [E62_ENGINE_HASH]: Object.freeze({ Battle: E62Battle, unpackChallenge: unpackE62Challenge }),
+  [C804_ENGINE_HASH]: Object.freeze({ Battle: C804Battle, unpackChallenge: unpackCurrentChallenge }),
 });
 
 export const CHAIN_ID = 4217;

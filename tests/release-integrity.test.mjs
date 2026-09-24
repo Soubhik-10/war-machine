@@ -7,10 +7,11 @@ import { join, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { assertSimulationSourceGraph, hashSimulationSources } from '../server/simulation-hash.mjs';
 import { verifyRelease } from '../scripts/verify-release.mjs';
-import { AMBIGUOUS_ENGINE_HASH, E62_ENGINE_HASH, ENGINE_EVALUATORS, ESCROW, LEGACY_ENGINE_HASH, evaluate } from '../settlement/protocol.mjs';
+import { AMBIGUOUS_ENGINE_HASH, C804_ENGINE_HASH, E62_ENGINE_HASH, ENGINE_EVALUATORS, ESCROW, LEGACY_ENGINE_HASH, evaluate } from '../settlement/protocol.mjs';
 import { Battle as CurrentBattle } from '../dist/engine.mjs';
 import { packChallenge as pack4, PRESETS as presets4 } from '../settlement/engines/data.mjs';
 import { packChallenge as packE62, PRESETS as presetsE62 } from '../settlement/engines/e62d2be3ff92293eb4ebb0a2357a039833ebf3a782ddff2d71dee367de1c5cf1/data.mjs';
+import { packChallenge as packC804, PRESETS as presetsC804 } from '../settlement/engines/c804997d4145a830c246f10c358522c36ad9d820a86b313f74b5ced8a37340c6/data.mjs';
 
 const root = new URL('../', import.meta.url);
 const source = path => readFileSync(new URL(path, root), 'utf8');
@@ -52,7 +53,7 @@ test('verification reads only and rejects a stale or malformed stamp', () => {
 });
 
 test('historical snapshots retain their exact engine and catalog pairs', () => {
-  for (const hash of [E62_ENGINE_HASH, AMBIGUOUS_ENGINE_HASH, 'f2779776cd3a4bf33d688b8384816c527c426654ef640f256353e0dbe37a0d45']) {
+  for (const hash of [C804_ENGINE_HASH, E62_ENGINE_HASH, AMBIGUOUS_ENGINE_HASH, 'f2779776cd3a4bf33d688b8384816c527c426654ef640f256353e0dbe37a0d45']) {
     const base = `settlement/engines/${hash}/`;
     assert.equal(pairHash(source(base + 'engine.mjs'), source(base + 'data.mjs')), hash);
     assert.match(source(base + 'engine.mjs'), /from ['"]\.\/data\.mjs['"]/);
@@ -69,14 +70,13 @@ const fixture = (hash, pack, presets) => ({
 });
 
 test('known historical evaluators keep their established fixed-seed result', () => {
-  for (const [hash, pack, presets] of [[LEGACY_ENGINE_HASH, pack4, presets4], [E62_ENGINE_HASH, packE62, presetsE62]]) {
+  const established = {winner:1, reason:'Combat systems disabled', time:35.399999999999274, integrity:[0.06888797702092737,0.8168880781603366], damage:[508,1339]};
+  const c804 = {winner:1, reason:'Combat systems disabled', time:22.266666666666683, integrity:[0.019647776183973176,0.9098774697568202], damage:[201,1541]};
+  for (const [hash, pack, presets, expected] of [[LEGACY_ENGINE_HASH, pack4, presets4, established], [E62_ENGINE_HASH, packE62, presetsE62, established], [C804_ENGINE_HASH, packC804, presetsC804, c804]]) {
     assert.ok(ENGINE_EVALUATORS[hash]);
     assert.notEqual(ENGINE_EVALUATORS[hash].Battle, CurrentBattle);
     const result = evaluate(fixture(hash, pack, presets), 1700000000000).result;
-    assert.deepEqual({winner:result.winner, reason:result.reason, time:result.time, integrity:result.integrity, damage:result.damage}, {
-      winner:1, reason:'Combat systems disabled', time:35.399999999999274,
-      integrity:[0.06888797702092737, 0.8168880781603366], damage:[508, 1339],
-    });
+    assert.deepEqual({winner:result.winner, reason:result.reason, time:result.time, integrity:result.integrity, damage:result.damage}, expected);
   }
 });
 
