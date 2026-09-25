@@ -60,6 +60,7 @@ import { purgePreV6Bounties } from "./legacy-purge.mjs";
 import { repairMislabeledBounties } from "./payment-migrations.mjs";
 import { mainnetOpenApi } from "./openapi.mjs";
 import { handleMcpRequest } from "../../server/mcp.mjs";
+import { handleFriendlyChallenges } from "../../server/friendly-challenges.mjs";
 
 const now = () => Date.now(),
   COMPLETED_BOUNTY_BOARD_MS = 10 * 60 * 1000,
@@ -6712,6 +6713,15 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       if (access.response) return access.response;
       auth = access.auth;
     }
+    const friendly = await handleFriendlyChallenges({
+      db,
+      request,
+      path,
+      method,
+      body,
+      response,
+    });
+    if (friendly) return friendly;
     if (path === "/api/blueprints/validate" && method === "POST")
       return response(await inspection(db, body, auth?.account));
     if (path === "/api/practice" && method === "POST")

@@ -108,6 +108,12 @@ class D1Mock {
         "utf8",
       ),
     );
+    this.sqlite.exec(
+      await readFile(
+        new URL("../drizzle/0010_friendly_challenges.sql", import.meta.url),
+        "utf8",
+      ),
+    );
   }
   close() {
     this.sqlite.close();
@@ -1487,4 +1493,37 @@ test("Sites Worker + D1 supports private build vaults and authoritative sandbox 
   assert.equal(detail.body.history[0].participantName, "Copper Fox");
   assert.equal(detail.body.history[0].addressVisible, false);
   assert.equal(publicAttempt.body.replay.versions.hash.length, 64);
+});
+
+test("free friendly challenges use their own table, share invite links, and are purged at 24 hours", async (t) => {
+  const DB = new D1Mock();
+  await DB.migrate();
+  t.after(() => DB.close());
+  const env = { DB, ASSETS: { fetch: () => new Response("asset") } };
+  const blueprint = packChallenge(PRESETS[0], "foundry", 0);
+  const created = await call(env, "/api/friendly-challenges", "POST", {
+    challengerName: "Copper Fox",
+    title: "Try my Foundry build",
+    clientId: crypto.randomUUID(),
+    blueprint,
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  assert.equal(created.body.challengerName, "Copper Fox");
+  assert.equal(created.body.expires - created.body.created, 24 * 60 * 60 * 1000);
+  const board = await call(env, "/api/friendly-challenges");
+  assert.equal(board.status, 200);
+  assert.equal(board.body.length, 1);
+  assert.equal(board.body[0].id, created.body.id);
+  const detail = await call(env, "/api/friendly-challenges/" + created.body.id);
+  assert.equal(detail.status, 200);
+  assert.deepEqual(
+    DB.sqlite.prepare("SELECT COUNT(*) AS count FROM accounts").get().count,
+    0,
+    "friendly challenges should not create profiles or wallet records",
+  );
+  assert.equal(DB.sqlite.prepare("SELECT COUNT(*) AS count FROM bounties").get().count, 0);
+  DB.sqlite.prepare("UPDATE friendly_challenges SET expires=? WHERE id=?").run(Date.now() - 1, created.body.id);
+  const afterExpiry = await call(env, "/api/friendly-challenges");
+  assert.deepEqual(afterExpiry.body, []);
+  assert.equal(DB.sqlite.prepare("SELECT COUNT(*) AS count FROM friendly_challenges").get().count, 0);
 });
