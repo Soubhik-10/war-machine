@@ -132,6 +132,7 @@ export class AudioDirector {
     const burst = Math.min(count, 4);
     if (id === "laser") { this.tone(820, .13, .025, "sine", 1560); this.tone(1480, .055, .011, "sine", 960); return; }
     if (id === "railgun") { this.tone(155, .16, .026, "sine", 1120); this.tone(980, .07, .025, "sawtooth", 2200); this.noise(.06, .014, 6000, 1900); return; }
+    if (id === "sabot") { this.tone(220, .1, .028, "triangle", 85); this.noise(.055, .016, 2200, 650); return; }
     if (id === "plasma") { this.tone(155, .22, .042, "sine", 68); this.noise(.12, .018, 1250, 340); return; }
     if (id === "rocket") { this.tone(125, .19, .034, "sawtooth", 52); this.noise(.14, .031, 1000, 350); return; }
     if (id === "mortar") { this.tone(82, .22, .037, "sawtooth", 42); this.noise(.18, .033, 760, 240); return; }
