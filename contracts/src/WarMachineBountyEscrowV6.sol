@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {IERC20} from "./WarMachineBountyEscrow.sol";
+import {IERC20} from "./IERC20.sol";
 
 /// @notice V6 pathUSD escrow with held entries and permissionless technical refunds.
 /// @dev V6 deliberately remains a one-signer trusted-operator escrow. Native MPP
