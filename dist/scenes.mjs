@@ -4,10 +4,10 @@ import {world,CELL} from './engine.mjs';
 const colors={snow:'#c1d8dc',brine:'#577966',sand:'#bca47c',mud:'#4f4c39',oil:'#24363a',ice:'#82c3d0',lava:'#a74c29',vent:'#282c2b',ridge:'#ac8466',coolant:'#4b9f90',rubble:'#827463'};
 const noise=n=>{const x=Math.sin(n*73.19+13)*4731;return x-Math.floor(x);};
 const sceneCache=new Map(),battleSceneCache=new WeakMap(),workshopSceneCache=new WeakMap();
-const FULL_QUALITY=Object.freeze({tier:'high',effects:'full',ventParticles:7,trailParticles:8,damageSmokeParticles:3,smokeParticles:16,shieldRings:6,shieldSegments:7,debrisLimit:Infinity,ringSegments:64,effectBudget:120,muzzleLayers:3,impactDebris:7});
+const FULL_QUALITY=Object.freeze({tier:'high',effects:'full',ventParticles:7,trailParticles:8,damageSmokeParticles:3,smokeParticles:16,shieldRings:6,shieldSegments:7,debrisLimit:Infinity,ringSegments:64,effectBudget:120,muzzleLayers:3,impactDebris:7,damageMarks:12});
 // Profiles use the app's full/reduced vocabulary. Reduced retains one clear
 // identity cue per weapon while bounding smoke, muzzle layers and debris.
-const sceneQuality=q=>{const profile=q?{...FULL_QUALITY,...q}:FULL_QUALITY;return profile.effects==='reduced'?{...profile,effectBudget:Math.min(profile.effectBudget,48),muzzleLayers:Math.min(profile.muzzleLayers,1),impactDebris:Math.min(profile.impactDebris,3)}:profile;};
+const sceneQuality=q=>{const profile=q?{...FULL_QUALITY,...q}:FULL_QUALITY;return profile.effects==='reduced'?{...profile,effectBudget:Math.min(profile.effectBudget,48),muzzleLayers:Math.min(profile.muzzleLayers,1),impactDebris:Math.min(profile.impactDebris,3),damageMarks:Math.min(profile.damageMarks,6)}:profile;};
 const wx=x=>(x-600)/CELL,wz=y=>(y-400)/CELL;
 function bracket(g,x,y,z,color,width=1){for(const dx of [-1,1])for(const dz of [-1,1]){g.box(x+dx*width*.45,y,z+dz*width*.35,.055,.025,width*.25,color,.55);g.box(x+dx*width*.35,y,z+dz*width*.45,width*.25,.025,.055,color,.55);}}
 function weaponMuzzle(g,e,t,x,z,h,q=FULL_QUALITY){const id=e.weapon||'cannon',a=Number.isFinite(e.angle)?e.angle:0,dx=Math.cos(a),dz=Math.sin(a),fade=t*t*(3-2*t),scale=e.scale||1,layers=q.muzzleLayers||1,line=(len,width,color,em=1,op=fade,side=0,up=0)=>g.cylinder([x+dz*side,h,z-dx*side],[x+dx*len+dz*side,h+up,z+dz*len-dx*side],width*scale,color,6,em,op),ring=(r,w,color,em=1,op=fade)=>g.ring(x,h,z,r*scale,w*scale,color,em,q.ringSegments,op),orb=(ox,oy,oz,r,color,em=1,op=fade)=>g.sphere(x+ox,h+oy,z+oz,r*scale,color,em,op);if(id==='cannon'){line(.56,.05,'#ffe0a6');ring(.22,.03,'#ffc878');return;}if(id==='machinegun'){line(.42,.018,'#ffd17b',1,fade,(e.pellets||0)%2?.08:-.08);return;}if(id==='gatling'){for(let i=0;i<layers;i++)line(.34+i*.08,.014,'#ffe19a',.9,fade,(i-1)*.07);ring(.18,.02,'#ffdc9f',.8);return;}if(id==='railgun'){line(1.3,.018,'#d9ffff',1,fade);line(-.5,.012,'#63d9e9',.75,fade);ring(.32,.025,'#a9ffff',.8);return;}if(id==='laser'){line(.95,.015,'#e5fff9',1,fade);ring(.2,.018,'#8affdf',.8);return;}if(id==='plasma'){orb(dx*.18,0,dz*.18,.19,'#b4ffe8',1);ring(.32,.035,'#55e7be',.8);return;}if(id==='rocket'||id==='mortar'){line(-.55,.07,'#ff9d4d',1,fade,0,id==='mortar'?.12:.02);orb(-dx*.42,-.02,-dz*.42,.10,'#ffb45e',1);ring(.18,.02,'#ffcb75',.8);return;}if(id==='flame'){for(let i=0;i<layers;i++)line(.55+i*.11,.04,'#ff7c35',.9,fade,(i-(layers-1)/2)*.09,.025);return;}if(id==='tesla'||id==='emp'){ring(.36,.035,id==='emp'?'#d6b3ff':'#8dfff1',.8);for(let i=0;i<layers;i++)line(.32+i*.12,.014,id==='emp'?'#c597f4':'#70ffe0',.9,fade,(i-1)*.12,.08*Math.sin(i));return;}if(id==='cryo'){ring(.28,.03,'#c4f6ff',.8);for(let i=0;i<layers+1;i++){const s=(i-layers*.5)*.12;line(.42,.014,'#9deaff',.9,fade,s,.03);}return;}if(id==='flak'||id==='shredder'){for(let i=0;i<layers+2;i++)line(.42+Math.abs(i-layers*.5)*.06,.018,id==='flak'?'#ffd795':'#d8f2e8',.85,fade,(i-layers*.5)*.1);return;}if(id==='mine'){orb(0,-.06,0,.13,'#8ce5d2',.8);ring(.28,.025,'#79ffe0',.7);return;}line(.46,.03,e.color||'#ffdd8c');orb(dx*.13,0,dz*.13,.12,e.color||'#ffdd8c');}
@@ -15,6 +15,22 @@ function weaponMuzzle(g,e,t,x,z,h,q=FULL_QUALITY){const id=e.weapon||'cannon',a=
 const clamp=(value,low=0,high=1)=>Math.max(low,Math.min(high,value));
 const weaponColors={cannon:'#ffd18d',machinegun:'#ffe0a8',gatling:'#ffd06f',railgun:'#a5f7ff',laser:'#73ffe0',plasma:'#55e7be',rocket:'#ff9d4d',mortar:'#ffc36e',flame:'#ff7638',tesla:'#8cffe4',emp:'#d7a8ff',cryo:'#9eeaff',flak:'#ffd795',shredder:'#d8f2e8',mine:'#8ce5d2',interceptor:'#93ffef',ram:'#ffd59a'};
 const weaponColor=(id,fallback='#efb575')=>weaponColors[id]||fallback;
+
+// A tiny source-coded flash on the struck module makes weapon identity readable
+// even when the projectile's impact is hidden by the chassis. Marks are brief,
+// transient additive geometry (no decals or particle entities) and quality-capped.
+function moduleDamageCue(g,v,m,q){
+ const id=m.lastDamageBy,color=weaponColors[id];if(!(m.flash>0)||!color)return;
+ const p=world(v,m),x=wx(p.x),z=wz(p.y),h=p.h/CELL+.73,fade=clamp(m.flash/.13),size=.17+fade*.09;
+ const bar=(ox,oz,w,d,c=color)=>g.box(x+ox,h,z+oz,w,.018,d,c,.9,fade*.72);
+ if(id==='railgun'||id==='laser'){bar(0,0,size*1.8,.035);if(q.damageMarks>6)bar(0,0,.035,size*1.8,'#f1fffe');return;}
+ if(id==='tesla'||id==='emp'){bar(-size*.35,-size*.18,.045,size*.65);bar(size*.35,size*.18,.045,size*.65,id==='emp'?'#f1d9ff':'#d9fff8');return;}
+ if(id==='cryo'){bar(-size*.5,0,.035,size);bar(size*.5,0,.035,size);bar(0,-size*.5,size,.035);bar(0,size*.5,size,.035);return;}
+ if(id==='plasma'){bar(-size*.4,0,.07,size*.8);bar(size*.4,0,.07,size*.8,'#c7ffef');return;}
+ // Kinetic, explosive and flame hits use a compact outward spark/scorch mark.
+ bar(-size*.48,-size*.38,.07,.035);bar(size*.42,size*.3,.06,.035);
+ if(id==='flame'&&q.damageMarks>6)bar(0,size*.42,size*.65,.045,'#ffb05a');
+}
 
 function weaponThermal(g,battle,v,m,q){
  const spec=partSpec(m);if(!spec?.rate)return;
@@ -130,6 +146,7 @@ export function battleScene(battle,{inspect=false,waypoint=true,reuse=false,qual
   const pos={x:wx(v.x),z:wz(v.y),h:v.ground/CELL};
   g.machine({...v,paint:v.side&&v.paint===battle.vehicles[0].paint?'#c36c5a':v.paint},{...pos,a:v.a,cx:v.cx,cy:v.cy,phase:(v.odometer||0)*.06,time:battle.time,damage:true});
    g.beginEffects('additive');
+   for(const m of activeModules.filter(m=>m.flash>0&&weaponColors[m.lastDamageBy]).slice(0,q.damageMarks))moduleDamageCue(g,v,m,q);
    for(const m of activeModules)weaponThermal(g,battle,v,m,q);
    const heatSignal=clamp(((v.heat||0)-60)/40);
    if(heatSignal>0){const thermalColor=v.overheated?'#ff6464':v.coolingDown?'#ff9855':'#ffd07e';g.ring(pos.x,pos.h+.14,pos.z,v.radius/CELL+.38+heatSignal*.24,.035+heatSignal*.026,thermalColor,.82,Math.min(q.ringSegments,24),.22+heatSignal*.48);if(v.coolingDown)g.ring(pos.x,pos.h+.18,pos.z,v.radius/CELL+.7+Math.sin(battle.time*7)*.12,.018,'#ffe0a8',.72,Math.min(q.ringSegments,20),.26);}
