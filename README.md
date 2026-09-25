@@ -2,7 +2,6 @@
 
 ![Wraith rotating on its display platform](assets/readme-machine.gif)
 
-[🔊 Play the rotating machine with Robotic City V2](https://raw.githubusercontent.com/Soubhik-10/war-machine/e71543735b9dc1e74be806fb60561065991a70f2/assets/robotic-city-v2.mp4)
 
 A modular engineering battle game for desktop and mobile browsers. Build a machine, set its doctrine, scout a defender and design a counter. Battles run automatically. The workshop and ordinary machine links work on a static host; **public bounties use the bundled Worker/D1 backend and direct Tempo escrow**.
 
