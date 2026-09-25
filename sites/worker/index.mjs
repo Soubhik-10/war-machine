@@ -7,6 +7,7 @@ import {CREDIT_SCALE,PLATFORM_FEE_BPS,PLATFORM_FEE_POLICY,rewardQuote} from '../
 import {PART_GUIDANCE} from '../../dist/part-guidance.mjs';
 import {serveStaticAsset} from './static-assets.mjs';
 import {mainnetFetch} from './mainnet.mjs';
+import {handleFriendlyChallenges,purgeFriendlyChallenges} from '../../server/friendly-challenges.mjs';
 
 const json=value=>JSON.stringify(value),now=()=>Date.now(),id=()=>crypto.randomUUID();
 const money=value=>Math.round(Number(value)*CREDIT_SCALE),credits=value=>Number(value)/CREDIT_SCALE;
@@ -112,12 +113,13 @@ const discovery={name:'War Machines',version:'3.0',mode:'demo',description:'Engi
 const response=(value,status=200)=>new Response(json(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'}});
 async function bodyOf(request){const length=Number(request.headers.get('content-length')||0);check(length<=65536,'Request exceeds 64 KiB.',413);check(request.headers.get('content-type')?.split(';')[0]==='application/json','Use application/json.',415);try{return await request.json();}catch{fail(400,'Invalid JSON.');}}
 
-export default {async scheduled(event,env,ctx){ctx.waitUntil((async()=>{const until=Date.now()+50000;do{await runAutomaticSettlement(env,"scheduled");if(Date.now()+5000>=until)break;await new Promise(resolve=>setTimeout(resolve,5000));}while(Date.now()<until);})().catch(error=>{console.error("Scheduled settlement failed:",error);throw error;}));},async fetch(request,env,ctx){
+export default {async scheduled(event,env,ctx){ctx.waitUntil((async()=>{if(env.DB)try{await purgeFriendlyChallenges(env.DB);}catch(error){console.error("Friendly challenge cleanup failed:",error);}const until=Date.now()+50000;do{await runAutomaticSettlement(env,"scheduled");if(Date.now()+5000>=until)break;await new Promise(resolve=>setTimeout(resolve,5000));}while(Date.now()<until);})().catch(error=>{console.error("Scheduled worker task failed:",error);throw error;}));},async fetch(request,env,ctx){
  if(env.WM_MODE==='tempo-mainnet')return mainnetFetch(request,env,ctx,serveStaticAsset);
  const url=new URL(request.url),path=url.pathname;
  if(path==='/.well-known/war-machines.json'&&request.method==='GET')return response(discovery);
  if(!path.startsWith('/api/'))return serveStaticAsset(request);
  try{check(env.DB,'D1 storage is unavailable.');const db=env.DB,method=request.method;check(['GET','POST','PATCH','PUT','DELETE'].includes(method),'Method not allowed.',405);if(request.headers.get('origin'))check(new URL(request.headers.get('origin')).origin===url.origin,'Cross-origin API requests are not allowed.',403);const body=['POST','PATCH'].includes(method)?await bodyOf(request):{},auth=await dbAuth(db,request);await expire(db);
+  const friendly=await handleFriendlyChallenges({db,request,path,method,body,response});if(friendly)return friendly;
   if(path==='/api/rules'&&method==='GET')return response(catalog());if(path==='/api/openapi.json'&&method==='GET')return response(openapi);if(path==='/api/health'&&method==='GET')return response({ok:true,app:'war-machines',mode:'demo',paymentsEnabled:false,engineHash:CLIENT_ENGINE_HASH});
   if(path==='/api/session'&&method==='POST'){fields(body,['name']);const name=text(body.name||'Independent engineer',28,'pilot name'),token=secret(),accountId=id(),created=now();await db.prepare('INSERT INTO accounts (id,token_hash,name,balance,entry_cap,daily_cap,created) VALUES (?,?,?,?,?,?,?)').bind(accountId,await hex(token),name,money(1000),null,null,created).run();await db.prepare('INSERT INTO ledger (id,account,amount,kind,ref,created) VALUES (?,?,?,?,?,?)').bind(id(),accountId,money(1000),'grant',accountId,created).run();return response({token,me:await account(db,accountId)},201);}
   if(path==='/api/blueprints/validate'&&method==='POST')return response(await inspection(db,body));if(path==='/api/practice'&&method==='POST')return response(await practice(db,body));

@@ -43,5 +43,6 @@ export const PART_GUIDANCE=Object.freeze({
  insulator:{role:'CLIMATE ARMOR',quick:'Cuts ambient heat and brine leakage. It cannot protect a machine standing on lava.'},
  heater:{role:'COLD POWER RECOVERY',quick:'Restores generation in deep cold, but consumes energy and makes some heat itself.'},
  gyro:{role:'SLIPPERY STEERING',quick:'Improves control on oil and ice. It helps turning, not raw speed, and needs power.'},
- shredder:{role:'ARMOR-PIERCING BURST',quick:'Fast darts slip through some armor. Use it on a stable chassis with a clear firing lane.'}
+ shredder:{role:'ARMOR-PIERCING BURST',quick:'Fast darts slip through some armor. Use it on a stable chassis with a clear firing lane.'},
+ sabot:{role:'HEAVY-ARMOR BREAKER',quick:'A direct hit ignores 72% of one part’s armor resistance. It cannot splash or pass through parts, and its high heat needs cooling.'}
 });

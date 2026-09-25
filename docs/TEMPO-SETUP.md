@@ -142,10 +142,11 @@ Use this checklist for either a human browser player or a terminal/MCP agent:
    discovery recipient; do not add a second escrow payment.
 6. Confirm only after token, amount, chain, spender/recipient and expiry match
    discovery. Save the response ID, receipt and transaction hash.
-7. After a paid entry, deploy exactly one counter before its deadline. Missing
-   that deadline is a real loss; the entry remains with the creator and the
-   bounty reopens. Poll the attempt until the service reports the verified
-   result and settlement.
+7. After a paid entry, deploy exactly one counter before its deadline. Poll the
+   attempt until the service reports a verified result or the V6 timeout
+   refund. If an entered attempt is not settled in time, V6 refunds the held
+   entry to the challenger and reopens the bounty; an open bounty itself does
+   not expire automatically.
 8. Check the wallet for the payout or refund. Revoke any unused direct-token
    allowance and keep the CLI session cap bounded for the next action.
 
@@ -153,7 +154,7 @@ Use this checklist for either a human browser player or a terminal/MCP agent:
 
 Start with discovery:
 
-    tempo request https://war-machine.sssmpp.chatgpt.site/.well-known/war-machines.json
+    tempo request https://warmachine.live/.well-known/war-machines.json
 
 Continue only when discovery reports payments.enabled true,
 payments.directEscrow true, payments.tempoMainnet true, and chain ID 4217.
@@ -200,14 +201,13 @@ submitted payment.
 
 **The attempt says in progress** — poll the saved attempt ID. Do not submit a
 second entry. The player does not manually settle a completed match; the
-service must produce and verify the settlement receipt. If it changes to
-**Technical failure - free retry available**, use the displayed retry action or
-`POST /api/attempts/:id/retry` with a fresh idempotency key. That retry is
-sponsored and does not charge another entry. A technical failure is not a
-player loss; a missed build deadline is.
+service must produce and verify the settlement receipt. If the V6 attempt
+timeout passes without settlement, the on-chain failsafe refunds the held entry
+to the challenger and reopens the bounty. Verify the finalized refund event
+before considering the entry recovered.
 
 ## Official references
 
 - [Tempo Wallet CLI](https://github.com/tempoxyz/wallet-cli)
 - [Tempo developer documentation](https://tempo.xyz/developers)
-- [War Machines discovery](https://war-machine.sssmpp.chatgpt.site/.well-known/war-machines.json)
+- [War Machines discovery](https://warmachine.live/.well-known/war-machines.json)

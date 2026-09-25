@@ -2,21 +2,22 @@
 
 ## Public deployment
 
-The public deployment is [war-machine.sssmpp.chatgpt.site](https://war-machine.sssmpp.chatgpt.site).
+The canonical public deployment is [warmachine.live](https://warmachine.live). The app, API, discovery document, and shared challenge links use this origin.
 
 It runs the bundled Worker with D1 binding `DB` and the following live runtime configuration:
 
 ```text
 WM_MODE=tempo-mainnet
-WM_BOUNTY_ESCROW_VERSION=5
-WM_BOUNTY_ESCROW_ADDRESS=<deployed V5 escrow>
-WM_ESCROW_SETTLEMENT_SIGNER=<public V5 settlement signer>
-WM_BOUNTY_RELAYER_ADDRESS=<public V5 relayer>
+WM_BOUNTY_ESCROW_VERSION=6
+WM_ALLOW_ESCROW_V6=true
+WM_BOUNTY_ESCROW_ADDRESS=<verified deployed V6 escrow>
+WM_ESCROW_SETTLEMENT_SIGNER=<public V6 settlement signer>
+WM_BOUNTY_RELAYER_ADDRESS=<public V6 relayer>
 WM_TEMPO_SUPPORTED_TOKENS=0x20C0000000000000000000000000000000000000,0x20C000000000000000000000b9537d11c60E8b50
 WM_TEMPO_SWAP_SLIPPAGE_BPS=100
 ```
 
-The Worker serves the game, account build vault, bounty metadata, wallet identity flow, direct escrow transaction plans, native MPP bounty relaying when V5 is enabled, receipt verification, deterministic simulations, and result-attestation state. Only the optional V5 relayer key is stored as a secret runtime variable; it is never sent to the browser or persisted in D1.
+The Worker serves the game, account build vault, bounty metadata, wallet identity flow, direct escrow transaction plans, native MPP bounty relaying, receipt verification, deterministic simulations, and result-attestation state. The active V6 relayer key is stored only as a protected runtime secret; it is never sent to the browser or persisted in D1.
 
 ## Deploying a change
 
@@ -48,10 +49,10 @@ Static hosting supports local saves, exports, ordinary challenge links, and loca
 ## Mainnet safeguards
 
 - Keep `WM_BOUNTY_ESCROW_ADDRESS` pinned to the verified deployed escrow.
-- Never put a payout custody key, signer private key, or wallet seed phrase in public Site configuration, frontend code, D1, Git, or browser storage. The active V5 signer and relayer keys belong only in protected server-side Worker secret bindings. The V5 relayer key is a deliberate bounded forwarding secret: native MPP payments are temporarily held by that relayer until the matching escrow call, so keep its balance, allowance and exposure small.
-- V5's current small-trial contract uses one fixed settlement signer; keep its key separate from the relayer and guardian. Use an independently reviewed multi-signer contract before accepting larger public funds; see [ESCROW-V4-AUDIT.md](ESCROW-V4-AUDIT.md) for the inherited trust-boundary review.
-- Native MPP bounty charging is off until V5, the relayer address/key, `WM_AGENT_BOUNTY_MPP_*` values and `MPP_SECRET_KEY` have been intentionally configured. The relayer key must stay in the Worker secret store and the relayer must be funded/approved for the deployed V5 escrow.
-- Use controlled small amounts while the V5 single-signer settlement trust boundary is in place. V3/V4 deployments remain readable for recovery but do not accept new paid bounty actions.
+- Never put a payout custody key, signer private key, or wallet seed phrase in public Site configuration, frontend code, D1, Git, or browser storage. The active V6 signer and relayer keys belong only in protected server-side Worker secret bindings. The V6 relayer is a bounded forwarding secret: native MPP payments are temporarily held by that relayer until the matching escrow call, so keep its balance, allowance and exposure small.
+- V6 uses one fixed settlement signer; keep its key separate from the relayer and guardian. This is a trusted-operator model, not independent multi-signer protection.
+- Keep native MPP bounty charging enabled only with the reviewed V6 escrow, relayer address/key, `WM_AGENT_BOUNTY_MPP_*` values, and `MPP_SECRET_KEY` intentionally configured. The relayer must be funded and approved for the deployed V6 escrow.
+- The V6 escrow is the only active version for new paid bounty actions. Older contracts and recovery material are archived under [`contracts/stale/`](../contracts/stale/README.md); legacy Worker reads/recovery must not be used for new bounties.
 
 ## Release compatibility
 

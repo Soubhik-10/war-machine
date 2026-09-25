@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {IERC20} from "../src/WarMachineBountyEscrow.sol";
+import {IERC20} from "../src/IERC20.sol";
 
 contract MockTIP20 is IERC20 {
     string public constant name = "Mock pathUSD";

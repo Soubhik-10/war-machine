@@ -15,6 +15,7 @@ Every combat voice uses envelope gain -> shared master gain -> conservative comp
 | Cannon | square transient, low noise body, short decay |
 | Machinegun / gatling | dry square ticks plus filtered noise; accelerated burst aggregation |
 | Railgun | rising electrical saw charge and bright noise discharge |
+| Breach sabot | compact low thump with a sharp kinetic crack |
 | Laser | stable rising sine energy onset/release |
 | Plasma | rounded low sine launch with soft noise body |
 | Rocket / mortar | low exhaust noise; rocket is brighter than mortar |

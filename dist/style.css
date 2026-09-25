@@ -36,3 +36,16 @@
 .fee-disclosure{color:var(--text);overflow-wrap:anywhere}.fee-disclosure strong{color:var(--gold)}.card-fee{color:var(--gold)!important;font-size:12px!important;line-height:1.6}.portal-actions .skill-download{background:var(--gold);color:#161b1b;font-weight:700}.contract-economy>div{min-width:0}.contract-economy b{overflow-wrap:anywhere}
 /* Keep the result readable without making the live arena look abruptly relit. */
 .fight-overlay{background:rgb(8 15 18 / 14%);backdrop-filter:none}.match-card{background:#182326;box-shadow:0 12px 38px #0006}
+
+/* Short pre-fight cinematic: keep the countdown crisp while the arena recedes. */
+.arena-screen.countdown-active>canvas,.arena-screen.countdown-active>.fight-hud,.arena-screen.countdown-active>.arena-corner,.arena-screen.countdown-active>.minimap-wrap,.arena-screen.countdown-active>.damage-labels{filter:blur(5px);transform:scale(1.025);transition:filter .35s ease,transform .45s ease,opacity .35s ease;opacity:.58}
+.arena-screen.countdown-active>.fight-hud,.arena-screen.countdown-active>.arena-corner,.arena-screen.countdown-active>.minimap-wrap,.arena-screen.countdown-active>.damage-labels{opacity:.2}
+.fight-overlay.countdown-overlay{z-index:5;overflow:hidden;background:rgb(3 8 11 / 66%);backdrop-filter:none}
+.fight-overlay.countdown-overlay::before{content:"";position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 7vh 0 #05090b,inset 0 -7vh 0 #05090b;}
+.countdown-card{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:clamp(9px,2vh,18px);text-align:center;text-shadow:0 5px 28px #000b;animation:countdown-arrive .32s cubic-bezier(.2,.8,.2,1) both}
+.countdown-card small{color:#b9c8c1;font-size:clamp(10px,1.2vw,14px);letter-spacing:.24em}
+.countdown-number{font:900 clamp(88px,19vw,210px)/.82 Foundry,'Arial Narrow',Arial,sans-serif;letter-spacing:-.06em;color:var(--text);-webkit-text-stroke:1px #ffffff30;filter:drop-shadow(0 0 30px #e9b45c55)}
+.countdown-number[data-beat="FIGHT!"]{font-size:clamp(64px,13vw,142px);letter-spacing:.025em;color:var(--gold);text-shadow:0 0 38px #e9b45c88,0 5px 28px #000b}
+.countdown-card>span{font:12px 'Courier New',monospace;letter-spacing:.2em;color:#c4cbc5}
+@keyframes countdown-arrive{from{opacity:0;transform:scale(1.12) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@media(prefers-reduced-motion:reduce){.arena-screen.countdown-active>canvas,.arena-screen.countdown-active>.fight-hud,.arena-screen.countdown-active>.arena-corner,.arena-screen.countdown-active>.minimap-wrap,.arena-screen.countdown-active>.damage-labels{transition:none;transform:none}.countdown-card{animation:none}}

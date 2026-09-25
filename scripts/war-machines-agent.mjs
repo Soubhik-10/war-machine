@@ -22,7 +22,7 @@ import {
 import { validateEscrowPlan } from "./tempo-wallet-mcp.mjs";
 
 export const DEFAULT_AGENT_BASE_URL =
-  "https://war-machine.sssmpp.chatgpt.site";
+  "https://warmachine.live";
 export const TEMPO_CHAIN_ID = 4217;
 export const PATHUSD_DECIMALS = 6;
 export const TEMPO_USDC_TOKEN =

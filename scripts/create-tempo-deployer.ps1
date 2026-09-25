@@ -51,4 +51,4 @@ Write-Host ''
 Write-Host "Local encrypted deployer created: $keystore"
 Write-Host "Public address: $address"
 Write-Host "Fund this address with at least 0.05 pathUSD, then deploy with:"
-Write-Host ".\scripts\deploy-tempo-escrow.ps1 -DeployerAddress $address -KeystorePath '$keystore' -Broadcast"
+Write-Host ".\scripts\deploy-tempo-escrow-v6.ps1 -DeployerAddress $address -KeystorePath '$keystore' -Broadcast"
