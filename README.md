@@ -1,5 +1,9 @@
 # WAR MACHINES — THE FOUNDRY
 
+![Wraith rotating on its display platform](assets/readme-machine.gif)
+
+[🔊 Hear the vroom-vroom sound](assets/vroom-vroom.wav)
+
 A modular engineering battle game for desktop and mobile browsers. Build a machine, set its doctrine, scout a defender and design a counter. Battles run automatically. The workshop and ordinary machine links work on a static host; **public bounties use the bundled Worker/D1 backend and direct Tempo escrow**.
 
 No hosted AI calls, external fonts, asset CDNs or analytics. Every machine, texture and arena is generated locally. The public release uses direct Tempo mainnet escrow calls for bounties. V5 intentionally uses one trusted settlement signer for this small trial, and native MPP briefly forwards the payer's pathUSD through a bounded relayer before the matching escrow call.
