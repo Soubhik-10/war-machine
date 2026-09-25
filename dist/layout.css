@@ -446,7 +446,19 @@ body[data-page="home"] .portal-footer { border-top: 0; margin-top: 0; }
 /* Keep immersive playback independent of page sizing and stacking. */
 .combat-stage:fullscreen > .arena-screen,
 .combat-stage.theater > .arena-screen { flex: 1 1 auto; height: auto; min-height: 200px; }
-.combat-stage.theater { z-index: 70; }
+#combat-stage:fullscreen,
+#combat-stage.theater {
+  position: fixed; inset: 0; z-index: 1000; width: 100vw; height: 100dvh;
+  max-height: none; overflow: auto; border-radius: 0; background: var(--bg, #08121c);
+}
+#combat-stage.theater { display: flex; }
+#combat-stage.focus-view > .observation-deck,
+#combat-stage.focus-view > .battle-toolbar,
+#combat-stage.focus-view .minimap-wrap,
+#combat-stage.focus-view .arena-corner { display: none; }
+#combat-stage:fullscreen.focus-view > .arena-screen,
+#combat-stage.theater.focus-view > .arena-screen { min-height: 0; }
+#focus-view-btn[aria-pressed="true"] { border-color: #c79f5a; color: #f0cb7f; }
 @media (prefers-reduced-motion: reduce) {
   .home-paths button, .contract-card { transition: none; }
 }

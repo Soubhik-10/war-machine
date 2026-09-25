@@ -10,6 +10,8 @@ test("route parser preserves share links and identifies recoverable routes", () 
   assert.deepEqual(parseRoute("#not-a-route"), { name: "missing", value: "not-a-route" });
   assert.equal(serializeRoute({ name: "bounties" }), "#bounties");
   assert.equal(serializeRoute({ name: "friendly" }), "#friendly");
+  assert.deepEqual(parseRoute("#meta"), { name: "meta" });
+  assert.equal(serializeRoute({ name: "meta" }), "#meta");
   assert.equal(serializeRoute({ name: "friendlyChallenge", value: "abc-123" }), "#friendly=abc-123");
   assert.equal(serializeRoute({ name: "bounty", value: "abc-123" }), "#bounty=abc-123");
 });

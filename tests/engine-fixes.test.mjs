@@ -69,6 +69,50 @@ test('containment field keeps vehicles inside the contracting ring', () => {
   assert.ok(battle.events.some((event) => event.text.includes('forced a return')));
 });
 
+test('overlapping vehicles separate deterministically inside a tight containment ring', () => {
+  const battle = new Battle(PRESETS[0], PRESETS[0], 'foundry', 7654, { headless: true }),
+    [a, b] = battle.vehicles;
+  battle.time = 99;
+  battle.ring = 200;
+  a.radius = 170;
+  b.radius = 170;
+  a.x = b.x = 600;
+  a.y = b.y = 400;
+  for (let i = 0; i < 20; i += 1) {
+    battle.collideVehicles();
+    assert.ok([a.x, a.y, b.x, b.y].every(Number.isFinite));
+    assert.ok(Math.hypot(b.x - a.x, b.y - a.y) >= 89.99);
+  }
+});
+
+test('simulation catches invalid state and returns a safe, explicit stop instead of throwing', () => {
+  const battle = new Battle(PRESETS[0], PRESETS[1], 'foundry', 91, { headless: true });
+  battle.time = 3;
+  battle.vehicles[0].x = Number.NaN;
+  assert.doesNotThrow(() => battle.step());
+  assert.equal(battle.fault, true);
+  assert.equal(battle.result.fault, true);
+  assert.equal(battle.result.reason, 'Simulation safety stop');
+  assert.equal(battle.result.winner, -1);
+});
+
+test('run has a hard step ceiling even if a frame cannot advance', () => {
+  const battle = new Battle(PRESETS[0], PRESETS[1], 'foundry', 92, { headless: true });
+  battle.step = () => {};
+  const result = battle.run();
+  assert.equal(result.fault, true);
+  assert.equal(result.reason, 'Simulation safety stop');
+});
+
+test('identical machines complete a contracting-zone mirror fight without corrupting state', () => {
+  const battle = new Battle(PRESETS[0], PRESETS[0], 'foundry', 42, { headless: true }),
+    result = battle.run();
+  assert.equal(battle.fault, undefined);
+  assert.ok(result.time <= 100 + 1 / 60);
+  assert.ok(result.damage.every(Number.isFinite));
+  assert.ok(battle.vehicles.every((vehicle) => [vehicle.x, vehicle.y, vehicle.heat, vehicle.energy].every(Number.isFinite)));
+});
+
 test('headless evaluation preserves deterministic battle outcomes', () => {
   const rendered = new Battle(PRESETS[7], PRESETS[0], 'foundry', 913);
   const headless = new Battle(PRESETS[7], PRESETS[0], 'foundry', 913, { headless: true });

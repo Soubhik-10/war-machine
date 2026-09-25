@@ -13,7 +13,8 @@ import {
   runtimeConfig,
   validateEscrowAttestation,
 } from "../sites/worker/mainnet.mjs";
-import { packChallenge, PARTS, PRESETS, partSpec } from "../dist/data.mjs";
+import { packChallenge, DEFAULT_RULES, PARTS, PRESETS, partSpec } from "../dist/data.mjs";
+import { runBattleMetaReport, BATTLE_META_RETENTION_MS } from "../sites/worker/battle-meta.mjs";
 import {
   pathUsdToUnits,
   payoutQuote,
@@ -114,11 +115,62 @@ class D1Mock {
         "utf8",
       ),
     );
+    this.sqlite.exec(
+      await readFile(
+        new URL("../drizzle/0011_battle_meta.sql", import.meta.url),
+        "utf8",
+      ),
+    );
   }
   close() {
     this.sqlite.close();
   }
 }
+
+test("all free browser battles are replay-verified, retained for a week, and included in meta reports", async (t) => {
+  const DB = new D1Mock();
+  await DB.migrate();
+  t.after(() => DB.close());
+  const env = { DB, WM_META_REPORT_INTERVAL_HOURS: "12" }, ctx = { waitUntil() {} }, seed = 8124,
+    challenger = packChallenge(PRESETS[0], "foundry", seed, DEFAULT_RULES),
+    defender = packChallenge(PRESETS[1], "foundry", seed, DEFAULT_RULES),
+    clientBattleId = "123e4567-e89b-42d3-a456-426614174000",
+    payload = { clientBattleId, kind: "browser-practice", engineHash: (await import("../dist/release.mjs")).CLIENT_ENGINE_HASH, challenger, defender, seed, mode: DEFAULT_RULES.combat, swapSpawns: false, objective: "reactor", commands: [] };
+  const accepted = await call(env, "/api/meta/battles", "POST", payload);
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.body.stored, true);
+  assert.equal(accepted.body.engineHash, payload.engineHash);
+  const duplicate = await call(env, "/api/meta/battles", "POST", payload);
+  assert.equal(duplicate.status, 200);
+  assert.equal(duplicate.body.duplicate, true);
+  const stored = DB.sqlite.prepare("SELECT source,settled_at,battle_json FROM battle_meta_logs WHERE client_battle_id=?").get(clientBattleId);
+  assert.equal(stored.source, "browser-practice");
+  assert.ok(stored.settled_at);
+  const snapshot = JSON.parse(stored.battle_json);
+  assert.equal(snapshot.kind, "browser-practice");
+  assert.equal("participantName" in snapshot, false);
+  const mainnetAccepted = await call({ ...env, WM_MODE: "tempo-mainnet" }, "/api/meta/battles", "POST", {
+    ...payload,
+    clientBattleId: "123e4567-e89b-42d3-a456-426614174001",
+    kind: "browser-friendly",
+  });
+  assert.equal(mainnetAccepted.status, 200);
+  assert.equal(mainnetAccepted.body.stored, true);
+  const at = Date.now();
+  assert.equal((await runBattleMetaReport(DB, { intervalHours: 12, at })).matches, 2);
+  const reports = await call(env, "/api/meta/reports", "GET");
+  assert.equal(reports.status, 200);
+  assert.equal(reports.body.intervalHours, 12);
+  assert.equal(reports.body.reports[0].report.sample.matches, 2);
+  assert.deepEqual(reports.body.reports[0].report.groups.map((group) => group.source).sort(), ["browser-friendly", "browser-practice"]);
+  assert.equal(reports.body.reports[0].report.groups[0].engineHash, payload.engineHash);
+  assert.equal(BATTLE_META_RETENTION_MS, 7 * 24 * 60 * 60 * 1000);
+  const staleId = "stale-meta-test";
+  DB.sqlite.prepare("INSERT INTO battle_meta_logs (id,source,captured_at,settled_at,engine_hash,arena,seed,winner,duration,battle_json) VALUES (?,?,?,?,?,?,?,?,?,?)")
+    .run(staleId, "browser-practice", at - BATTLE_META_RETENTION_MS - 1, at - BATTLE_META_RETENTION_MS - 1, "old", "foundry", seed, -1, 1, "{}");
+  await DB.prepare("DELETE FROM battle_meta_logs WHERE captured_at<?").bind(at - BATTLE_META_RETENTION_MS).run();
+  assert.equal(DB.sqlite.prepare("SELECT id FROM battle_meta_logs WHERE id=?").get(staleId), undefined);
+});
 function seedHealthyPayment(DB, env) {
   DB.sqlite.prepare("INSERT INTO payment_kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
     .run(

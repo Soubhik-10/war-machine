@@ -2,15 +2,19 @@ import { sha256, stringToHex, parseAbi, recoverTypedDataAddress } from 'viem';
 import { Battle } from '../dist/engine.mjs';
 import { unpackChallenge as unpackCurrentChallenge } from '../dist/data.mjs';
 import { CLIENT_ENGINE_HASH } from '../dist/release.mjs';
+import { captureBattleMeta } from './meta-snapshot.mjs';
 import { Battle as LegacyBattle } from './engines/4b762a9b76ba071b27799113a0aafb5b8a04a7a02e21a445e60295f3c82ca365.mjs';
 import { unpackChallenge as unpackLegacyChallenge } from './engines/data.mjs';
 import { Battle as E62Battle } from './engines/e62d2be3ff92293eb4ebb0a2357a039833ebf3a782ddff2d71dee367de1c5cf1/engine.mjs';
 import { unpackChallenge as unpackE62Challenge } from './engines/e62d2be3ff92293eb4ebb0a2357a039833ebf3a782ddff2d71dee367de1c5cf1/data.mjs';
 import { Battle as C804Battle } from './engines/c804997d4145a830c246f10c358522c36ad9d820a86b313f74b5ced8a37340c6/engine.mjs';
+import { Battle as PreFaultGuardBattle } from './engines/ae85c8f193469ea3f4e6637fe07e2b21e13393acecac121ce6338c065c264e03/engine.mjs';
+import { unpackChallenge as unpackPreFaultGuardChallenge } from './engines/ae85c8f193469ea3f4e6637fe07e2b21e13393acecac121ce6338c065c264e03/data.mjs';
 
 export const LEGACY_ENGINE_HASH = '4b762a9b76ba071b27799113a0aafb5b8a04a7a02e21a445e60295f3c82ca365';
 export const E62_ENGINE_HASH = 'e62d2be3ff92293eb4ebb0a2357a039833ebf3a782ddff2d71dee367de1c5cf1';
 export const C804_ENGINE_HASH = 'c804997d4145a830c246f10c358522c36ad9d820a86b313f74b5ced8a37340c6';
+export const PRE_FAULT_GUARD_ENGINE_HASH = 'ae85c8f193469ea3f4e6637fe07e2b21e13393acecac121ce6338c065c264e03';
 // This advertised value covered both its original sources and later changed
 // deployed sources. A record's engineHash alone cannot select either safely.
 export const AMBIGUOUS_ENGINE_HASH = 'd65afc7a4429e15908beddef95eeba568d23a92d3870d5be844950c87e3b519c';
@@ -19,6 +23,7 @@ export const ENGINE_EVALUATORS = Object.freeze({
   [LEGACY_ENGINE_HASH]: Object.freeze({ Battle: LegacyBattle, unpackChallenge: unpackLegacyChallenge }),
   [E62_ENGINE_HASH]: Object.freeze({ Battle: E62Battle, unpackChallenge: unpackE62Challenge }),
   [C804_ENGINE_HASH]: Object.freeze({ Battle: C804Battle, unpackChallenge: unpackCurrentChallenge }),
+  [PRE_FAULT_GUARD_ENGINE_HASH]: Object.freeze({ Battle: PreFaultGuardBattle, unpackChallenge: unpackPreFaultGuardChallenge }),
 });
 
 export const CHAIN_ID = 4217;
@@ -57,7 +62,7 @@ export function evaluate(record, time = Date.now(), expectedEscrow = ESCROW) {
   ensure(time < record.deadline * 1000, 'EXPIRED');
   const evaluator = ENGINE_EVALUATORS[record.engineHash];
   const defender = evaluator.unpackChallenge(record.defender);
-  let result;
+  let result, meta = null;
   if (record.reason === 'counter-build-timeout') {
     ensure(record.challenger === null && record.buildDeadline <= time && record.committedAt >= record.buildDeadline);
     result = { winner: 1, reason: record.reason, time: 0, seed: record.seed, integrity: [0,1], damage: [0,0] };
@@ -66,12 +71,21 @@ export function evaluate(record, time = Date.now(), expectedEscrow = ESCROW) {
     ensure(record.challenger.a === record.defender.a && canonical(record.challenger.q) === canonical(record.defender.q));
     ensure((record.challenger.o || 'reactor') === (record.defender.o || 'reactor'), 'OBJECTIVE_MISMATCH');
     const challenger = evaluator.unpackChallenge(record.challenger);
-    result = { ...new evaluator.Battle(challenger.machine, defender.machine, defender.arena, record.seed, {
+    const battle = new evaluator.Battle(challenger.machine, defender.machine, defender.arena, record.seed, {
       mode:'auto',
       swapSpawns:!!(record.seed & 1),
       objective:defender.objective||challenger.objective||'reactor',
       headless:true,
-    }).run(), seed: record.seed };
+    });
+    result = { ...battle.run(), seed: record.seed };
+    ensure(!battle.fault, 'SIMULATION_FAULT');
+    if (record.escrowVersion === '6') meta = captureBattleMeta({
+      record: { ...record, mode: 'auto', swapSpawns: !!(record.seed & 1) },
+      battle,
+      result,
+      unpackChallenge: evaluator.unpackChallenge,
+      kind: 'server-paid',
+    });
   }
   const outcome = result.winner === 0 ? 0 : 1;
   const fee = outcome === 0 ? BigInt(record.reward) * 250n / 10000n : 0n;
@@ -93,7 +107,7 @@ export function evaluate(record, time = Date.now(), expectedEscrow = ESCROW) {
       : {version:'war-machines-settlement-v2',engineHash:record.engineHash,bountyId:record.bountyId,attemptNonce:Number(record.attemptNonce),outcome:1,challenger:null,defender:record.defender,reason:'counter-build-timeout',buildDeadline:record.buildDeadline,seed:record.seed};
     payload.resultHash=sha256(stringToHex(JSON.stringify(commitment)));
   }
-  return { payload, amounts, result: {...result, outcome: result.winner === 0 ? 'win' : result.winner === 1 ? 'loss' : 'draw'} };
+  return { payload, amounts, result: {...result, outcome: result.winner === 0 ? 'win' : result.winner === 1 ? 'loss' : 'draw'}, meta };
 }
 export function verifyPayload(record, payload, time, expectedEscrow = ESCROW) {
   const verified = evaluate(record, time, expectedEscrow);

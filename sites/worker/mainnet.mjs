@@ -61,6 +61,8 @@ import { repairMislabeledBounties } from "./payment-migrations.mjs";
 import { mainnetOpenApi } from "./openapi.mjs";
 import { handleMcpRequest } from "../../server/mcp.mjs";
 import { handleFriendlyChallenges } from "../../server/friendly-challenges.mjs";
+import { captureBattleMeta } from "../../settlement/meta-snapshot.mjs";
+import { insertBattleMetaLog, makeBrowserBattleMeta, metaReportIntervalHours, readBattleMetaReports, runBattleMetaReport } from "./battle-meta.mjs";
 
 const now = () => Date.now(),
   COMPLETED_BOUNTY_BOARD_MS = 10 * 60 * 1000,
@@ -2478,13 +2480,24 @@ async function practice(db, body, viewer) {
   integer(seed, 0, 4294967295, "Seed");
   const a = unpackChallenge(challenger),
     b = unpackChallenge(defender),
-    result = {
-      ...new Battle(a.machine, b.machine, b.arena, seed, {
+    battle = new Battle(a.machine, b.machine, b.arena, seed, {
         mode: "auto",
         swapSpawns: !!(seed & 1),
-      }).run(),
-      seed,
-    };
+        headless: true,
+      }),
+    result = { ...battle.run(), seed },
+    snapshot = captureBattleMeta({
+      record: { engineHash: CLIENT_ENGINE_HASH, challenger, defender, seed, mode: "auto", swapSpawns: !!(seed & 1), objective: b.objective || a.objective || "reactor" },
+      battle,
+      result,
+      unpackChallenge,
+      kind: "server-practice",
+    });
+  try {
+    await insertBattleMetaLog(db, { capturedAt: now(), settledAt: now(), snapshot });
+  } catch (error) {
+    console.error("Practice battle meta log could not be saved.", error);
+  }
   return {
     kind: "practice",
     official: false,
@@ -5356,6 +5369,15 @@ async function confirmSettlement(db, attemptId, hash, config) {
         attempt.id,
       ),
   ]);
+  if (attemptStatus === "settled") {
+    try {
+      await db.prepare(
+        "UPDATE battle_meta_logs SET settled_at=? WHERE attempt_id=? AND source='server-paid' AND settled_at IS NULL",
+      ).bind(updated, attempt.id).run();
+    } catch (error) {
+      console.error("Paid battle meta completion could not be marked.", error);
+    }
+  }
   return await attemptView(db, attempt.id, attempt.account);
 }
 
@@ -5437,13 +5459,17 @@ async function materializeV3Result(db, attemptId, time = now(), config = null) {
     .bind(attemptId)
     .first();
   check(attempt?.match_record, "Automatic settlement record is missing.", 409);
-  if (attempt.settlement_payload) return;
   const record = parse(attempt.match_record);
+  if (attempt.settlement_payload) {
+    await ensurePaidBattleMetaLog(db, attempt, record, time, config);
+    return;
+  }
   const verified = evaluate(
     record,
     Math.min(time, record.deadline * 1000 - 1),
     config?.escrowAddress || record.escrow,
   );
+  await savePaidBattleMetaLog(db, attempt.id, verified.meta, time);
   const payload = { ...verified.payload, signatures: [] };
   await db
     .prepare(
@@ -5456,6 +5482,32 @@ async function materializeV3Result(db, attemptId, time = now(), config = null) {
       attemptId,
     )
     .run();
+}
+
+async function savePaidBattleMetaLog(db, attemptId, snapshot, time) {
+  if (!snapshot) return;
+  try {
+    await insertBattleMetaLog(db, { attemptId, capturedAt: time, snapshot });
+  } catch (error) {
+    // Analytics is deliberately outside the payment/settlement transaction.
+    console.error("Paid battle meta log could not be saved.", error);
+  }
+}
+
+async function ensurePaidBattleMetaLog(db, attempt, record, time, config) {
+  if (record?.escrowVersion !== "6" || record?.reason !== "battle") return;
+  try {
+    const existing = await db.prepare("SELECT 1 AS found FROM battle_meta_logs WHERE attempt_id=?").bind(attempt.id).first();
+    if (existing) return;
+  } catch {
+    return;
+  }
+  try {
+    const verified = evaluate(record, Math.min(time, record.deadline * 1000 - 1), config?.escrowAddress || record.escrow);
+    await savePaidBattleMetaLog(db, attempt.id, verified.meta, time);
+  } catch (error) {
+    console.error("Paid battle meta recovery could not be reproduced.", error);
+  }
 }
 
 function v3SettlementAccount(env, config) {
@@ -6722,6 +6774,32 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       response,
     });
     if (friendly) return friendly;
+    if (path === "/api/meta/reports" && method === "GET") {
+      const intervalHours = metaReportIntervalHours(env.WM_META_REPORT_INTERVAL_HOURS),
+        reports = await readBattleMetaReports(db, { intervalHours, at: now() });
+      if (ctx?.waitUntil)
+        ctx.waitUntil(runBattleMetaReport(db, { intervalHours, at: now() }).catch((error) => {
+          console.error("On-demand battle meta report failed.", error);
+        }));
+      return response(reports);
+    }
+    if (path === "/api/meta/battles" && method === "POST") {
+      fields(body, ["clientBattleId", "kind", "engineHash", "challenger", "defender", "seed", "mode", "swapSpawns", "objective", "commands"]);
+      let verified;
+      try {
+        verified = makeBrowserBattleMeta(body, { canonicalBlueprint, unpackChallenge, engineHash: CLIENT_ENGINE_HASH });
+      } catch (error) {
+        error.status ||= 400;
+        throw error;
+      }
+      const saved = await insertBattleMetaLog(db, {
+        clientBattleId: verified.clientBattleId,
+        capturedAt: now(),
+        settledAt: now(),
+        snapshot: verified.snapshot,
+      });
+      return response({ accepted: true, stored: saved.stored, duplicate: saved.duplicate, engineHash: verified.snapshot.engineHash });
+    }
     if (path === "/api/blueprints/validate" && method === "POST")
       return response(await inspection(db, body, auth?.account));
     if (path === "/api/practice" && method === "POST")

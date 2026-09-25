@@ -54,6 +54,7 @@ for (const required of [
   "dist/.openai/drizzle/0008_escrow_policy_identity.sql",
   "dist/.openai/drizzle/0009_board_pagination.sql",
   "dist/.openai/drizzle/0010_friendly_challenges.sql",
+  "dist/.openai/drizzle/0011_battle_meta.sql",
 ])
   if (!stdout.split(/\r?\n/).includes(required))
     throw Error(`Archive is missing ${required}.`);

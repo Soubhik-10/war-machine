@@ -7,7 +7,7 @@ import { join, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { assertSimulationSourceGraph, hashSimulationSources } from '../server/simulation-hash.mjs';
 import { verifyRelease } from '../scripts/verify-release.mjs';
-import { AMBIGUOUS_ENGINE_HASH, C804_ENGINE_HASH, E62_ENGINE_HASH, ENGINE_EVALUATORS, ESCROW, LEGACY_ENGINE_HASH, evaluate } from '../settlement/protocol.mjs';
+import { AMBIGUOUS_ENGINE_HASH, C804_ENGINE_HASH, E62_ENGINE_HASH, ENGINE_EVALUATORS, ESCROW, LEGACY_ENGINE_HASH, PRE_FAULT_GUARD_ENGINE_HASH, evaluate } from '../settlement/protocol.mjs';
 import { Battle as CurrentBattle } from '../dist/engine.mjs';
 import { packChallenge as pack4, PRESETS as presets4 } from '../settlement/engines/data.mjs';
 import { packChallenge as packE62, PRESETS as presetsE62 } from '../settlement/engines/e62d2be3ff92293eb4ebb0a2357a039833ebf3a782ddff2d71dee367de1c5cf1/data.mjs';
@@ -53,12 +53,13 @@ test('verification reads only and rejects a stale or malformed stamp', () => {
 });
 
 test('historical snapshots retain their exact engine and catalog pairs', () => {
-  for (const hash of [C804_ENGINE_HASH, E62_ENGINE_HASH, AMBIGUOUS_ENGINE_HASH, 'f2779776cd3a4bf33d688b8384816c527c426654ef640f256353e0dbe37a0d45']) {
+  for (const hash of [C804_ENGINE_HASH, E62_ENGINE_HASH, AMBIGUOUS_ENGINE_HASH, PRE_FAULT_GUARD_ENGINE_HASH, 'f2779776cd3a4bf33d688b8384816c527c426654ef640f256353e0dbe37a0d45']) {
     const base = `settlement/engines/${hash}/`;
     assert.equal(pairHash(source(base + 'engine.mjs'), source(base + 'data.mjs')), hash);
     assert.match(source(base + 'engine.mjs'), /from ['"]\.\/data\.mjs['"]/);
   }
   assert.equal(pairHash(source(`settlement/engines/${LEGACY_ENGINE_HASH}.mjs`), source('settlement/engines/data.mjs')), LEGACY_ENGINE_HASH);
+  assert.ok(ENGINE_EVALUATORS[PRE_FAULT_GUARD_ENGINE_HASH], 'keep the previously deployed evaluator available for in-flight V6 attempts');
 });
 
 const fixture = (hash, pack, presets) => ({

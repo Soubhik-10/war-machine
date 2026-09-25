@@ -1,6 +1,6 @@
 // The hash is the shareable address of a screen. UI-only state (filters,
 // drafts, focus and scroll) deliberately stays out of it.
-const SIMPLE = new Set(["home", "workshop", "arena", "rules", "agents", "bounties", "friendly"]);
+const SIMPLE = new Set(["home", "workshop", "arena", "rules", "agents", "bounties", "friendly", "meta"]);
 
 export function parseRoute(hash = "") {
   const value = String(hash).replace(/^#/, "");

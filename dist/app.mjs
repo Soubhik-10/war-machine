@@ -37,6 +37,7 @@ import { createPortal } from "./portal.mjs";
 import { createBountyUI } from "./bounties.mjs";
 import { createFriendlyChallengesUI } from "./friendly.mjs";
 import { createHashRouter } from "./routes.mjs";
+import { CLIENT_ENGINE_HASH } from "./release.mjs";
 import { TERRAIN_INFO } from "./data.mjs";
 import {
   Battle,
@@ -113,6 +114,8 @@ function machineMetricText(s, name = machine.name || "Machine") {
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let graphicsProfile = getGraphicsProfile();
 let lastArenaRender = 0;
+let theaterFallback = false;
+let battleFocusView = false;
 let machine = clone(PRESETS[0]),
   selected = "cannon",
   category = "Weapons",
@@ -1514,6 +1517,8 @@ function loadChallenge(c) {
   );
 }
 function arenaView() {
+  theaterFallback = false;
+  battleFocusView = false;
   if (!routeRestoring && !challenge) return go({ name: "arena" });
   cleanupView();
   document.body.classList.toggle("official-replay", !!officialReceipt);
@@ -1535,7 +1540,7 @@ function arenaView() {
  <div id="damage-labels" class="damage-labels" aria-hidden="true"></div><div class="fight-hud"><div class="fighter-hud"><strong>${esc(machine.name)}</strong><div class="meter"><i id="your-hp" style="width:100%"></i></div><small id="your-systems">YOUR MACHINE · ${stats(machine).cost} ¢</small><div class="resource-meters"><span title="Heat"><i id="your-heat"></i></span><span title="Energy"><i id="your-energy"></i></span></div></div><div class="timer"><span id="fight-time">1:40</span><small id="fight-state">STANDBY</small></div><div class="fighter-hud"><strong>${esc(enemy.name)}</strong><div class="meter"><i id="enemy-hp" style="width:100%"></i></div><small id="enemy-systems">OPPONENT MACHINE · ${stats(enemy).cost} ¢</small><div class="resource-meters"><span title="Heat"><i id="enemy-heat"></i></span><span title="Energy"><i id="enemy-energy"></i></span></div></div></div>
  <div class="arena-corner"><span id="terrain-label">ROAD</span><span id="reactor-label">REACTOR NEUTRAL</span></div><div class="minimap-wrap"><canvas id="minimap" width="240" height="160" aria-label="Arena overview. Machine positions and objectives."></canvas><small>TACTICAL MAP</small></div>
  <div class="fight-overlay briefing-overlay" id="fight-overlay"><div class="match-card"><small>${challenge ? "FRIEND CHALLENGE" : meta.rank + " PRACTICE MATCH"}</small><h2>${esc(enemy.name)}</h2><p>${esc(challenge ? "Build your machine to the same rules, then watch both machines fight." : meta.hint)}</p><div class="engineering-contract"><span class="auto-indicator"></span><div><strong>MACHINES FIGHT AUTOMATICALLY</strong><small>They use the movement, target and damage settings from the workshop.</small></div></div><button class="primary" id="start-battle">Start simulation ↗</button><p class="mode-note">UP TO 100 SECONDS · SAME SEED, SAME RESULT</p></div></div>
- </div><div class="arena-camera-bar"><div class="camera-follow"><span>CAMERA</span><select id="camera-follow" aria-label="Camera follow"><option value="both">Frame both</option><option value="you">Follow you</option><option value="rival">Follow opponent</option><option value="free">Free camera</option></select></div><div class="group"><button data-fight-camera="left" aria-label="Orbit left">↶</button><button data-fight-camera="right" aria-label="Orbit right">↷</button><button data-fight-camera="fit">⌖ Fit</button><button data-fight-camera="in" aria-label="Zoom in">+</button><button data-fight-camera="out" aria-label="Zoom out">−</button><button id="theater-btn" title="Fullscreen arena">⛶</button></div></div>
+ </div><div class="arena-camera-bar"><div class="camera-follow"><span>CAMERA</span><select id="camera-follow" aria-label="Camera follow"><option value="both">Frame both</option><option value="you">Follow you</option><option value="rival">Follow opponent</option><option value="free">Free camera</option></select></div><div class="group"><button data-fight-camera="left" aria-label="Orbit left">↶</button><button data-fight-camera="right" aria-label="Orbit right">↷</button><button data-fight-camera="fit">⌖ Fit</button><button data-fight-camera="in" aria-label="Zoom in">+</button><button data-fight-camera="out" aria-label="Zoom out">−</button><button id="focus-view-btn" type="button" aria-pressed="false" aria-label="Hide bottom battle controls and tactical map" title="Hide bottom controls and tactical map">Hide HUD</button><button id="theater-btn" type="button" title="Fullscreen arena" aria-label="Enter fullscreen arena">⛶</button></div></div>
  <div class="observation-deck"><div class="observation-heading"><span class="auto-indicator"></span><strong id="observation-status">SYSTEM STATUS</strong><span id="observation-hint">Behavior locked when the match starts</span></div><div class="weapons-monitor" id="weapons-monitor"></div><div class="system-readout" id="system-readout"></div></div>
  <div class="panel battle-toolbar"><div class="group"><button id="pause-btn" disabled>Ⅱ Pause</button><button id="replay-btn" disabled>↻ Replay</button><button id="inspect-btn">◎ Damage</button></div><div class="group"><span class="mode-note">SPEED</span>${[0.5, 1, 2, 4].map((s) => `<button data-speed="${s}" class="${speed === s ? "active" : ""}">${s}×</button>`).join("")}</div></div></section>
  <div class="combat-log"><section class="panel"><h3>Combat log <small id="seed-label">SEED ${seed}</small></h3><div class="log-lines" id="combat-log">Ready for deployment.</div></section><section class="panel arena-legend"><h3>Arena rules</h3><p><b>Central ring:</b> hold for 3s to gain +8 energy/sec while present. <b>Green caches:</b> restore 100 HP and 30 energy; respawn after 25s.</p><p>Destroy cover to open a firing lane. At 55s the containment field closes.</p></section></div></div></div><div class="battle-bottom"><button id="tune-btn">← Back to workshop</button><button id="import-btn">Load a challenge</button></div><div class="footer-note"><span>SPACE PAUSE · TAP PART TO INSPECT</span><span>DRAG ORBIT · RIGHT DRAG PAN · SCROLL / PINCH ZOOM</span></div>`;
@@ -1595,9 +1600,15 @@ function bindArena() {
     save();
     arenaView();
   };
-  $("#start-battle").onclick = () => startBattle(false);
+  $("#start-battle").onclick = () => {
+    enterArenaTheater();
+    startBattle(false);
+  };
   $("#pause-btn").onclick = togglePause;
-  $("#replay-btn").onclick = () => startBattle(true);
+  $("#replay-btn").onclick = () => {
+    enterArenaTheater();
+    startBattle(true);
+  };
   $("#inspect-btn").onclick = () => {
     inspectMode = !inspectMode;
     $("#inspect-btn").classList.toggle("active", inspectMode);
@@ -1641,17 +1652,9 @@ function bindArena() {
         drawArena();
       }),
   );
-  $("#theater-btn").onclick = async () => {
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else if ($("#combat-stage").requestFullscreen)
-        await $("#combat-stage").requestFullscreen();
-      else $("#combat-stage").classList.toggle("theater");
-    } catch {
-      $("#combat-stage").classList.toggle("theater");
-    }
-    drawArena();
-  };
+  $("#focus-view-btn").onclick = () => setBattleFocusView(!battleFocusView);
+  $("#theater-btn").onclick = toggleArenaTheater;
+  syncArenaTheater();
   bindCamera($("#arena-canvas"), fightCamera, {
     change: () => {
       $("#camera-follow").value = fightCamera.follow;
@@ -1659,6 +1662,71 @@ function bindArena() {
     },
     tap: arenaTap,
   });
+}
+
+function syncArenaTheater() {
+  const stage = $("#combat-stage");
+  if (!stage) return;
+  const active = document.fullscreenElement === stage || theaterFallback;
+  stage.classList.toggle("theater", active);
+  const button = $("#theater-btn");
+  if (button) {
+    button.textContent = active ? "↙" : "⛶";
+    button.title = active ? "Exit fullscreen arena" : "Fullscreen arena";
+    button.setAttribute("aria-label", button.title);
+    button.setAttribute("aria-pressed", String(active));
+  }
+}
+
+function enterArenaTheater() {
+  const stage = $("#combat-stage");
+  if (!stage) return;
+  theaterFallback = true;
+  syncArenaTheater();
+  if (typeof stage.requestFullscreen !== "function") return;
+  try {
+    const request = stage.requestFullscreen();
+    Promise.resolve(request).then(() => {
+      theaterFallback = false;
+      syncArenaTheater();
+      drawArena();
+    }).catch(() => {
+      theaterFallback = true;
+      syncArenaTheater();
+      drawArena();
+    });
+  } catch {
+    theaterFallback = true;
+    syncArenaTheater();
+  }
+}
+
+async function toggleArenaTheater() {
+  const stage = $("#combat-stage");
+  if (!stage) return;
+  if (document.fullscreenElement === stage) {
+    try { await document.exitFullscreen(); } catch { /* Keep the current theater view. */ }
+    return;
+  }
+  if (theaterFallback) {
+    theaterFallback = false;
+    syncArenaTheater();
+    drawArena();
+    return;
+  }
+  enterArenaTheater();
+}
+
+function setBattleFocusView(enabled) {
+  battleFocusView = !!enabled;
+  const stage = $("#combat-stage"), button = $("#focus-view-btn");
+  if (!stage || !button) return;
+  stage.classList.toggle("focus-view", battleFocusView);
+  button.textContent = battleFocusView ? "Show HUD" : "Hide HUD";
+  button.title = battleFocusView ? "Show bottom controls and tactical map" : "Hide bottom controls and tactical map";
+  button.setAttribute("aria-label", button.title);
+  button.setAttribute("aria-pressed", String(battleFocusView));
+  drawArena();
 }
 
 function arenaTap(e) {
@@ -1818,37 +1886,56 @@ function startArenaIdle() {
 let hudTime = 0;
 function frame(t) {
   if (!running || view !== "arena") return;
-  if (document.hidden) { audioDirector.clear({ stale: true }); lastFrame = t; raf = requestAnimationFrame(frame); return; }
-  if (!lastFrame) lastFrame = t;
-  const delta = Math.min((t - lastFrame) / 1000, 0.12);
-  lastFrame = t;
-  if (!paused) {
-    accumulator += delta * speed;
-    let steps = 0;
-    const stepStart = performance.now();
-    while (accumulator >= DT && steps++ < 32 && !battle.result && (steps === 1 || performance.now() - stepStart < 6)) {
-      battle.step();
-      accumulator -= DT;
+  try {
+    if (document.hidden) {
+      audioDirector.clear({ stale: true });
+      lastFrame = t;
+      raf = requestAnimationFrame(frame);
+      return;
+    }
+    if (!lastFrame) lastFrame = t;
+    const delta = Math.min((t - lastFrame) / 1000, 0.12);
+    lastFrame = t;
+    if (!paused) {
+      accumulator += delta * speed;
+      let steps = 0;
+      const stepStart = performance.now();
+      while (accumulator >= DT && steps++ < 32 && !battle.result && (steps === 1 || performance.now() - stepStart < 6)) {
+        battle.step();
+        accumulator -= DT;
+      }
+    }
+    if (battle.result) {
+      if (!battle.fault) drawArena();
+      finishBattle();
+      return;
+    }
+    syncBattleSound();
+    if (!lastArenaRender || t - lastArenaRender >= 1000 / graphicsProfile.renderHz) {
+      drawArena();
+      lastArenaRender = t;
+    }
+    if (t - hudTime > 90) {
+      updateHUD();
+      hudTime = t;
+    }
+    raf = requestAnimationFrame(frame);
+  } catch {
+    battle?.stopForSimulationFault?.();
+    running = false;
+    paused = false;
+    cancelAnimationFrame(raf);
+    try {
+      if (battle?.result || battle?.fault) finishBattle();
+    } catch {
+      const overlay = $("#fight-overlay");
+      if (overlay) {
+        overlay.hidden = false;
+        overlay.innerHTML = `<div class="match-card"><small>${battle?.fault ? "SIMULATION SAFETY STOP" : "RESULT DISPLAY RECOVERY"}</small><h2>${battle?.fault ? "SIMULATION STOPPED." : "BATTLE ENDED."}</h2><p>${battle?.fault ? "The match stopped safely and no result was recorded." : "The simulation result is available; the display recovered safely."}</p><button class="primary" id="sim-fault-workshop">Refit machine</button></div>`;
+        $("#sim-fault-workshop").onclick = workshop;
+      }
     }
   }
-  syncBattleSound();
-  if (
-    battle.result ||
-    !lastArenaRender ||
-    t - lastArenaRender >= 1000 / graphicsProfile.renderHz
-  ) {
-    drawArena();
-    lastArenaRender = t;
-  }
-  if (t - hudTime > 90) {
-    updateHUD();
-    hudTime = t;
-  }
-  if (battle.result) {
-    finishBattle();
-    return;
-  }
-  raf = requestAnimationFrame(frame);
 }
 function updateHUD() {
   if (!battle || !$("#your-hp")) return;
@@ -2151,6 +2238,28 @@ function finishBattle() {
   running = false;
   paused = false;
   if (!battle.replaying) matchSource.commands = clone(battle.commands);
+  if (!battle.replaying && !officialReceipt && !battle.fault && matchSource) {
+    const kind = bountyContext
+      ? bountyContext.friendly === true
+        ? "browser-friendly"
+        : "browser-challenge"
+      : "browser-practice";
+    try {
+      const challenger = packChallenge(matchSource.a, matchSource.arena, matchSource.seed, matchSource.rules, matchSource.objective),
+        defender = packChallenge(matchSource.b, matchSource.arena, matchSource.seed, matchSource.rules, matchSource.objective);
+      fetch("/api/meta/battles", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        keepalive: true,
+        body: JSON.stringify({
+          clientBattleId: crypto.randomUUID(), kind, engineHash: CLIENT_ENGINE_HASH,
+          challenger, defender, seed: matchSource.seed, mode: matchSource.mode,
+          swapSpawns: !!matchSource.swapSpawns, objective: matchSource.objective || "reactor",
+          commands: matchSource.commands || [],
+        }),
+      }).catch(() => {});
+    } catch {}
+  }
   updateHUD();
   $("#pause-btn").disabled = true;
   $("#replay-btn").disabled = false;
@@ -2170,11 +2279,13 @@ function finishBattle() {
       localStorage.setItem("wm-wins-v2", JSON.stringify(wins));
     } catch {}
   }
-  const advice = battleAdvice(battle).notes[0];
+  const advice = battle.fault
+    ? "The simulation detected an invalid state and stopped safely. No result was recorded."
+    : battleAdvice(battle).notes[0];
   const overlay = $("#fight-overlay");
   overlay.classList.remove("briefing-overlay");
   overlay.hidden = false;
-  overlay.innerHTML = `<div class="match-card"><small>${officialReceipt ? "PAID REPLAY · " : ""}${esc(r.reason.toUpperCase())}</small><h2 style="color:${won ? "var(--gold)" : draw ? "var(--text)" : "var(--red)"}">${won ? "VICTORY." : draw ? "STALEMATE." : "OUTENGINEERED."}</h2><div class="result-grid"><div><strong>${r.time.toFixed(1)}s</strong><small>BATTLE TIME</small></div><div><strong>${r.damage[0]}</strong><small>DAMAGE</small></div><div><strong>${v.intercepts}</strong><small>INTERCEPTIONS</small></div></div><p>${esc(advice)}</p><p class="hint">Deterministic trial · ${v.pickups} caches · ${v.detached} part${v.detached === 1 ? "" : "s"} collapsed</p><div class="modal-footer"><button id="battle-report-btn">Battle report</button><button id="watch-replay">↻ Exact replay</button><button class="primary" id="result-tune">Refit machine</button></div><div class="result-extras"><button id="fight-again">${officialReceipt ? "Continue to result" : "Fight again"}</button><button id="inspect-wreck">Inspect wreckage</button></div></div>`;
+  overlay.innerHTML = `<div class="match-card"><small>${officialReceipt ? "PAID REPLAY · " : ""}${esc(r.reason.toUpperCase())}</small><h2 style="color:${won ? "var(--gold)" : draw ? "var(--text)" : "var(--red)"}">${battle.fault ? "SIMULATION STOPPED." : won ? "VICTORY." : draw ? "STALEMATE." : "OUTENGINEERED."}</h2><div class="result-grid"><div><strong>${r.time.toFixed(1)}s</strong><small>BATTLE TIME</small></div><div><strong>${r.damage[0]}</strong><small>DAMAGE</small></div><div><strong>${v.intercepts}</strong><small>INTERCEPTIONS</small></div></div><p>${esc(advice)}</p><p class="hint">Deterministic trial · ${v.pickups} caches · ${v.detached} part${v.detached === 1 ? "" : "s"} collapsed</p><div class="modal-footer"><button id="battle-report-btn">Battle report</button><button id="watch-replay">↻ Exact replay</button><button class="primary" id="result-tune">Refit machine</button></div><div class="result-extras"><button id="fight-again">${officialReceipt ? "Continue to result" : "Fight again"}</button><button id="inspect-wreck">Inspect wreckage</button></div></div>`;
   $("#battle-report-btn").onclick = showBattleReportEnhanced;
   $("#watch-replay").onclick = () => startBattle(true);
   $("#result-tune").onclick = workshop;
@@ -2196,7 +2307,13 @@ function finishBattle() {
     $("#inspect-btn").classList.add("active");
     drawArena();
   };
-  $("#fight-state").textContent = won ? "VICTORY" : draw ? "DRAW" : "DEFEAT";
+  if (battle.fault) {
+    for (const id of ["battle-report-btn", "watch-replay", "inspect-wreck"]) {
+      const button = $("#" + id);
+      if (button) button.disabled = true;
+    }
+  }
+  $("#fight-state").textContent = battle.fault ? "SIM STOPPED" : won ? "VICTORY" : draw ? "DRAW" : "DEFEAT";
   startArenaIdle();
 }
 function renderEngineering() {
@@ -3091,7 +3208,9 @@ $$("[data-view]").forEach(
           ? friendlyUI.open()
         : b.dataset.view === "bounties"
           ? bountyUI.open()
-          : b.dataset.view === "rules"
+        : b.dataset.view === "meta"
+          ? metaView()
+        : b.dataset.view === "rules"
             ? rulesView()
           : b.dataset.view === "agents"
             ? portal.agents()
@@ -3107,6 +3226,62 @@ $("#manual-btn").onclick = () => {
   if (running && !paused) togglePause();
   manual();
 };
+function metaView() {
+  if (!routeRestoring) return go({ name: "meta" });
+  restoreReplay();
+  cleanupView();
+  view = "meta";
+  setNav();
+  app.innerHTML = `<div class="page-heading meta-heading"><div><span class="eyebrow">BATTLE TELEMETRY / BALANCE</span><h1>THE META.</h1><p>Verified outcomes and build telemetry across paid, friendly, and practice matches.</p></div><div class="heading-actions"><select id="meta-history" aria-label="Choose a report" hidden></select><button id="meta-refresh">Refresh report</button></div></div><section class="panel meta-intro"><div><strong>All completed battles count.</strong><span>Free matches are replayed on the server; build layouts and combat telemetry are stored without player display names or wallet addresses. Raw match logs are kept for 7 days. Reports are generated every <b id="meta-interval">24 hours</b> by default; the latest 365 aggregate reports are retained. Results are split by source, engine hash, arena, and rules.</span></div><small id="meta-updated" role="status" aria-live="polite">Loading the latest report…</small></section><div id="meta-content" class="meta-content" aria-live="polite"></div>`;
+  const content = $("#meta-content"), status = $("#meta-updated"), refresh = $("#meta-refresh"), history = $("#meta-history");
+  let selectedReportIndex = 0;
+  const load = async () => {
+    refresh.disabled = true;
+    status.textContent = "Loading the latest report…";
+    try {
+      const response = await fetch("/api/meta/reports", { headers: { accept: "application/json" }, cache: "no-store" });
+      if (!response.ok) throw Error("The report service is unavailable.");
+      const data = await response.json();
+      if (!content.isConnected) return;
+      $("#meta-interval").textContent = `${data.intervalHours || 24} hour${Number(data.intervalHours) === 1 ? "" : "s"}`;
+      const reports = Array.isArray(data.reports) ? data.reports : [];
+      if (data.available === false) throw Error("Battle reports are temporarily unavailable.");
+      if (!reports.length) {
+        status.textContent = "No completed battles have been recorded yet.";
+        content.innerHTML = `<section class="panel meta-empty"><strong>Your first battle starts the dataset.</strong><p>Finish any practice, friendly, or paid match, then refresh this page. Each free match is replayed on the server before it is included.</p><button class="primary" id="meta-play">Build a machine and fight</button></section>`;
+        $("#meta-play").onclick = workshop;
+        return;
+      }
+      selectedReportIndex = Math.min(selectedReportIndex, reports.length - 1);
+      history.hidden = reports.length < 2;
+      history.innerHTML = reports.map((item, index) => `<option value="${index}">${new Date(item.generatedAt).toLocaleString()} · ${Number(item.battleCount) || 0} matches</option>`).join("");
+      history.value = String(selectedReportIndex);
+      history.onchange = () => { selectedReportIndex = Number(history.value) || 0; load(); };
+      const latest = reports[selectedReportIndex], report = latest.report, sample = report.sample || {}, groups = Array.isArray(report.groups) ? report.groups : [];
+      status.textContent = `Generated ${new Date(latest.generatedAt).toLocaleString()} · ${reports.length} report${reports.length === 1 ? "" : "s"}`;
+      const sourceLabel = (source) => ({ "server-paid": "Paid V6", "server-practice": "Practice", "browser-practice": "Practice", "browser-friendly": "Friendly", "browser-challenge": "Challenge" }[source] || source || "Unknown");
+      const groupMarkup = groups.map((group) => {
+        const outcomes = group.outcomes || {}, pressure = group.resourcePressure || {}, weapons = Array.isArray(group.weapons) ? group.weapons : [],
+          weaponRowsMarkup = weapons.length ? weapons.map((weapon) => `<tr><th>${esc(weapon.weapon)}</th><td>${weapon.builds}</td><td>${weapon.pickShare == null ? "—" : `${Math.round(weapon.pickShare * 100)}%`}</td><td>${weapon.winShare == null ? "—" : `${Math.round(weapon.winShare * 100)}%`}</td><td>${weapon.hitRate == null ? "—" : `${Math.round(weapon.hitRate * 100)}%`}</td><td>${Math.round(weapon.damagePerGun || 0)}</td></tr>`).join("") : `<tr><td colspan="6">No weapon usage recorded.</td></tr>`,
+          hash = String(group.engineHash || "unknown"), ruleText = group.rules ? `${group.rules.combat || "auto"} · ${group.rules.credits ?? "custom"} credits · ${group.rules.parts ?? "custom"} parts · ${group.rules.mass ?? "custom"} t · ${group.rules.weapons ?? "custom"} weapons` : "Unknown rules",
+          bandRows = (rows) => (Array.isArray(rows) && rows.length ? rows : []).map((band) => `<tr><th>${esc(band.range)}</th><td>${band.builds}</td><td>${band.wins}</td><td>${band.losses}</td><td>${band.draws}</td><td>${band.winShare == null ? "—" : `${Math.round(band.winShare * 100)}%`}</td></tr>`).join("") || `<tr><td colspan="6">No build data.</td></tr>`,
+          bandTable = (title, rows) => `<div><strong>${title}</strong><div class="meta-table-wrap"><table><thead><tr><th>Count</th><th>Builds</th><th>Wins</th><th>Losses</th><th>Draws</th><th>Win share</th></tr></thead><tbody>${bandRows(rows)}</tbody></table></div></div>`;
+        return `<article class="panel meta-group"><header><div><span class="eyebrow">${esc(sourceLabel(group.source))} · ${esc(group.arena || "unknown arena")}</span><h2>${Number(group.matches) || 0} matches</h2></div><span class="meta-engine" title="${esc(hash)}">ENGINE ${esc(hash.slice(0, 14))}</span></header><p class="meta-rules">${esc(ruleText)}</p><div class="meta-stats"><div><strong>${outcomes.side0Wins || 0}</strong><span>SIDE 0 WINS</span></div><div><strong>${outcomes.side1Wins || 0}</strong><span>SIDE 1 WINS</span></div><div><strong>${outcomes.draws || 0}</strong><span>DRAWS</span></div><div><strong>${Number(group.medianDurationSeconds || 0).toFixed(1)}s</strong><span>MEDIAN LENGTH</span></div><div><strong>${Math.round((pressure.overheatingBuildShare || 0) * 100)}%</strong><span>BUILDS OVERHEATED</span></div><div><strong>${Number(pressure.averagePeakHeat || 0).toFixed(1)}</strong><span>AVG. PEAK HEAT</span></div><div><strong>${Number(pressure.averageThermalRetreatSeconds || 0).toFixed(1)}s</strong><span>AVG. THERMAL RETREAT</span></div><div><strong>${Number(pressure.averagePowerLimitedSeconds || 0).toFixed(1)}s</strong><span>AVG. POWER-LIMITED</span></div></div><details><summary>Weapon use and performance</summary><div class="meta-table-wrap"><table><thead><tr><th>Weapon</th><th>Builds</th><th>Pick rate</th><th>Win share</th><th>Hit rate</th><th>Damage / gun</th></tr></thead><tbody>${weaponRowsMarkup}</tbody></table></div><p class="meta-note">Weapon win share is descriptive: player skill, opponent builds, and selection bias all affect it.</p></details><details><summary>Armor and weapon-count trends</summary><div class="meta-bands">${bandTable("Armor parts per build", group.armorBands)}${bandTable("Weapons per build", group.weaponCountBands)}</div><p class="meta-note">These are observational build bands; they do not isolate a part's causal effect.</p></details></article>`;
+      }).join("");
+      const hashes = (report.engineHashes || []).map((hash) => `<code title="${esc(hash)}">${esc(hash)}</code>`).join(" "), insights = (report.insights || []).map((insight) => `<li>${esc(insight.note || insight.type)}</li>`).join("");
+      content.innerHTML = `<section class="meta-summary"><article class="panel"><strong>${Number(sample.matches) || 0}</strong><span>RECORDED MATCHES</span></article><article class="panel"><strong>${Number(sample.storedInWindow) || 0}</strong><span>RAW LOGS IN 7-DAY WINDOW</span></article><article class="panel"><strong>${Number(report.averageDurationSeconds || 0).toFixed(1)}s</strong><span>AVERAGE BATTLE LENGTH</span></article><article class="panel"><strong>${Number(report.medianDurationSeconds || 0).toFixed(1)}s</strong><span>MEDIAN BATTLE LENGTH</span></article></section><section class="meta-hashes"><span class="eyebrow">ENGINE RELEASES IN THIS REPORT</span><div>${hashes || "No engine hash recorded"}</div></section>${sample.truncated ? `<p class="meta-warning">This report analyzed a maximum of 5,000 matches. Raw logs remain available through their seven-day retention window.</p>` : ""}${insights ? `<section class="panel meta-insights"><h2>Patterns to inspect</h2><ul>${insights}</ul></section>` : ""}<div class="meta-groups">${groupMarkup || `<section class="panel meta-empty">No verified matches were available in this report window.</section>`}</div><p class="meta-caveat">${esc(report.interpretation || "Match outcomes describe the submitted player population; they are not a controlled balance experiment.")}</p>`;
+    } catch (error) {
+      if (!content.isConnected) return;
+      status.textContent = "Could not load the battle meta report.";
+      content.innerHTML = `<section class="panel meta-empty"><strong>${esc(error.message || "Report unavailable")}</strong><p>The match logger is best-effort; battles still work if analytics are offline.</p><button id="meta-retry">Try again</button></section>`;
+      $("#meta-retry").onclick = load;
+    } finally {
+      if (content.isConnected) refresh.disabled = false;
+    }
+  };
+  refresh.onclick = load;
+  load();
+}
 function setSoundUI(ready = false) {
   const state = sound ? (ready ? "ON" : "BLOCKED") : "OFF";
   $("#sound-state").textContent = state;
@@ -3179,7 +3354,12 @@ window.addEventListener("resize", () => {
 });
 document.addEventListener("fullscreenchange", () => {
   if ($("#builder-focus")) invalidateBench();
-  if ($("#combat-stage")) drawArena();
+  const stage = $("#combat-stage");
+  if (stage) {
+    if (document.fullscreenElement !== stage) theaterFallback = false;
+    syncArenaTheater();
+    drawArena();
+  }
 });
 function renderRoute(route) {
   routeRestoring = true;
@@ -3189,6 +3369,7 @@ function renderRoute(route) {
     if (route.name === "workshop") return workshop();
     if (route.name === "arena") return arenaView();
     if (route.name === "rules") return rulesView();
+    if (route.name === "meta") return metaView();
     if (route.name === "friendly") return void friendlyUI.open(undefined, { restore: true });
     if (route.name === "friendlyChallenge") return void friendlyUI.open(route.value, { restore: true });
     if (route.name === "anchor") {
