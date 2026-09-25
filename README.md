@@ -2,7 +2,6 @@
 
 ![Wraith rotating on its display platform](assets/readme-machine.gif)
 
-[🔊 Hear the vroom-vroom sound](assets/vroom-vroom.wav)
 
 A modular engineering battle game for desktop and mobile browsers. Build a machine, set its doctrine, scout a defender and design a counter. Battles run automatically. The workshop and ordinary machine links work on a static host; **public bounties use the bundled Worker/D1 backend and direct Tempo escrow**.
 
