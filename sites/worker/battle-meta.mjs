@@ -276,7 +276,9 @@ export async function runBattleMetaReport(db, { intervalHours = 24, at = Date.no
     ).bind(token, at + 5 * 60 * 1000, at, at - interval * 60 * 60 * 1000).first();
   if (!state) return { generated: false, reason: "not-due-or-leased" };
   try {
-    const windowStart = at - BATTLE_META_RETENTION_MS,
+    // Each saved report describes its own interval (24 hours by default).
+    // Raw logs stay for seven days for retries and auditability.
+    const windowStart = at - interval * 60 * 60 * 1000,
       total = await db.prepare(
         "SELECT COUNT(*) AS total FROM battle_meta_logs l WHERE l.captured_at>=? AND l.captured_at<=? AND l.settled_at IS NOT NULL",
       ).bind(windowStart, at).first(),
@@ -311,27 +313,35 @@ export async function runBattleMetaReport(db, { intervalHours = 24, at = Date.no
   }
 }
 
-export async function readBattleMetaReports(db, { intervalHours = 24, at = Date.now() } = {}) {
+export async function readBattleMetaReports(db, { intervalHours = 24, at = Date.now(), reportId = null } = {}) {
   const interval = metaReportIntervalHours(intervalHours);
   try {
     const [state, rows] = await Promise.all([
       db.prepare("SELECT last_report_at FROM battle_meta_state WHERE id=1").first(),
-      db.prepare("SELECT generated_at,window_start,window_end,battle_count,engine_hashes,report_json FROM battle_meta_reports ORDER BY generated_at DESC LIMIT 30").all(),
+      db.prepare("SELECT id,generated_at,window_start,window_end,battle_count,engine_hashes FROM battle_meta_reports ORDER BY generated_at DESC LIMIT 365").all(),
     ]);
     const reports = (rows.results || []).map((row) => ({
+      reportId: Number(row.id),
       generatedAt: row.generated_at,
       windowStart: row.window_start,
       windowEnd: row.window_end,
       battleCount: row.battle_count,
       engineHashes: parse(row.engine_hashes, []),
-      report: parse(row.report_json, null),
-    })).filter((row) => row.report);
+    }));
+    const selected = reportId === null ? reports[0] : reports.find((row) => row.reportId === Number(reportId));
+    let selectedReport = null;
+    if (selected) {
+      const stored = await db.prepare("SELECT report_json FROM battle_meta_reports WHERE id=?").bind(selected.reportId).first();
+      const report = parse(stored?.report_json, null);
+      if (report) selectedReport = { ...selected, report };
+    }
     return {
       available: true,
       intervalHours: interval,
       retentionDays: BATTLE_META_RETENTION_DAYS,
       nextReportAt: Number(state?.last_report_at || 0) + interval * 60 * 60 * 1000,
       reports,
+      selectedReport,
     };
   } catch {
     return {
@@ -340,6 +350,7 @@ export async function readBattleMetaReports(db, { intervalHours = 24, at = Date.
       retentionDays: BATTLE_META_RETENTION_DAYS,
       nextReportAt: at + interval * 60 * 60 * 1000,
       reports: [],
+      selectedReport: null,
     };
   }
 }

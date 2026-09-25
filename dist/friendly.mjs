@@ -158,7 +158,7 @@ export function createFriendlyChallengesUI(adapter) {
 
   function shell(title = "FRIENDLY CHALLENGES.", subtitle = "Free machine matchups. No wallet, no entry fee.") {
     return `<div class="page-heading bounty-heading friendly-heading"><div class="bounty-heading-copy"><span class="eyebrow">WAR MACHINES / FREE PLAY</span><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions"><button class="primary" id="friendly-create">＋ Post your machine</button><button id="friendly-refresh">⟳ Refresh board</button></div></div>
-      <div class="friendly-rules"><strong>24-hour listing window</strong><span>This is only how long the invite stays listed. There is no separate acceptance or build countdown; matches use normal arena rules.</span><span>Free to post and challenge · no wallet · no bounty or payment records.</span></div>`;
+      <div class="friendly-rules"><strong>24-hour listing window</strong><span>This is only how long the invite stays listed. There is no separate acceptance or build countdown; matches use normal arena rules.</span><span>Free to post and challenge · no wallet · no bounty or payment records.</span></div><div class="friendly-meta-notice"><span>Completed friendly battles contribute replay-verified telemetry to the public daily Meta reports. Raw battle logs are kept for 7 days; reports omit names and wallet addresses.</span><a href="#meta">See the data and daily reports →</a></div>`;
   }
 
   function bindShell(rows, currentGeneration) {

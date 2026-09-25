@@ -157,13 +157,20 @@ test("all free browser battles are replay-verified, retained for a week, and inc
   assert.equal(mainnetAccepted.status, 200);
   assert.equal(mainnetAccepted.body.stored, true);
   const at = Date.now();
-  assert.equal((await runBattleMetaReport(DB, { intervalHours: 12, at })).matches, 2);
+  const generated = await runBattleMetaReport(DB, { intervalHours: 12, at });
+  assert.equal(generated.matches, 2);
   const reports = await call(env, "/api/meta/reports", "GET");
   assert.equal(reports.status, 200);
   assert.equal(reports.body.intervalHours, 12);
-  assert.equal(reports.body.reports[0].report.sample.matches, 2);
-  assert.deepEqual(reports.body.reports[0].report.groups.map((group) => group.source).sort(), ["browser-friendly", "browser-practice"]);
-  assert.equal(reports.body.reports[0].report.groups[0].engineHash, payload.engineHash);
+  assert.equal(reports.body.selectedReport.report.sample.matches, 2);
+  assert.equal(reports.body.selectedReport.windowEnd - reports.body.selectedReport.windowStart, 12 * 60 * 60 * 1000);
+  assert.deepEqual(reports.body.selectedReport.report.groups.map((group) => group.source).sort(), ["browser-friendly", "browser-practice"]);
+  assert.equal(reports.body.selectedReport.report.groups[0].engineHash, payload.engineHash);
+  assert.equal("report" in reports.body.reports[0], false, "date list stays compact instead of returning every historical report body");
+  const selectedHistory = await call(env, `/api/meta/reports?reportId=${reports.body.selectedReport.reportId}`, "GET");
+  assert.equal(selectedHistory.body.selectedReport.report.sample.matches, 2);
+  assert.equal((await call(env, "/api/meta/reports?reportId=not-a-date", "GET")).status, 400);
+  assert.equal((await call(env, "/api/meta/reports?reportId=999999", "GET")).status, 404);
   assert.equal(BATTLE_META_RETENTION_MS, 7 * 24 * 60 * 60 * 1000);
   const staleId = "stale-meta-test";
   DB.sqlite.prepare("INSERT INTO battle_meta_logs (id,source,captured_at,settled_at,engine_hash,arena,seed,winner,duration,battle_json) VALUES (?,?,?,?,?,?,?,?,?,?)")

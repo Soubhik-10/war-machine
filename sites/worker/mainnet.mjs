@@ -6775,9 +6775,15 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
     });
     if (friendly) return friendly;
     if (path === "/api/meta/reports" && method === "GET") {
+      const reportParam = url.searchParams.get("reportId"),
+        reportId = reportParam === null ? null : Number(reportParam);
+      check(reportParam === null || (/^[1-9]\d*$/.test(reportParam) && Number.isSafeInteger(reportId)), "Invalid report date.", 400);
       const intervalHours = metaReportIntervalHours(env.WM_META_REPORT_INTERVAL_HOURS),
-        reports = await readBattleMetaReports(db, { intervalHours, at: now() });
-      if (ctx?.waitUntil)
+        refresh = url.searchParams.get("refresh") === "1";
+      if (refresh) await runBattleMetaReport(db, { intervalHours, at: now() });
+      const reports = await readBattleMetaReports(db, { intervalHours, at: now(), reportId });
+      if (reportId !== null) check(!!reports.selectedReport, "Report date not found.", 404);
+      if (!refresh && reportId === null && ctx?.waitUntil)
         ctx.waitUntil(runBattleMetaReport(db, { intervalHours, at: now() }).catch((error) => {
           console.error("On-demand battle meta report failed.", error);
         }));
