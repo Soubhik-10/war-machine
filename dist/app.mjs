@@ -167,6 +167,8 @@ const musicDirector = new MusicDirector({
 // UI confirmation reuses the context created by the user-gesture audio director.
 let audioCtx = null;
 let arenaIdleRAF = 0,
+  battleCountdownTimer = 0,
+  battleCountdownRun = 0,
   modalCleanup = null,
   replaceFitted = false,
   scoutRenderer = null,
@@ -287,6 +289,11 @@ function go(route, options) {
   routeRouter?.navigate(route, options);
 }
 function stopBattle() {
+  battleCountdownRun++;
+  clearTimeout(battleCountdownTimer);
+  battleCountdownTimer = 0;
+  $(".arena-screen")?.classList.remove("countdown-active");
+  $("#fight-overlay")?.classList.remove("countdown-overlay");
   running = false;
   paused = false;
   cancelAnimationFrame(raf);
@@ -1685,6 +1692,7 @@ function arenaTap(e) {
   }
 }
 function startBattle(replay = false) {
+  if (battleCountdownTimer) return;
   if (officialReceipt) replay = true;
   if (!replay) {
     const issues = matchIssues();
@@ -1706,6 +1714,50 @@ function startBattle(replay = false) {
     };
   }
   if (!matchSource) return;
+  const startButton = $("#start-battle");
+  if (startButton) startButton.disabled = true;
+  runBattleCountdown(() => launchBattle(replay));
+}
+function runBattleCountdown(onComplete) {
+  const overlay = $("#fight-overlay"),
+    screen = $(".arena-screen");
+  if (!overlay || !screen) {
+    onComplete();
+    return;
+  }
+  const run = ++battleCountdownRun,
+    beats = [
+      ["3", 520],
+      ["2", 440],
+      ["1", 360],
+      ["FIGHT!", 760],
+    ];
+  let beatIndex = 0;
+  overlay.classList.remove("briefing-overlay");
+  overlay.classList.add("countdown-overlay");
+  overlay.hidden = false;
+  screen.classList.add("countdown-active");
+  const advance = () => {
+    if (run !== battleCountdownRun || view !== "arena") return;
+    const beat = beats[beatIndex];
+    if (!beat) {
+      battleCountdownTimer = 0;
+      screen.classList.remove("countdown-active");
+      overlay.classList.remove("countdown-overlay");
+      overlay.hidden = true;
+      onComplete();
+      return;
+    }
+    const [label, frequency] = beat;
+    overlay.innerHTML = `<div class="countdown-card" role="status" aria-live="assertive" aria-atomic="true"><small>COMBAT SYSTEMS · ARMED</small><strong class="countdown-number" data-beat="${label}">${label}</strong><span>${label === "FIGHT!" ? "ENGAGE" : "PREPARE FOR DEPLOYMENT"}</span></div>`;
+    beep(frequency, label === "FIGHT!" ? 0.34 : 0.2, label === "FIGHT!" ? 0.09 : 0.055, "triangle");
+    beatIndex++;
+    battleCountdownTimer = window.setTimeout(advance, reducedMotion ? 520 : beat[0] === "FIGHT!" ? 760 : 720);
+  };
+  advance();
+}
+function launchBattle(replay = false) {
+  if (!matchSource || view !== "arena") return;
   cancelAnimationFrame(raf);
   battle = new Battle(
     matchSource.a,
