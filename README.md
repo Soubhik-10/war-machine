@@ -2,7 +2,7 @@
 
 ![Wraith rotating on its display platform](assets/readme-machine.gif)
 
-[🔊 Hear the Robotic City V2 theme](https://raw.githubusercontent.com/Soubhik-10/war-machine/main/dist/audio/general.ogg)
+[🔊 Hear the Robotic City V2 theme](https://warmachine.live/audio/general.ogg)
 
 A modular engineering battle game for desktop and mobile browsers. Build a machine, set its doctrine, scout a defender and design a counter. Battles run automatically. The workshop and ordinary machine links work on a static host; **public bounties use the bundled Worker/D1 backend and direct Tempo escrow**.
 
