@@ -217,3 +217,38 @@ main{max-width:1500px;padding:34px clamp(18px,4vw,64px) 54px}
 .portal-footer .footer-idea-link{display:inline-flex;align-items:center;gap:9px;min-height:38px;padding:8px 12px;border:1px solid color-mix(in srgb,var(--portal-accent) 48%,var(--portal-line));border-radius:10px;background:color-mix(in srgb,var(--portal-accent) 10%,transparent);color:var(--portal-text);font:12px/1.2 Arial,sans-serif;text-decoration:none;transition:background .15s,border-color .15s}
 .portal-footer .footer-idea-link:hover{border-color:var(--portal-accent);background:color-mix(in srgb,var(--portal-accent) 18%,transparent)}
 .portal-footer .footer-idea-link span{color:var(--portal-accent);font:14px/1 monospace}
+
+/* The masthead behaves like a small cinematic ident while preserving a compact, usable header. */
+.brand{isolation:isolate;position:relative}
+.brand-wordmark{display:flex;align-items:center;gap:.34em;overflow:hidden}
+.brand-mark b,.brand-mark i,.brand-mark::after,.brand-wordmark{will-change:clip-path,filter,opacity,transform}
+.brand-mark::after{position:absolute;z-index:2;inset:-22% 47%;content:"";opacity:0;background:linear-gradient(180deg,transparent,#fff7d0 38%,transparent);transform:rotate(19deg) scaleY(0);mix-blend-mode:screen;pointer-events:none}
+.brand-cinematic .brand-mark{animation:brand-mark-pulse 920ms cubic-bezier(.2,.8,.2,1)}
+.brand-cinematic .brand-mark b{animation:brand-w-cleave 920ms cubic-bezier(.2,.8,.2,1)}
+.brand-cinematic .brand-mark i{animation:brand-m-cleave 920ms cubic-bezier(.2,.8,.2,1)}
+.brand-cinematic .brand-mark::after{animation:brand-cut 600ms ease-out 75ms}
+.brand-cinematic .brand-wordmark{clip-path:inset(0 100% 0 0);opacity:0;animation:brand-write 760ms cubic-bezier(.16,.85,.18,1) 180ms forwards}
+@keyframes brand-mark-pulse{0%,100%{filter:none}27%{filter:brightness(1.45) drop-shadow(0 0 8px #f4ca7eaa)}}
+@keyframes brand-w-cleave{0%,100%{transform:translateX(0) rotate(0)}25%{transform:translateX(-9px) rotate(-10deg)}48%{transform:translateX(-4px) rotate(-4deg)}}
+@keyframes brand-m-cleave{0%,100%{transform:translateX(0) rotate(0)}25%{transform:translateX(10px) rotate(10deg)}48%{transform:translateX(4px) rotate(4deg)}}
+@keyframes brand-cut{0%{opacity:0;transform:rotate(19deg) scaleY(0)}28%{opacity:.85;transform:rotate(19deg) scaleY(1)}100%{opacity:0;transform:rotate(19deg) scaleY(1.3)}}
+@keyframes brand-write{0%{clip-path:inset(0 100% 0 0);opacity:0;filter:blur(4px);letter-spacing:.4em;transform:translateX(-7px)}100%{clip-path:inset(0 0 0 0);opacity:1;filter:blur(0);letter-spacing:inherit;transform:none}}
+
+/* A real, controllable hero machine rather than a static render. */
+.hero-display{box-shadow:0 22px 62px #02070c3b}
+#hero-machine{cursor:grab;outline:0;touch-action:none}
+#hero-machine:focus-visible{outline:2px solid var(--portal-accent);outline-offset:-4px}
+.hero-display[data-orbit=dragging] #hero-machine{cursor:grabbing}
+.hero-machine-stats{position:absolute;top:61px;right:20px;z-index:2;display:grid;min-width:130px;border:1px solid color-mix(in srgb,var(--portal-line) 84%,#8fbdd0);border-radius:10px;background:#101b24d9;box-shadow:0 12px 28px #06101960;backdrop-filter:blur(12px)}
+.hero-machine-stats span{display:flex;align-items:baseline;justify-content:space-between;gap:11px;padding:8px 10px;border-bottom:1px solid color-mix(in srgb,var(--portal-line) 72%,transparent)}
+.hero-machine-stats span:last-child{border-bottom:0}
+.hero-machine-stats b{color:#f2c56b;font:700 12px/1 Foundry,Arial,sans-serif;letter-spacing:.04em;white-space:nowrap}
+.hero-machine-stats small{color:var(--portal-muted);font:8px/1.2 'Courier New',monospace;letter-spacing:.65px;white-space:nowrap}
+.hero-orbit-controls{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:11px;align-items:center;margin:0 24px;padding:11px 0;border-top:1px solid color-mix(in srgb,var(--portal-line) 70%,transparent);color:var(--portal-muted);font:9px/1.3 'Courier New',monospace;letter-spacing:.7px}
+.hero-orbit-controls>span:first-child{color:var(--portal-green);white-space:nowrap}
+.hero-orbit-controls>span:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hero-orbit-controls button{min-height:31px;padding:5px 9px;border-color:color-mix(in srgb,var(--portal-line) 90%,#9ac8dd);border-radius:7px;background:#182936;color:var(--portal-text);font:10px/1 Arial,sans-serif;white-space:nowrap}
+.hero-orbit-controls button:hover{border-color:var(--portal-accent);background:#223744}
+.hero-callout{margin-top:10px}
+@media(max-width:720px){.hero-machine-stats{top:57px;right:14px;min-width:112px}.hero-machine-stats span{padding:7px 8px}.hero-machine-stats b{font-size:11px}.hero-machine-stats small{font-size:7px}.hero-orbit-controls{grid-template-columns:1fr auto;gap:7px;margin:0 16px;padding:10px 0}.hero-orbit-controls>span:nth-child(2){grid-column:1/-1;grid-row:2;white-space:normal}.hero-callout{margin:8px 16px 16px}.brand-wordmark{gap:.28em}}
+@media(prefers-reduced-motion:reduce){.brand-cinematic .brand-mark,.brand-cinematic .brand-mark b,.brand-cinematic .brand-mark i,.brand-cinematic .brand-mark::after,.brand-cinematic .brand-wordmark{animation:none}.brand-cinematic .brand-wordmark{clip-path:none;opacity:1;filter:none;transform:none}}

@@ -3217,8 +3217,18 @@ $$("[data-view]").forEach(
             : arenaView();
     }),
 );
+let brandCinematicTimer = 0;
+function playBrandCinematic(mark) {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  clearTimeout(brandCinematicTimer);
+  mark.classList.remove("brand-cinematic");
+  void mark.offsetWidth;
+  mark.classList.add("brand-cinematic");
+  brandCinematicTimer = setTimeout(() => mark.classList.remove("brand-cinematic"), 1200);
+}
 $(".brand").onclick = (e) => {
   e.preventDefault();
+  playBrandCinematic(e.currentTarget);
   setMobileNav(false);
   portal.home();
 };

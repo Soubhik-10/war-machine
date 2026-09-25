@@ -13,7 +13,41 @@ export function createPortal(adapter){
  function bindThemes(){document.querySelectorAll('[data-theme-choice]').forEach(b=>b.onclick=()=>{document.documentElement.dataset.theme=b.dataset.themeChoice;try{localStorage.setItem('wm-theme',b.dataset.themeChoice);}catch{}document.querySelectorAll('[data-theme-choice]').forEach(n=>n.setAttribute('aria-pressed',String(n===b)));});}
  function footer(){return `<footer class="portal-footer"><span>WAR MACHINES<br><small>Independent engineers. One shared ruleset.</small></span>${themes()}<a class="footer-idea-link" href="https://github.com/Soubhik-10/war-machine/issues/new?template=idea.yml" target="_blank" rel="noopener">Suggest an idea <span aria-hidden="true">↗</span></a></footer>`;}
  function start(view){if(adapter.syncRoute?.(view))return;activityCleanup?.();activityCleanup=null;clearRenderers();adapter.show(view);generation++;window.scrollTo(0,0);}
- function hero(){const canvas=$('#hero-machine');try{renderer=new Renderer(canvas,{maxPixelRatio:graphicsProfile.maxPixelRatio});const m=clone(PRESETS[9]);m.paint='#708c85';m.accent='#f4c973';m.glow='#acf2db';const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches,start=performance.now(),scene=new Geometry();let lastDraw=0;const draw=now=>{if(!renderer)return;if(graphicsProfile.tier!=='high'&&now-lastDraw<1000/graphicsProfile.renderHz){frame=requestAnimationFrame(draw);return;}lastDraw=now;const t=(now-start)/1000;scene.vertices.length=0;scene.origin=[0,0,0];scene.angle=0;scene.scale=1;scene.material=4;scene.bevel(0,-.2,0,8,.35,7,'#24312e');for(const x of [-3.7,3.7])scene.box(x,.005,0,.03,.02,6.7,'#c6a86d',.2);scene.machine(m,{phase:t*.2,time:t});renderer.render(scene,{target:[0,1.1,.3],yaw:-2.48+(reduced?0:Math.sin(t*.2)*.13),elevation:.63,span:9,bg:[0,0,0,0]});if(!reduced)frame=requestAnimationFrame(draw);};draw(start);}catch{canvas.hidden=true;$('.hero-machine-label').textContent='WRAITH · SHIELDED MISSILE PLATFORM';}}
+ function hero(){
+  const canvas=$('#hero-machine'),display=canvas?.closest('.hero-display');
+  if(!canvas||!display)return;
+  try{
+   renderer=new Renderer(canvas,{maxPixelRatio:graphicsProfile.maxPixelRatio});
+   const m=clone(PRESETS[9]),s=stats(m),reduced=matchMedia('(prefers-reduced-motion: reduce)').matches,start=performance.now(),scene=new Geometry();
+   m.paint='#708c85';m.accent='#f4c973';m.glow='#acf2db';
+   const status=$('#hero-orbit-state'),reset=$('#hero-reset'),baseYaw=-2.48,baseElevation=.63;
+   let yaw=baseYaw,targetYaw=baseYaw,elevation=baseElevation,targetElevation=baseElevation,lastDraw=0,lastInput=0,dragging=false,lastPointer=null;
+   const setStatus=text=>{if(status)status.textContent=text;};
+   const render=now=>{
+    if(!renderer)return;
+    if(graphicsProfile.tier!=='high'&&now-lastDraw<1000/graphicsProfile.renderHz){frame=requestAnimationFrame(render);return;}
+    lastDraw=now;
+    const t=(now-start)/1000,auto=!reduced&&!dragging&&now-lastInput>1800;
+    if(auto)targetYaw+=.00145;
+    yaw+=(targetYaw-yaw)*.14;elevation+=(targetElevation-elevation)*.14;
+    scene.vertices.length=0;scene.origin=[0,0,0];scene.angle=0;scene.scale=1;scene.material=4;
+    scene.bevel(0,-.2,0,8,.35,7,'#24312e');for(const x of[-3.7,3.7])scene.box(x,.005,0,.03,.02,6.7,'#c6a86d',.2);
+    scene.machine(m,{phase:t*.2,time:t});
+    renderer.render(scene,{target:[0,1.1,.3],yaw,elevation,span:9,bg:[0,0,0,0]});
+    if(!reduced)frame=requestAnimationFrame(render);
+   };
+   const redraw=()=>{if(reduced)render(performance.now());};
+   const settle=()=>{dragging=false;lastPointer=null;display.dataset.orbit='ready';setStatus(reduced?'MANUAL ORBIT':'AUTO ORBIT');};
+   const nudge=(nextYaw,nextElevation)=>{targetYaw=nextYaw;targetElevation=Math.max(.38,Math.min(1.05,nextElevation));lastInput=performance.now();setStatus('MANUAL ORBIT');redraw();};
+   canvas.addEventListener('pointerdown',event=>{dragging=true;lastPointer=[event.clientX,event.clientY];lastInput=performance.now();display.dataset.orbit='dragging';canvas.setPointerCapture?.(event.pointerId);setStatus('ORBIT LOCKED');event.preventDefault();});
+   canvas.addEventListener('pointermove',event=>{if(!dragging||!lastPointer)return;const dx=event.clientX-lastPointer[0],dy=event.clientY-lastPointer[1];lastPointer=[event.clientX,event.clientY];nudge(targetYaw+dx*.010,targetElevation-dy*.006);event.preventDefault();});
+   canvas.addEventListener('pointerup',settle);canvas.addEventListener('pointercancel',settle);
+   canvas.addEventListener('keydown',event=>{const step=.16;let handled=true;if(event.key==='ArrowLeft')nudge(targetYaw-step,targetElevation);else if(event.key==='ArrowRight')nudge(targetYaw+step,targetElevation);else if(event.key==='ArrowUp')nudge(targetYaw,targetElevation-step*.32);else if(event.key==='ArrowDown')nudge(targetYaw,targetElevation+step*.32);else if(event.key.toLowerCase()==='r'){targetYaw=baseYaw;targetElevation=baseElevation;lastInput=0;setStatus(reduced?'RESET VIEW':'AUTO ORBIT');redraw();}else handled=false;if(handled)event.preventDefault();});
+   reset.onclick=()=>{targetYaw=baseYaw;targetElevation=baseElevation;lastInput=0;setStatus(reduced?'RESET VIEW':'AUTO ORBIT');canvas.focus({preventScroll:true});redraw();};
+   $('#hero-structure').textContent=`${s.hp.toLocaleString()} HP`;$('#hero-weapons').textContent=`${s.weapons} weapons`;$('#hero-range').textContent=`${m.range} m`;
+   render(start);
+  }catch{canvas.hidden=true;$('.hero-machine-label').textContent='WRAITH · SHIELDED MISSILE PLATFORM';}
+ }
  function home(){
   start('home');
   $('#app').innerHTML=`<section class="portal-hero">
@@ -24,7 +58,7 @@ export function createPortal(adapter){
     <p class="guest-note">Free to build and practice. No account needed.</p>
     <div class="home-facts"><span>${PARTS.length} parts</span><span>${ARENAS.length} arenas</span><span>3 build levels</span></div>
    </div>
-   <div class="hero-display"><span class="hero-display-top">ASSEMBLY / UNIT 023 <i>LIVE PREVIEW</i></span><canvas id="hero-machine" aria-label="Wraith modular machine on a display platform"></canvas><span class="hero-machine-label">WRAITH <small>MISSILE PLATFORM</small></span><div class="hero-callout"><b>The support is the weak point.</b><span>Break it and the tower falls.</span></div></div>
+   <div class="hero-display" data-orbit="ready"><span class="hero-display-top">ASSEMBLY / UNIT 023 <i>LIVE PREVIEW</i></span><canvas id="hero-machine" tabindex="0" aria-label="Interactive three-dimensional preview of the Wraith machine. Drag to orbit it; use arrow keys to rotate it."></canvas><span class="hero-machine-label">WRAITH <small>SHIELDED MISSILE PLATFORM</small></span><div class="hero-machine-stats" aria-label="Wraith machine statistics"><span><b id="hero-structure">—</b><small>STRUCTURE</small></span><span><b id="hero-weapons">—</b><small>WEAPON SLOTS</small></span><span><b id="hero-range">—</b><small>ENGAGE RANGE</small></span></div><div class="hero-orbit-controls"><span id="hero-orbit-state">AUTO ORBIT</span><span>DRAG TO ORBIT · ARROWS TO AIM</span><button id="hero-reset" type="button" aria-label="Reset machine preview view">Reset view</button></div><div class="hero-callout"><b>The support is the weak point.</b><span>Break it and the tower falls.</span></div></div>
   </section>
   <nav class="home-paths" aria-label="Explore War Machines">
    <button id="portal-play"><span class="home-path-number" aria-hidden="true">01</span><span><strong>Practice in the arena</strong><small>Test your build against different rivals and terrain.</small></span><span aria-hidden="true">→</span></button>
