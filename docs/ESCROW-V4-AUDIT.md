@@ -1,6 +1,6 @@
 # V4 escrow audit notes
 
-This is a review of `contracts/src/WarMachineBountyEscrowV4.sol` and its deployment script. It is a code-level audit record, not a third-party security audit.
+This is a historical review of [`contracts/stale/src/WarMachineBountyEscrowV4.sol`](../contracts/stale/src/WarMachineBountyEscrowV4.sol) and its archived deployment script. It is a code-level audit record, not a third-party security audit, and V4 is not the live contract.
 
 ## Findings
 
