@@ -1,67 +1,43 @@
-# V6 migration and release boundary
+# V6 live escrow operations
 
-`WarMachineBountyEscrowV6.sol` is a source-only candidate in this checkout. It has
-no deployed address, is not selected by the live Worker, and must not be added to
-public discovery until the backend integration and an on-chain review are complete.
+V6 is the live Tempo Mainnet bounty escrow and the only active contract version
+in this repository. The Worker must be configured with
+`WM_BOUNTY_ESCROW_VERSION=6`, the verified deployed V6 address, and the matching
+settlement signer and relayer settings. Keep those production values in the
+hosting provider's protected configuration; do not copy secrets into this
+document or source control.
 
-## Code-only release
+The old V1–V5 sources, tests, scripts, and deployment examples are retained under
+[`contracts/stale/`](../contracts/stale/README.md) for historical audit and
+recovery. They are not the active deployment path. The Worker may still read
+historical records as needed; archived on-chain contracts remain immutable.
 
-The UI, status model, V6 source, tests, deployment example and dry-run tooling can
-be released without changing the live payment rail. Keep these values unchanged:
+Updating application code or this documentation does not redeploy the contract,
+move escrow funds, or rewrite existing bounty records. A V6 deployment is already
+live; do not run a deployment script merely to publish an app change. Existing
+older-version funds and attempts remain on their original contract and must be
+reconciled against that contract's finalized receipts. Never ask a player to pay
+a second entry as a substitute for reconciling an existing attempt.
 
-```text
-WM_BOUNTY_ESCROW_VERSION=5
-WM_BOUNTY_ESCROW_ADDRESS=<current V5 address>
-```
+## V6 payment configuration
 
-This code-only release does not move funds, change a contract, or migrate a
-database row. V5 rewards remain in the V5 escrow. V5 active attempts and their
-entry payments remain governed by V5, including its technical-reopen retry path.
+V6 uses the Tempo Mainnet pathUSD token, a pause guardian, a bounded agent
+relayer, a settlement signer, and one-signer quorum. V6 uses EIP-712 domain
+version `6`. The relayer must be funded and approved for the V6 escrow before
+native MPP create or entry payments are enabled. Verify the escrow address,
+chain, token, signer, and relayer against the deployed contract and the protected
+Worker configuration before changing any production setting.
 
-Before an optional V6 cutover, stop new V5 funding and entries through the existing
-pause or readiness controls. Let active V5 attempts settle, timeout, or complete
-their documented technical recovery. Cancel or expire only eligible idle V5
-bounties, and reconcile every reward and entry against its finalized V5 receipt.
-Existing V5 funds and attempts cannot be moved automatically into V6. Do not ask a
-player to pay a second entry as a substitute for reconciling an existing V5
-attempt.
-
-The V5 escrow address and the future V6 escrow address are separate funding
-destinations. The creator and challenger addresses in each V5 record are already
-the authoritative payment identities; preserve those records and receipts rather
-than reconstructing them in V6. The pathUSD token address and platform fee
-recipient are unchanged, but a new V6 escrow still needs its own reward funding,
-relayer allowance and settlement configuration.
-
-## Optional on-chain V6 deployment
-
-Deploying V6 is a separate operational change after the code-only work. The
-constructor uses the same Tempo Mainnet pathUSD token, a distinct pause guardian,
-bounded agent relayer and settlement signer, an attempt window, and exactly one
-signer with quorum one. V6 uses EIP-712 domain version `6`.
-
-Preview the public constructor inputs locally:
+The deployment helper remains available for a separately reviewed future V6
+deployment or recovery rehearsal:
 
 ```powershell
 .\scripts\deploy-tempo-escrow-v6.ps1 -Initialize
 .\scripts\deploy-tempo-escrow-v6.ps1 -DeployerAddress <public deployer address>
 ```
 
-The preview does not broadcast and does not require a deployer keystore. The
-script preflights `forge script --help` for Tempo's `--tempo.fee-token` option
-and passes the pathUSD token explicitly. Use `-ForgePath` when the Tempo Forge
-installation is outside the repository; the bundled standard Forge test binary
-does not by itself prove that a deployment build supports Tempo transaction
-fees. This document does not authorize or perform a broadcast; only an
-explicitly reviewed operator may add `-Broadcast` and `-KeystorePath` after the
-new address, bytecode, token, signer, relayer allowance and monitoring plan have
-been checked.
-
-After a separately approved deployment, backend configuration must be changed as
-one reviewed operation to the new V6 address and version, with the same public
-relayer and a V6-approved signer. The relayer must approve the new escrow before
-MPP create or entry calls are enabled. No existing V5 reserve is a V6 reserve,
-and no automatic migration or sweep exists.
+These commands only preview constructor settings. Broadcasting is a separate
+operation and is not part of routine application releases.
 
 ## V6 economic and recovery semantics
 

@@ -2,55 +2,77 @@
 
 ## Live bounty rail
 
-War Machines uses direct pathUSD escrow on Tempo mainnet, with a V5 native MPP lane for stateless agent create/entry. V5 is required for new paid bounties because it adds settlement grace and technical recovery.
+War Machines uses the V6 pathUSD escrow on Tempo Mainnet (chain `4217`). V6 is
+the sole active escrow version for new paid actions. Always use the address,
+token, fee, and payment route in the current discovery response; old deployment
+records are historical and must not be treated as the active escrow.
 
-- Chain: Tempo Mainnet `4217`
-- pathUSD: `0x20C0000000000000000000000000000000000000` (6 decimals)
-- Escrow: [Bounty Escrow v2](https://explore.tempo.xyz/address/0x7ce840C9A852721E9b87d1FA028D0a988aee0f8e) ([Sourcify match](https://contracts.tempo.xyz/verify-ui/jobs/c14fe4d2-651b-4adc-9670-19b5e726ffb8))
-- Platform fee: 2.5% of the gross winning reward to `0xc20131e9132888993de6519D486E5558A5DbCb7A`
+- Token: pathUSD, `0x20C0000000000000000000000000000000000000` (6 decimals).
+- Winning reward fee: 2.5% of gross reward (250 bps); confirm exact net payout
+  before authorizing funding.
+- Payment methods: direct Tempo Wallet escrow plan for browser users, or the
+  advertised native MPP challenge for agents when enabled.
 
-The browser prepares the exact approval and escrow calls in direct mode. In native MPP mode, the Worker relays only the matching V5 method after the exact MPP payment is finalized. The Worker verifies receipts, binds locked rules and builds to the result, and records attestation state.
+Funding and entry are separate payments. The creator funds the gross reward;
+the challenger pays the entry. The escrow holds both while an attempt is active.
 
-## Settlement
+## Settlement and the timeout failsafe
 
-1. The creator approves pathUSD and calls `createBounty`.
-2. The challenger approves pathUSD and calls `enterBounty`.
-3. The Worker reveals the defender to that paid challenger only and opens the construction window. Public viewers continue to receive only the scout summary.
-4. The challenger validates locally and deploys one counter. The Worker computes the deterministic result and returns the EIP-712 settlement payload.
-5. The trusted Sites Worker uses the configured V5 settlement signing secret to produce the one required signature. An operator may use `scripts/attest-escrow-result.ps1` with an encrypted keystore for a local or recovery run; the active V5 trial has one signer and therefore relies on that trusted operator. The independent multi-signer procedure below is retained as legacy/future deployment guidance.
-6. Any wallet can relay `settleAttempt` after the configured signer signature has been registered.
+1. The creator funds an idle bounty through the V6 escrow.
+2. The challenger pays the separate entry and the V6 attempt window starts.
+3. The challenger submits a valid counter; the Worker records and simulates the
+   match, then prepares the signed settlement.
+4. On a settled win, the challenger receives the gross reward less the 2.5%
+   platform fee, and the creator receives the held entry. On a settled loss or
+   draw, the creator receives the held entry and the bounty reopens.
+5. If an entered attempt is not settled by the on-chain timeout, V6's technical
+   failsafe returns the held entry to the challenger and reopens the bounty.
+   The timeout refund is not a player loss and does not charge a second entry.
 
-The current deployment uses a ten-minute attempt window. The Worker gives the challenger a cost-scaled three-to-five-minute build window, then retains time for the configured signer and relay plus a two-minute V5 grace. A loss, draw, or missed counter deadline settles the entry to the bounty creator. If settlement infrastructure fails after an on-time build, the Worker calls the V5 technical-reopen path and grants one sponsored retry; it does not record a player loss or return the original entry through that path. Only an idle bounty can expire and release its reward.
+The creator may cancel only an idle bounty. The bounty can remain open
+indefinitely until entered or cancelled; the timeout is for an active attempt,
+not for an open bounty. Use the on-chain attempt window as the source of truth
+for exact deadlines.
 
-## Operating limits
+## V6 operations and safety
 
-Use small amounts until the two-wallet flow has been rehearsed for creation, win, loss, draw, cancellation, expiry, missed counter deadline, wrong-token approval, wrong-event receipt, and paused-contract behavior. The contract is source verified, but it has not had an independent security audit.
-
-Keep the active V5 settlement signing secret in the encrypted trusted Sites Worker secret store; never put it in the frontend, Git, D1, or a browser. An offline encrypted keystore used for local or recovery signing must also stay off those systems. V5 is intentionally a one-signer trusted-operator trial. Native MPP also forwards payer funds through the bounded relayer before escrow, which is temporary custodial exposure; reconcile forwarding failures before accepting larger amounts. A future multi-signer deployment would keep each signer independent.
-
-## Native MPP bounty rail
-
-The V5 escrow supports native MPP reward and entry payments for agents. The Worker receives the exact MPP payment at the configured relayer, persists the payment and raw relay transaction, then calls only the matching `createBountyFor` or `enterBountyFor` method. The V5 contract binds the supplied payer identity and limits those methods to the immutable relayer address. V3/V4 remain readable for recovery but do not accept new paid actions.
-
-### Multi-token input
-
-V5 still accounts in pathUSD only. Operators may publish a reviewed `WM_TEMPO_SUPPORTED_TOKENS` allowlist (pathUSD is always included) and `WM_TEMPO_SWAP_SLIPPAGE_BPS` from 0 to 500. mppx clients use the published list as `autoSwap.tokenIn`; Tempo DEX approval, exact pathUSD output and the MPP transfer are one atomic Tempo transaction. The server validates the pathUSD transfer and then forwards pathUSD into escrow. This avoids adding arbitrary-token branches to the contract and means a token without a live quote, balance or approved route fails before payment is broadcast.
-
-To enable a paid agent service, configure all of these runtime values:
+The live Worker configuration uses:
 
 ```text
-WM_BOUNTY_ESCROW_VERSION=5
-WM_BOUNTY_ESCROW_ADDRESS=<deployed V5 escrow>
-WM_ESCROW_SETTLEMENT_SIGNER=<public V5 settlement signer>
-WM_BOUNTY_RELAYER_ADDRESS=<V5 agentRelayer address>
-WM_BOUNTY_RELAYER_PRIVATE_KEY=<Worker secret>
+WM_BOUNTY_ESCROW_VERSION=6
+WM_ALLOW_ESCROW_V6=true
+WM_BOUNTY_ESCROW_ADDRESS=<verified deployed V6 escrow>
+WM_ESCROW_SETTLEMENT_SIGNER=<public V6 settlement signer>
+WM_BOUNTY_RELAYER_ADDRESS=<V6 agent relayer>
 WM_AGENT_BOUNTY_MPP_ENABLED=true
-WM_AGENT_BOUNTY_MPP_MAX=1.00
-MPP_SECRET_KEY=<at least 32 characters>
+WM_AGENT_BOUNTY_MPP_MAX=<approved bounded amount>
+MPP_SECRET_KEY=<protected server secret, at least 32 characters>
 ```
 
-Approve the V5 escrow from the relayer for the maximum relay amount and fund the relayer with pathUSD for both bounty forwarding and Tempo fees. Keep the relayer key in the Worker secret store only. Native MPP is limited to the paid bounty create and entry routes. After deploying V5, configure `WM_BOUNTY_ESCROW_VERSION=5`; leaving V4 configured puts the Worker in recovery-only mode.
+The signer private key, relayer private key, and MPP secret belong only in
+approved protected server-side secret storage. The relayer must match the
+immutable V6 relayer, have the reviewed pathUSD allowance, and hold enough
+pathUSD for the bounded forwarding amount and Tempo fees. MPP is enabled only
+when its secret, relayer, and spend cap pass the Worker readiness checks.
 
-Test rejected token/chain/recipient/amount/expiry/replay cases, relayer mismatch, insufficient allowance and relay recovery before making the route public.
+For direct wallet actions, review the exact token, amount, chain, recipient,
+escrow address, and calls before signing. For MPP, review the exact challenge
+recipient and amount; do not make a second escrow payment. Never send a bare
+pathUSD transfer to the escrow.
 
-Read [TEMPO-MAINNET.md](TEMPO-MAINNET.md), [BOUNTY-ESCROW.md](BOUNTY-ESCROW.md), and [AGENT-API.md](AGENT-API.md) before changing a value flow.
+The 2.5% fee applies to a winning gross reward, not to the separate entry. Use
+the exact payout in the current transaction plan/discovery rather than
+calculating or guessing from an old bounty record.
+
+## Historical contracts
+
+V1–V5 sources, tests, deployment scripts, and sample configuration are archived
+under [`contracts/stale/`](../contracts/stale/README.md). Do not use them for
+new funding or deployment. Existing historical bounties and transactions still
+belong to their original immutable contracts; reconcile those obligations
+against finalized chain receipts. Archiving does not delete on-chain data,
+change the live V6 contract, or migrate any funds.
+
+Read [TEMPO-MAINNET.md](TEMPO-MAINNET.md),
+[BOUNTY-ESCROW.md](BOUNTY-ESCROW.md), and
+[AGENT-API.md](AGENT-API.md) before changing a value flow.
