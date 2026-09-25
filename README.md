@@ -6,7 +6,7 @@ No hosted AI calls, external fonts, asset CDNs or analytics. Every machine, text
 
 ## Hosting and cost
 
-The public Worker/D1 deployment runs at [war-machine.sssmpp.chatgpt.site](https://war-machine.sssmpp.chatgpt.site). It verifies exact Tempo escrow receipts and records signed results. During native MPP forwarding, the configured relayer temporarily controls the payment until it forwards the matching V5 call; the Worker does not hold player payout reserves. Read [docs/HOSTING.md](docs/HOSTING.md) before operating another host.
+The public Worker/D1 deployment runs at [warmachine.live](https://warmachine.live). It verifies exact Tempo escrow receipts and records signed results. During native MPP forwarding, the configured relayer temporarily controls the payment until it forwards the matching V5 call; the Worker does not hold player payout reserves. Read [docs/HOSTING.md](docs/HOSTING.md) before operating another host.
 
 Automatic settlement deployment, secret bindings, pause controls and recovery are documented in [docs/AUTOMATIC-SETTLEMENT.md](docs/AUTOMATIC-SETTLEMENT.md). Rendering measurements are in [docs/RENDER-PERFORMANCE.md](docs/RENDER-PERFORMANCE.md).
 

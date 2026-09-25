@@ -1,0 +1,80 @@
+.friendly-heading .heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.friendly-rules {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px 18px;
+  align-items: center;
+  margin: 12px 0 22px;
+  padding: 14px 18px;
+  border: 1px solid #315047;
+  border-radius: 10px;
+  background: linear-gradient(110deg, #16352e, #14212a 70%);
+  color: #b2c3c7;
+  font-size: 13px;
+}
+.friendly-rules strong,
+.friendly-live {
+  color: #6de1b9;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.friendly-board .contract-filter {
+  margin-bottom: 14px;
+}
+.friendly-board .contract-filter h2 {
+  margin: 5px 0 0;
+  font-size: 22px;
+}
+.friendly-update,
+.friendly-countdown {
+  color: #9ab1b3;
+  font: 11px var(--mono, monospace);
+}
+.friendly-live { display: inline-flex; align-items: center; gap: 7px; }
+.friendly-live i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #66e0b4;
+  box-shadow: 0 0 10px #66e0b477;
+}
+.friendly-card .contract-preview { position: relative; }
+.friendly-machine-tag {
+  position: absolute;
+  right: 10px;
+  bottom: 9px;
+  border: 1px solid #34505a;
+  border-radius: 5px;
+  padding: 5px 8px;
+  background: #09141ddd;
+  color: #e6edf0;
+  font: 11px var(--mono, monospace);
+}
+.friendly-card .eyebrow { color: #8bd9c2; }
+.friendly-card-meta { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0; }
+.friendly-card-meta span {
+  border: 1px solid #304752;
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: #adc0c5;
+  font: 11px var(--mono, monospace);
+}
+.friendly-card .contract-footer { align-items: center; }
+.friendly-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.friendly-card .contract-footer small { color: #91a9ad; line-height: 1.4; }
+.friendly-loading,
+.friendly-error { margin: 18px 0; padding: 24px; color: #a7b5bb; }
+@media (max-width: 760px) {
+  .friendly-rules { grid-template-columns: 1fr; }
+  .friendly-heading .heading-actions { width: 100%; }
+  .friendly-heading .heading-actions button { flex: 1; }
+  .friendly-card .contract-footer { align-items: stretch; flex-direction: column; }
+  .friendly-card-actions { justify-content: stretch; }
+  .friendly-card-actions button { flex: 1; }
+}

@@ -2,7 +2,7 @@
 
 ## Public deployment
 
-The public deployment is [war-machine.sssmpp.chatgpt.site](https://war-machine.sssmpp.chatgpt.site).
+The canonical public deployment is [warmachine.live](https://warmachine.live). The app, API, discovery document, and shared challenge links use this origin.
 
 It runs the bundled Worker with D1 binding `DB` and the following live runtime configuration:
 

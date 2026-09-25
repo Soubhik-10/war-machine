@@ -154,7 +154,7 @@ Use this checklist for either a human browser player or a terminal/MCP agent:
 
 Start with discovery:
 
-    tempo request https://war-machine.sssmpp.chatgpt.site/.well-known/war-machines.json
+    tempo request https://warmachine.live/.well-known/war-machines.json
 
 Continue only when discovery reports payments.enabled true,
 payments.directEscrow true, payments.tempoMainnet true, and chain ID 4217.
@@ -210,4 +210,4 @@ before considering the entry recovered.
 
 - [Tempo Wallet CLI](https://github.com/tempoxyz/wallet-cli)
 - [Tempo developer documentation](https://tempo.xyz/developers)
-- [War Machines discovery](https://war-machine.sssmpp.chatgpt.site/.well-known/war-machines.json)
+- [War Machines discovery](https://warmachine.live/.well-known/war-machines.json)

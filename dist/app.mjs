@@ -35,6 +35,7 @@
 import { PART_GUIDANCE } from "./part-guidance.mjs";
 import { createPortal } from "./portal.mjs";
 import { createBountyUI } from "./bounties.mjs";
+import { createFriendlyChallengesUI } from "./friendly.mjs";
 import { createHashRouter } from "./routes.mjs";
 import { TERRAIN_INFO } from "./data.mjs";
 import {
@@ -172,6 +173,7 @@ let arenaIdleRAF = 0,
   bountyClock = 0;
 let portal = null,
   bountyUI = null,
+  friendlyUI = null,
   routeRouter = null,
   routeRestoring = false,
   bountyContext = null,
@@ -2764,6 +2766,7 @@ function renderTerrainKey(arena) {
 }
 function renderContractContext() {
   if (!bountyContext) return;
+  const friendly = bountyContext.friendly === true;
   clearInterval(bountyClock);
   bountyClock = 0;
   const el = document.createElement("section");
@@ -2782,9 +2785,11 @@ function renderContractContext() {
       : view === "arena"
         ? bountyContext.attemptId
           ? "PAID BUILD WINDOW · Submit once before the deadline."
-          : "LOCAL TEST · No entry charge or reward. Return to the challenge to pay the entry."
+          : friendly
+            ? "FRIENDLY MATCH · Free to play. No separate build or submission deadline."
+            : "LOCAL TEST · No entry charge or reward. Return to the challenge to pay the entry."
         : "CHALLENGE WORKSHOP · Construction limits are locked to this bounty. Your engineering changes stay in your local draft.") +
-    '</p></div><div class="bounty-actions"><button id="return-contract">← Back to challenge</button>' +
+    '</p></div><div class="bounty-actions"><button id="return-contract">← Back to ' + (friendly ? "friendly challenges" : "challenge") + '</button>' +
     (!officialReceipt
       ? '<button type="button" id="exit-bounty">× Exit to normal play</button>'
       : "") +
@@ -2802,7 +2807,9 @@ function renderContractContext() {
     el.querySelector(".bounty-actions")?.prepend(clock);
   }
   $("#return-contract").onclick = () =>
-    officialReceipt && officialAttemptId
+    friendly
+      ? friendlyUI.open(bountyContext.id)
+      : officialReceipt && officialAttemptId
       ? bountyUI.attempt(officialAttemptId)
       : bountyUI.open(bountyContext.id);
   $("#exit-bounty")?.addEventListener("click", leaveChallenge);
@@ -2820,18 +2827,20 @@ function renderContractContext() {
     };
   if (view === "arena") {
     const button = document.createElement("button");
-    button.textContent = "← Bounty";
-    button.onclick = () => bountyUI.open(bountyContext.id);
+    button.textContent = friendly ? "← Friendly" : "← Bounty";
+    button.onclick = () => friendly ? friendlyUI.open(bountyContext.id) : bountyUI.open(bountyContext.id);
     $(".arena-camera-bar .group")?.append(button);
   }
   if (view === "arena" && bountyContext && !officialReceipt) {
     const small = $(".match-card>small");
     const paidAttempt = !!bountyContext.attemptId;
-    if (small) small.textContent = paidAttempt ? "PAID MACHINE SUBMISSION" : "LOCAL CHALLENGE TEST";
+    if (small) small.textContent = paidAttempt ? "PAID MACHINE SUBMISSION" : friendly ? "FREE FRIENDLY MATCH" : "LOCAL CHALLENGE TEST";
     const p = $(".match-card>p");
     if (p && !matchIssues().length)
       p.textContent = paidAttempt
         ? "Submit your machine before the deadline. The verified result uses the locked seed and settles the entry."
+        : friendly
+          ? "No entry fee or separate build deadline. Take the time you need, then run your free match under normal arena rules."
         : "Test your machine against the fixed opponent. Local simulations do not affect a bounty.";
   }
   if (paidAttempt) {
@@ -2933,6 +2942,35 @@ bountyUI = createBountyUI({
     startBattle(true);
   },
 });
+friendlyUI = createFriendlyChallengesUI({
+  navigate: go,
+  show() {
+    restoreReplay();
+    cleanupView();
+    closeModal();
+    bountyContext = null;
+    officialReceipt = null;
+    officialAttemptId = null;
+    view = "friendly";
+    setNav();
+  },
+  getBuild: () => ({
+    machine: clone(machine),
+    rules: clone(rules),
+    arena: arenaId,
+    objective,
+  }),
+  thumbnail: renderThumbnail,
+  toast,
+  modal: showModal,
+  modalClose: closeModal,
+  practice(b) {
+    prepareContract({ ...b, friendly: true });
+    bountyContext.friendly = true;
+    arenaView();
+    startBattle(false);
+  },
+});
 
 try {
   const theme = localStorage.getItem("wm-theme");
@@ -2997,6 +3035,8 @@ $$("[data-view]").forEach(
       setMobileNav(false);
       return b.dataset.view === "workshop"
         ? workshop()
+        : b.dataset.view === "friendly"
+          ? friendlyUI.open()
         : b.dataset.view === "bounties"
           ? bountyUI.open()
           : b.dataset.view === "rules"
@@ -3097,6 +3137,8 @@ function renderRoute(route) {
     if (route.name === "workshop") return workshop();
     if (route.name === "arena") return arenaView();
     if (route.name === "rules") return rulesView();
+    if (route.name === "friendly") return void friendlyUI.open(undefined, { restore: true });
+    if (route.name === "friendlyChallenge") return void friendlyUI.open(route.value, { restore: true });
     if (route.name === "anchor") {
       if (view !== "rules") rulesView();
       requestAnimationFrame(() => document.getElementById(route.value)?.scrollIntoView());
