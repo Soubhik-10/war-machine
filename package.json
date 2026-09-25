@@ -6,6 +6,7 @@
     "agent:mcp": "node scripts/war-machines-agent-mcp.mjs",
     "benchmark:agent": "node scripts/agent-benchmark.mjs",
     "benchmark:game": "node scripts/game-benchmark.mjs",
+    "benchmark:stress": "node scripts/stress-machine-benchmark.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:inventory": "node scripts/check-test-groups.mjs",
     "test:simulation": "node --test tests/autonomous.test.mjs tests/arsenal.test.mjs tests/audio-events.test.mjs tests/engineering.test.mjs tests/engine-fixes.test.mjs tests/game.test.mjs tests/performance.test.mjs tests/render-performance.test.mjs tests/simulation-behavior.test.mjs tests/terrain-balance.test.mjs tests/visual-effects.test.mjs",
