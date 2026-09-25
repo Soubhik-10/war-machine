@@ -98,7 +98,7 @@ async function req(app,path,method='GET',body,token,key){const r=await fetch(app
 test('guest agent can discover, validate and practice the same engine without any account or ledger change',async t=>{
  const app=await startServer({port:0,database:':memory:',seed:false});t.after(()=>app.close());
  const discovery=await req(app,'/.well-known/war-machines.json');assert.equal(discovery.body.payments.enabled,false);
- const spec=await req(app,'/api/openapi.json');assert.equal(spec.body.components.schemas.Module.properties.id.enum.length,43);
+ const spec=await req(app,'/api/openapi.json');assert.equal(spec.body.components.schemas.Module.properties.id.enum.length,PARTS.length);
  const inspected=await req(app,'/api/blueprints/validate','POST',{machine:rig('winterwheel',['insulator']),arena:'permafrost'});
  assert.equal(inspected.body.valid,true);assert.equal(inspected.body.versions.hash,ENGINE_HASH);assert.ok(inspected.body.environment.some(e=>e.type==='snow'));
  const before=app.store.db.prepare('SELECT COUNT(*) n FROM ledger').get().n;
