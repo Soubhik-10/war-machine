@@ -167,6 +167,8 @@ const musicDirector = new MusicDirector({
 // UI confirmation reuses the context created by the user-gesture audio director.
 let audioCtx = null;
 let arenaIdleRAF = 0,
+  battleCountdownTimer = 0,
+  battleCountdownRun = 0,
   modalCleanup = null,
   replaceFitted = false,
   scoutRenderer = null,
@@ -287,6 +289,11 @@ function go(route, options) {
   routeRouter?.navigate(route, options);
 }
 function stopBattle() {
+  battleCountdownRun++;
+  clearTimeout(battleCountdownTimer);
+  battleCountdownTimer = 0;
+  $(".arena-screen")?.classList.remove("countdown-active");
+  $("#fight-overlay")?.classList.remove("countdown-overlay");
   running = false;
   paused = false;
   cancelAnimationFrame(raf);
@@ -1685,6 +1692,7 @@ function arenaTap(e) {
   }
 }
 function startBattle(replay = false) {
+  if (battleCountdownTimer) return;
   if (officialReceipt) replay = true;
   if (!replay) {
     const issues = matchIssues();
@@ -1706,6 +1714,50 @@ function startBattle(replay = false) {
     };
   }
   if (!matchSource) return;
+  const startButton = $("#start-battle");
+  if (startButton) startButton.disabled = true;
+  runBattleCountdown(() => launchBattle(replay));
+}
+function runBattleCountdown(onComplete) {
+  const overlay = $("#fight-overlay"),
+    screen = $(".arena-screen");
+  if (!overlay || !screen) {
+    onComplete();
+    return;
+  }
+  const run = ++battleCountdownRun,
+    beats = [
+      ["3", 520],
+      ["2", 440],
+      ["1", 360],
+      ["FIGHT!", 760],
+    ];
+  let beatIndex = 0;
+  overlay.classList.remove("briefing-overlay");
+  overlay.classList.add("countdown-overlay");
+  overlay.hidden = false;
+  screen.classList.add("countdown-active");
+  const advance = () => {
+    if (run !== battleCountdownRun || view !== "arena") return;
+    const beat = beats[beatIndex];
+    if (!beat) {
+      battleCountdownTimer = 0;
+      screen.classList.remove("countdown-active");
+      overlay.classList.remove("countdown-overlay");
+      overlay.hidden = true;
+      onComplete();
+      return;
+    }
+    const [label, frequency] = beat;
+    overlay.innerHTML = `<div class="countdown-card" role="status" aria-live="assertive" aria-atomic="true"><small>COMBAT SYSTEMS · ARMED</small><strong class="countdown-number" data-beat="${label}">${label}</strong><span>${label === "FIGHT!" ? "ENGAGE" : "PREPARE FOR DEPLOYMENT"}</span></div>`;
+    beep(frequency, label === "FIGHT!" ? 0.34 : 0.2, label === "FIGHT!" ? 0.09 : 0.055, "triangle");
+    beatIndex++;
+    battleCountdownTimer = window.setTimeout(advance, reducedMotion ? 520 : beat[0] === "FIGHT!" ? 760 : 720);
+  };
+  advance();
+}
+function launchBattle(replay = false) {
+  if (!matchSource || view !== "arena") return;
   cancelAnimationFrame(raf);
   battle = new Battle(
     matchSource.a,
@@ -2664,7 +2716,7 @@ function manual() {
  <section><h3>Control the camera</h3><p>Drag to orbit and tilt. Scroll or pinch to zoom. Right-drag, Shift-drag, or two-finger drag to pan. Fit restores the view. In battle, follow your machine, follow the opponent, frame both, or explore freely. The fullscreen button gives the arena more room.</p></section>
  <section><h3>Engineer the behavior</h3><p>Choose movement style, preferred range, target priority, and damage response in the workshop. Both machines run those instructions automatically. Pause, inspect, replay, and compare weapon performance to improve the next revision. Camera and playback controls never change the outcome.</p></section>
  <section><h3>Automatic systems</h3><p>Boost trades 25 energy and 12 heat for speed. Coolant purge spends 20 energy to remove 45 heat but locks guns for 1.2 seconds. Brace spends 30 energy for 45% damage reduction and slower movement for three seconds. Smoke needs a Veil launcher and 20 energy; it breaks missile tracking and worsens enemy accuracy for five seconds. Both machines trigger these systems when their sensors detect high heat, incoming damage, or a distant target. Each needs power and has a cooldown. An Afterburner improves automatic boost.</p></section>
- <section><h3>Experimental arsenal</h3><p>Prism lasers hit instantly. Helios plasma bypasses half of armor. Storm coils chain through three nearby parts. Rupture scatterguns fire six pellets; Cyclone gatlings spin up during sustained fire. Frost lances slow targets and lower their heat. Widow minelayers drop armed traps behind your marked front, up to three live mines per launcher. Ceramic plating resists thermal weapons; blast cages resist explosives. Fusion reactors power hungry builds but explode when destroyed. Majority-hover builds float above damaging surfaces and ignore poor traction, but still absorb ambient heat.</p></section><section><h3>Layer your defenses</h3><p>Reactive armor reduces the first hit of 35 or more damage by 75%, on top of its armor. Fortress bulkheads reduce damage 52%. Sentinels intercept rockets and mortars for eight energy per shot. Shields recharge after a break in damage; repairs restore damaged connected parts. Batteries can explode into neighboring parts across levels.</p></section>
+ <section><h3>Experimental arsenal</h3><p>Prism lasers hit instantly. Helios plasma bypasses half of armor. Breach sabots ignore 72% of the struck part’s armor resistance, but cannot splash or pass through it and run hot. Storm coils chain through three nearby parts. Rupture scatterguns fire six pellets; Cyclone gatlings spin up during sustained fire. Frost lances slow targets and lower their heat. Widow minelayers drop armed traps behind your marked front, up to three live mines per launcher. Ceramic plating resists thermal weapons; blast cages resist explosives. Fusion reactors power hungry builds but explode when destroyed. Majority-hover builds float above damaging surfaces and ignore poor traction, but still absorb ambient heat.</p></section><section><h3>Layer your defenses</h3><p>Reactive armor reduces the first hit of 35 or more damage by 75%, on top of its armor. Fortress bulkheads reduce damage 52%. Sentinels intercept rockets and mortars for eight energy per shot. Shields recharge after a break in damage; repairs restore damaged connected parts. Batteries can explode into neighboring parts across levels.</p></section>
  <section><h3>Height changes the fight</h3><p>Shots travel through three-dimensional space. Elevated guns can shoot over low obstacles and ground armor. Towers are exposed and reduce steering stability. Mortars arc over cover and explode on impact. Damage to a support can bring every part above it down.</p></section>
  <section><h3>Use the ground</h3><p>Sand and mud slow wheels; treads retain most of their traction. Ice cools systems but reduces grip. Oil also reduces grip. Furnace vents erupt for four seconds in every twelve, starting at eight seconds. Lava and active vents damage parts and add heat. Redline Ridge has raised firing positions. Coolant channels increase cooling by 70% but slow wheels; rubble cuts wheel speed by 35%. Treads preserve most speed on both. Raised terrain also blocks low shots crossing the ridge. Most cover can be destroyed.</p></section>
  <section><h3>Fight for resources</h3><p>Occupy the central ring alone for three seconds to gain eight energy per second. Leave it and you lose control. Green caches restore up to 100 HP across surviving parts and 30 energy, then respawn after 25 seconds. At 55 seconds the containment field starts closing. At 100 seconds the higher percentage of surviving integrity wins; within 2.5 points is a draw.</p></section>

@@ -1,4 +1,4 @@
-export const BALANCE_VERSION="agent-season-6", ENGINE_VERSION="agent-season-6-explainable", TERRAIN_VERSION="climate-3";
+export const BALANCE_VERSION="agent-season-7", ENGINE_VERSION="agent-season-6-explainable", TERRAIN_VERSION="climate-3";
 export const VERSION=3, GRID=9, LIMIT=1200, PART_LIMIT=32, MASS_LIMIT=360, WEAPON_LIMIT=8, LEVELS=3, LAYER_HEIGHT=1.65;
 // A modest durability pass gives damaged systems time to degrade visibly before
 // they disappear. Costs and offensive output stay unchanged, so the extra time
@@ -79,6 +79,7 @@ export const PARTS=[
  {id:'heater',name:'Thermal regulator',cat:'Systems',cost:60,hp:110,mass:7,desc:'In deep cold, halves the remaining power-generation penalty. Uses 6 energy/s, adds 2 heat/s and slightly reduces the cold cooling bonus. Stacking has diminishing returns.'},
  {id:'gyro',name:'Vector stabilizer',cat:'Systems',cost:65,hp:115,mass:8,desc:'Powered gyroscope raises poor steering grip to 70%, using 4 energy/s only on slippery ground. Does not remove terrain speed penalties. Additional gyros add redundancy, not grip.'},
  {id:'shredder',name:'Needle flechette cannon',cat:'Weapons',cost:120,hp:125,mass:13,damage:17,pellets:3,rate:.9,range:320,heat:17,energy:16,speed:1000,spread:.12,armorPierce:.15,desc:'Three high-speed darts per burst, each ignoring 15% of armor resistance. Narrower spread than a scattergun; needs a steady firing lane and cooling.'},
+ {id:'sabot',name:'Breach sabot',cat:'Weapons',cost:150,hp:120,mass:17,damage:74,rate:2.5,range:430,heat:34,energy:30,speed:1050,spread:.015,armorPierce:.72,desc:'A dense dart ignores 72% of armor resistance on the directly struck part. No splash or through-part penetration; high heat and power demand limit sustained fire.'},
 ].map((p,i)=>({...p,support:['core','frame','armor'].includes(p.id)||!!p.support,ground:['core','wheel','track','ram'].includes(p.id)||!!p.ground,cat:['armor','shield','repair'].includes(p.id)?'Defense':p.cat,index:i}));
 export const BY_ID=Object.freeze(Object.assign(Object.create(null),Object.fromEntries(PARTS.map(p=>[p.id,p]))));
 export const PAINTS=['#e5a849','#5cbab4','#d66657','#829bd0','#c7c8c2','#9d7abd','#ed7145','#5d8148','#202b38','#ebcf34','#d35f99','#eeeeed'];

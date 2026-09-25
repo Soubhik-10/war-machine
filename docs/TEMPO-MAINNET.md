@@ -59,6 +59,14 @@ Do not run the V6 deploy helper as part of a routine app release. A new escrow
 deployment requires its own explicit operational review, address/bytecode
 verification, funding/allowance plan, and rollout approval.
 
+An application or engine release is not a contract boundary: do not archive a
+funded bounty, return its reserve, or refund an accepted entry just because its
+recorded engine hash differs from the current app. Preserve the recorded
+release for deterministic evaluation/replay and keep the bounty playable. Only
+an actual escrow version/address mismatch changes which contract rules apply;
+ordinary expiry, creator cancellation, and on-chain settlement remain the
+other valid state transitions.
+
 V1–V5 source, tests, scripts, and deployment examples live under
 [`contracts/stale/`](../contracts/stale/README.md). Their already-deployed
 contracts remain immutable. Existing balances and attempts cannot be moved
