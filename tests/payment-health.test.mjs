@@ -122,7 +122,7 @@ test('a rejected refresh releases its slot and a failed D1 read leaves public br
 test('static requests cause no readiness RPC, background work or settlement lease write', async () => {
   const key = '0x' + '0a'.repeat(32);
   const signer = privateKeyToAccount(key).address;
-  const env = { WM_MODE: 'tempo-mainnet', WM_BOUNTY_ESCROW_VERSION: '5',
+  const env = { WM_MODE: 'tempo-mainnet', WM_PAID_CHALLENGES_ENABLED: 'true', WM_BOUNTY_ESCROW_VERSION: '5',
     WM_BOUNTY_ESCROW_ADDRESS: '0x' + '55'.repeat(20),
     WM_ESCROW_SETTLEMENT_SIGNER: signer, WM_SETTLEMENT_PRIVATE_KEY: key,
     WM_RESULT_SIGNING_READY: 'true', DB: journalDb() };
@@ -140,7 +140,7 @@ test('catalog and health expose unavailable snapshots when D1 readiness reads fa
   const key = '0x' + '0a'.repeat(32);
   const signer = privateKeyToAccount(key).address;
   const db = journalDb({ fail: true });
-  const env = { WM_MODE: 'tempo-mainnet', WM_BOUNTY_ESCROW_VERSION: '5',
+  const env = { WM_MODE: 'tempo-mainnet', WM_PAID_CHALLENGES_ENABLED: 'true', WM_BOUNTY_ESCROW_VERSION: '5',
     WM_BOUNTY_ESCROW_ADDRESS: '0x' + '77'.repeat(20),
     WM_ESCROW_SETTLEMENT_SIGNER: signer, WM_SETTLEMENT_PRIVATE_KEY: key,
     WM_RESULT_SIGNING_READY: 'true', DB: db };
@@ -203,7 +203,7 @@ test('only relevant requests invoke the settlement lease; duplicate triggers obe
         return { meta: { changes: 0 } };
       } };
   } };
-  const env = { WM_MODE: 'tempo-mainnet', WM_BOUNTY_ESCROW_VERSION: '5',
+  const env = { WM_MODE: 'tempo-mainnet', WM_PAID_CHALLENGES_ENABLED: 'true', WM_BOUNTY_ESCROW_VERSION: '5',
     WM_BOUNTY_ESCROW_ADDRESS: '0x' + '55'.repeat(20),
     WM_ESCROW_SETTLEMENT_SIGNER: signer, WM_SETTLEMENT_PRIVATE_KEY: key,
     WM_RESULT_SIGNING_READY: 'true', DB: db };

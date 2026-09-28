@@ -8,6 +8,20 @@ const snapshots = new Map();
 const inFlight = new Map();
 const counters = { hit: 0, miss: 0, refresh: 0 };
 
+// Paid challenges can be deliberately left dormant while the game remains
+// public.  Do not turn a normal discovery or rules request into a readiness
+// probe just because the Worker still knows how to recover an older escrow
+// operation.
+const dormant = config => ({
+  state: 'dormant',
+  ready: false,
+  fresh: true,
+  checkedAt: null,
+  reason: config.paidChallengesReason || 'Paid challenges are disabled by operator configuration.',
+});
+
+const isDormant = config => config?.paidChallengesEnabled === false;
+
 function identity(config) {
   const base = `payment-health:${config.chainId}:${config.escrowAddress}:v${config.escrowVersion}:s${config.settlementSigner || ''}:r${config.relayerAddress || ''}`;
   return config.escrowVersion === '6'
@@ -31,6 +45,7 @@ function snapshot(value, at) {
 }
 
 export function paymentHealthSnapshot(config, at = Date.now()) {
+  if (isDormant(config)) return dormant(config);
   if (!config.enabled || !config.automaticSettlementReady) return unavailable(config);
   const key = identity(config);
   const value = snapshot(snapshots.get(key), at);
@@ -42,6 +57,18 @@ export function paymentHealthCounters() { return { ...counters }; }
 
 export function settlementCapacity(health) {
   const minimumUnits = String(MIN_FEE_BALANCE_UNITS);
+  if (health?.state === 'dormant') {
+    const paused = role => ({ role, state: 'dormant', balanceUnits: null, minimumUnits });
+    return {
+      state: 'dormant',
+      ready: false,
+      fresh: true,
+      checkedAt: null,
+      signer: paused('settlement-signer'),
+      relayer: paused('mpp-relayer'),
+      warning: null,
+    };
+  }
   const fresh = health?.fresh === true;
   if (!fresh && ['unknown', 'checking', 'stale', undefined, null].includes(health?.state)) {
     const checking = (role) => ({ role, state: 'checking', balanceUnits: null, minimumUnits });
@@ -75,7 +102,7 @@ export function settlementCapacity(health) {
 
 export async function persistedPaymentHealthSnapshot(db, config, at = Date.now()) {
   const local = paymentHealthSnapshot(config, at);
-  if (local.fresh || !config.enabled || !config.automaticSettlementReady) return local;
+  if (local.fresh || isDormant(config) || !config.enabled || !config.automaticSettlementReady) return local;
   // D1 is optional for browsing. A slow or failed read falls back to the
   // isolate snapshot; it never starts RPC in the response path.
   let timer;
@@ -98,6 +125,7 @@ export async function persistedPaymentHealthSnapshot(db, config, at = Date.now()
 // Only new paid admission awaits this. Public reads use the snapshot and can
 // start a refresh in waitUntil without placing chain RPC on the response path.
 export async function paymentHealth(db, config, readBalance, readDeployment = null, at = Date.now()) {
+  if (isDormant(config)) return dormant(config);
   if (!config.enabled || !config.automaticSettlementReady) return unavailable(config);
   const key = identity(config);
   const local = snapshot(snapshots.get(key), at);

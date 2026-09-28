@@ -34,7 +34,6 @@
 } from "./data.mjs";
 import { PART_GUIDANCE } from "./part-guidance.mjs";
 import { createPortal } from "./portal.mjs";
-import { createBountyUI } from "./bounties.mjs";
 import { createFriendlyChallengesUI } from "./friendly.mjs";
 import { createHashRouter } from "./routes.mjs";
 import { CLIENT_ENGINE_HASH } from "./release.mjs";
@@ -185,7 +184,21 @@ let portal = null,
   replayRestore = null,
   officialReceipt = null,
   officialAttemptId = null,
-  officialRedirectTimer = 0;
+  officialRedirectTimer = 0,
+  paidBountyUIReady = false;
+
+const dormantBountyUI = {
+  leave() {},
+  profile() {},
+  attempt() {},
+  deploy() {},
+  replay() {},
+  open() {
+    toast("Paid bounties are currently disabled. Try a free challenge instead.");
+    friendlyUI?.open();
+  },
+};
+bountyUI = dormantBountyUI;
 let rules = clone(DEFAULT_RULES),
   preChallengeRules = null,
   mirrorOpponent = false;
@@ -2528,7 +2541,7 @@ function showStressTest() {
     if (label) label.textContent = completed ? `Testing ${arena}` : "Preparing deterministic tests";
     if (count) count.textContent = `${completed} of ${total} runs`;
   };
-  showModal("Build stress test", `<p>Running two fixed seeds across every arena. The test yields between battles so the page stays responsive. Results are local and never touch a bounty or wallet.</p><div class="stress-progress" role="status" aria-live="polite"><div class="stress-progress-head"><strong id="stress-progress-label">Preparing deterministic tests</strong><span id="stress-progress-count">0 of 0 runs</span></div><div class="stress-progress-track"><i id="stress-progress-fill"></i></div><button id="stress-cancel">Stop test</button></div>`, () => {
+  showModal("Build stress test", `<p>Running two fixed seeds across every arena. The test yields between battles so the page stays responsive. Results stay local and do not change a challenge or rating.</p><div class="stress-progress" role="status" aria-live="polite"><div class="stress-progress-head"><strong id="stress-progress-label">Preparing deterministic tests</strong><span id="stress-progress-count">0 of 0 runs</span></div><div class="stress-progress-track"><i id="stress-progress-fill"></i></div><button id="stress-cancel">Stop test</button></div>`, () => {
     const stop = $("#stress-cancel");
     if (stop) stop.onclick = () => { cancelled = true; stop.disabled = true; stop.textContent = "Stopping…"; };
     modalCleanup = () => { cancelled = true; };
@@ -2838,7 +2851,7 @@ function manual() {
  <section><h3>Use the ground</h3><p>Sand and mud slow wheels; treads retain most of their traction. Ice cools systems but reduces grip. Oil also reduces grip. Furnace vents erupt for four seconds in every twelve, starting at eight seconds. Lava and active vents damage parts and add heat. Redline Ridge has raised firing positions. Coolant channels increase cooling by 70% but slow wheels; rubble cuts wheel speed by 35%. Treads preserve most speed on both. Raised terrain also blocks low shots crossing the ridge. Most cover can be destroyed.</p></section>
  <section><h3>Fight for resources</h3><p>Occupy the central ring alone for three seconds to gain eight energy per second. Leave it and you lose control. Green caches restore up to 100 HP across surviving parts and 30 energy, then respawn after 25 seconds. At 55 seconds the containment field starts closing. At 100 seconds the higher percentage of surviving integrity wins; within 2.5 points is a draw.</p></section>
  <section><h3>Test and replay</h3><p>Every match runs automatically from the saved behavior and seed. Exact replay repeats that same experiment. Playback speed and camera movement only change how you watch. Tap a part to inspect it. Weapon status explains reloads, firing arcs, and shortages; Battle report shows damage contribution and refit advice. View the other machine before building your own. Older live-command links still import as automatic matches.</p></section>
- <section><h3>Keep and share your machines</h3><p>Your build autosaves on this device. Save up to eight named blueprints or export JSON files. Previous blueprint files still import. Challenge links contain all parts, layers, upgrades, colors, front direction, arena, seed, and match rules. Host the static game anywhere you choose. Your friend needs access to your host; for large builds or another host, exchange JSON challenge files. Sandbox battles stay on each player’s device. Bounty links use your game server and keep authoritative results there.</p></section><section><h3>Tempo bounties</h3><p>Connect the Tempo wallet that will fund, enter or receive a reward. Creating and entering a bounty each send one transaction that batches the pathUSD approval and direct escrow call. Use local simulations to iterate before paying an entry. The server locks the builds, terrain and rules, then independent signers check the deterministic outcome before the escrow settles the payout. The result is recorded before the challenge can be tried again. A loss, draw, or missed build deadline sends the entry to the bounty creator; creators can close an idle bounty.</p></section></div><div class="modal-footer"><button class="primary" data-close>Back to home</button></div>`,
+ <section><h3>Keep and share your machines</h3><p>Your build autosaves on this device. Save up to eight named blueprints or export JSON files. Previous blueprint files still import. Challenge links contain all parts, layers, upgrades, colors, front direction, arena, seed, and match rules. Host the static game anywhere you choose. Your friend needs access to your host; for large builds or another host, exchange JSON challenge files. Free challenge results are reproduced by the game server and keep the authoritative replay there.</p></section><section><h3>Challenge friends</h3><p>Post a completed machine, send the link, and choose casual or rated play. Your friend builds a counter under the same rules. The server locks both builds, terrain, objective, and seed before it reproduces the match. Ratings change only after that verified result. Challenges are free, carry no entry fee or prize, and have no cash value.</p></section></div><div class="modal-footer"><button class="primary" data-close>Back to home</button></div>`,
   );
 }
 function rulesView() {
@@ -2850,14 +2863,14 @@ function rulesView() {
   app.innerHTML = `<div class="page-heading rules-heading"><div><span class="eyebrow">FIELD MANUAL / COMBAT RULES</span><h1>HOW MATCHES WORK.</h1><p>Build the machine, choose its behavior, then watch the deterministic simulation resolve the fight.</p></div><div class="heading-actions"><button id="rules-workshop">Open workshop</button><button id="rules-arena" class="primary">Run a test battle</button></div></div>
   <div class="rules-page">
      <section class="panel rules-hero"><div><span class="eyebrow">THE OBJECTIVE</span><h2>Destroy the other machine’s command core.</h2><p>Every match is deterministic. Both machines use their saved parts, front direction, behavior, terrain and the same seed. No hidden player input changes the result.</p></div><div class="rules-hero-stats"><div><strong>100 s</strong><span>match clock</span></div><div><strong>60 Hz</strong><span>simulation</span></div><div><strong>2.5%</strong><span>draw margin</span></div></div></section>
-    <div class="rules-jump" aria-label="Rules sections"><span>JUMP TO</span><a href="#rules-result">Result</a><a href="#rules-combat">Combat</a><a href="#rules-systems">Systems</a><a href="#rules-terrain">Terrain</a><a href="#rules-bounties">Bounties</a></div>
+    <div class="rules-jump" aria-label="Rules sections"><span>JUMP TO</span><a href="#rules-result">Result</a><a href="#rules-combat">Combat</a><a href="#rules-systems">Systems</a><a href="#rules-terrain">Terrain</a><a href="#rules-challenges">Challenges</a></div>
     <section class="rules-section panel" id="rules-result"><div class="rules-section-head"><span class="rules-index">01</span><div><span class="eyebrow">RESULT</span><h2>How a winner is decided</h2></div></div><div class="rules-section-body rules-result-grid"><div class="rule-step"><b>01</b><h3>Destroy a core</h3><p>Destroying the opponent command core immediately wins the match. If both cores are destroyed in the same exchange, the result is a draw.</p></div><div class="rule-step"><b>02</b><h3>Survive the clock</h3><p>If both cores are still alive at 100 seconds, the engine compares the percentage of starting module health each machine has left.</p></div><div class="rule-step"><b>03</b><h3>Resolve close calls</h3><p>The higher integrity wins. A difference under 2.5 percentage points is a draw. Integrity is about surviving structure, not just the core.</p></div></div></section>
      <section class="rules-section panel" id="rules-combat"><div class="rules-section-head"><span class="rules-index">02</span><div><span class="eyebrow">DETERMINISTIC COMBAT</span><h2>How machines choose their fight</h2></div></div><div class="rules-section-body rules-two-col"><div><h3>Movement style</h3><ul class="rules-list"><li><b>Balanced</b><span>Hold the configured engagement range.</span></li><li><b>Kite</b><span>Back away while keeping weapons on target.</span></li><li><b>Flank</b><span>Circle to expose weaker sides and change firing angles.</span></li><li><b>Ram</b><span>Close distance and collide at short range.</span></li></ul></div><div><h3>Target priority</h3><ul class="rules-list"><li><b>Weapons</b><span>Strip the other machine’s damage output first.</span></li><li><b>Power</b><span>Attack generators, batteries, cooling and shields.</span></li><li><b>Mobility</b><span>Break wheels, treads and hover systems.</span></li><li><b>Core or nearest</b><span>Focus the command core or the closest valid part.</span></li></ul></div><div class="rules-callout"><h3>Facing and firing arcs</h3><p>The marked front is the machine's fighting nose. Each mount has its own facing and firing arc. A weapon can be in range and still miss its opportunity if it is mounted backwards or the target is outside its arc. The engine leads moving targets and respects smoke, cover, height and projectile travel time.</p></div></div></section>
     <section class="rules-section panel" id="rules-systems"><div class="rules-section-head"><span class="rules-index">03</span><div><span class="eyebrow">POWER, HEAT AND DAMAGE</span><h2>What keeps a machine alive</h2></div></div><div class="rules-section-body rules-card-grid"><article class="rules-card"><span class="rules-card-label">HEAT</span><h3>Firepower has a limit</h3><p>Every shot adds heat. Radiators and cooling systems remove it, while hot terrain and heaters add more. At 85 heat, automatic systems enter thermal retreat: firing pauses and the machine backs away while cooling. At 100 heat, weapons shut down. They return below 35 heat. Automatic coolant purge removes 45 heat, costs 20 energy, and pauses guns for 1.2 seconds.</p></article><article class="rules-card"><span class="rules-card-label">ENERGY</span><h3>Power the machine</h3><p>Energy starts at the machine's capacity and changes every simulation tick from generators, environment drain and reactor control. Weapons, shields, repairs, interceptors and abilities spend it. Boost costs 25 energy and 12 heat; brace costs 30 energy for 45% damage reduction for 3 seconds; interceptors cost 8 energy per shot. At low power, weapons wait and support systems lose their powered benefits.</p></article><article class="rules-card"><span class="rules-card-label">DAMAGE</span><h3>Protect the right layer</h3><p>Armor, shields, thermal and blast resistance, brace systems and reactive armor reduce incoming damage. Damaged weapons reload more slowly, damaged coolers remove less heat, damaged mobility reduces speed and steering, and damaged sensors shorten range and spread aim. Batteries can surge before failure, briefly draining energy and adding heat; destroyed batteries can still explode into nearby parts.</p></article><article class="rules-card"><span class="rules-card-label">STRUCTURE</span><h3>Connections matter</h3><p>Upper parts need support below them. If a frame or deck is destroyed, unsupported parts collapse. Towers improve firing positions but are exposed and make the machine harder to turn.</p></article></div></section>
     <section class="rules-section panel" id="rules-terrain"><div class="rules-section-head"><span class="rules-index">04</span><div><span class="eyebrow">ARENA CONDITIONS</span><h2>Build for the ground you choose</h2></div></div><div class="rules-section-body"><p class="rules-intro">Terrain is sampled at each machine's position, so moving a few metres can change the tradeoff. Hovering avoids most contact hazards but still suffers ambient heat and cold.</p><div class="terrain-rule-grid"><div><b>Road</b><span>Normal traction and speed.</span></div><div><b>Sand and mud</b><span>Slow wheels; treads retain more speed.</span></div><div><b>Oil and ice</b><span>Reduce grip. Ice also improves cooling.</span></div><div><b>Snow</b><span>Slows wheels; winter tires help.</span></div><div><b>Brine</b><span>Drains energy over time.</span></div><div><b>Lava and vents</b><span>Add heat and damage grounded machines.</span></div><div><b>Rubble and coolant</b><span>Slow wheels; coolant increases cooling.</span></div><div><b>Ridges</b><span>Raise firing positions and block low shots.</span></div></div><div class="rules-arena-strip"><div><b>Central reactor</b><span>Hold it alone for 3 seconds to gain 8 energy per second. Leave the ring and control is lost.</span></div><div><b>Repair caches</b><span>Restore up to 100 health and 30 energy. They return after 25 seconds.</span></div><div><b>Containment field</b><span>Starts closing at 55 seconds. Machines outside take core damage as the ring contracts.</span></div></div></div></section>
     <section class="rules-section panel" id="rules-build"><div class="rules-section-head"><span class="rules-index">05</span><div><span class="eyebrow">ENGINEERING LIMITS</span><h2>Build within the class</h2></div></div><div class="rules-section-body rules-build-grid"><div><h3>Know the standard class</h3><p>The default class allows 1,200 credits, 32 fitted parts, 360 tonnes and 8 weapons. The command core is required but does not count toward the fitted-part limit. Custom and unlimited classes can change the caps.</p></div><div><h3>Choose a tradeoff</h3><p>Every fitted part has a credit cost, mass, health and system contribution. More armor adds mass. More weapons add damage but also reload pressure, energy demand and heat. Elevated mounts cost more and still need support.</p></div><div><h3>Make stacking meaningful</h3><p>The grid has three levels. Additional copies of one weapon share fire-control bandwidth and reload more slowly after the first two. A compact, supported design can outperform a taller pile of identical guns.</p></div></div></section>
-    <section class="rules-section panel" id="rules-bounties"><div class="rules-section-head"><span class="rules-index">06</span><div><span class="eyebrow">PAID CHALLENGES</span><h2>How a paid challenge works</h2></div></div><div class="rules-section-body rules-bounty-flow"><div class="bounty-flow-step"><b>01</b><span>Creator funds a reward and locks the machine, arena, seed and limits.</span></div><div class="bounty-flow-step"><b>02</b><span>The player joining pays the entry and receives the full opponent plus a timed build window.</span></div><div class="bounty-flow-step"><b>03</b><span>The match runs once. The result is recorded and checked before payout.</span></div><div class="bounty-flow-step"><b>04</b><span>If the joining player wins, they receive 97.5% of the gross reward after the 2.5% platform fee. A loss, draw or missed deadline sends the entry to the creator.</span></div></div><p class="rules-footnote">Payment only handles the reward; it does not change the combat rules. Watch the full simulation in the Arena before the result is finalized.</p></section>
-    <div class="rules-actions"><button id="rules-workshop-bottom" class="primary">Build a machine</button><button id="rules-arena-bottom">Run a test battle</button><button id="rules-bounties-bottom">Browse bounties</button></div>
+    <section class="rules-section panel" id="rules-challenges"><div class="rules-section-head"><span class="rules-index">06</span><div><span class="eyebrow">FREE CHALLENGES</span><h2>How a challenge works</h2></div></div><div class="rules-section-body rules-bounty-flow"><div class="bounty-flow-step"><b>01</b><span>Post a completed machine with an arena, objective, and build limits, then share the link.</span></div><div class="bounty-flow-step"><b>02</b><span>Your friend builds a counter under the same limits and chooses a casual or rated match.</span></div><div class="bounty-flow-step"><b>03</b><span>The server locks both builds and reproduces the deterministic fight with one shared seed.</span></div><div class="bounty-flow-step"><b>04</b><span>Open the verified replay, inspect the deciding event, and share the result card. Rated results update the leaderboard.</span></div></div><p class="rules-footnote">Challenges are free. There is no wallet, entry fee, prize, or cash value. The replay uses the same combat rules shown here.</p></section>
+    <div class="rules-actions"><button id="rules-workshop-bottom" class="primary">Build a machine</button><button id="rules-arena-bottom">Run a test battle</button><button id="rules-challenges-bottom">Browse challenges</button></div>
   </div>`;
   $("#rules-result .rules-section-body")?.insertAdjacentHTML("beforeend", '<div class="rules-callout"><h3>Published timeout formula</h3><p>When both cores survive, the deterministic score is <b>35% core survival + 25% structure + 15% weapons + 15% mobility + 10% power and cooling</b>. The higher score wins; a gap under 2.5 points is a draw. This prevents cheap armor walls from winning by raw hit points alone.</p></div>');
   $("#rules-terrain .rules-arena-strip")?.insertAdjacentHTML("beforeend", '<div><b>Escort convoy</b><span>Choose this objective in Proving grounds. Keep your cargo near your machine, stop the opponent from contesting it, and reach the far gate. Cargo progress breaks time-limit ties.</span></div>');
@@ -2869,7 +2882,7 @@ function rulesView() {
   $("#rules-arena").onclick = arenaView;
   $("#rules-workshop-bottom").onclick = workshop;
   $("#rules-arena-bottom").onclick = arenaView;
-  $("#rules-bounties-bottom").onclick = () => bountyUI.open();
+  $("#rules-challenges-bottom").onclick = () => friendlyUI.open();
   window.scrollTo(0, 0);
 }
 $("#modal").addEventListener("close", () => {
@@ -3010,7 +3023,7 @@ function renderContractContext() {
         ? "Submit your machine before the deadline. The verified result uses the locked seed and settles the entry."
         : friendly
           ? "No entry fee or separate build deadline. Take the time you need, then run your free match under normal arena rules."
-        : "Test your machine against the fixed opponent. Local simulations do not affect a bounty.";
+        : "Test your machine against the fixed opponent. Local simulations stay separate from shared challenges.";
   }
   if (paidAttempt) {
     const deadline = Number(bountyContext.buildDeadline);
@@ -3039,7 +3052,10 @@ function renderContractContext() {
     if (deadline > Date.now()) bountyClock = setInterval(tick, 1000);
   }
 }
-bountyUI = createBountyUI({
+async function initializePaidBountyUI() {
+  if (paidBountyUIReady) return bountyUI;
+  const { createBountyUI } = await import("./bounties.mjs");
+  bountyUI = createBountyUI({
   navigate: go,
   show() {
     restoreReplay();
@@ -3110,7 +3126,27 @@ bountyUI = createBountyUI({
     };
     startBattle(true);
   },
-});
+  });
+  paidBountyUIReady = true;
+  document.querySelector('[data-view="bounties"]')?.removeAttribute("hidden");
+  return bountyUI;
+}
+async function syncPaidBountyMode() {
+  try {
+    const response = await fetch("/api/rules", { credentials: "same-origin" });
+    const catalog = response.ok ? await response.json() : null;
+    if (catalog?.features?.paidChallenges !== true) return;
+    await initializePaidBountyUI();
+  } catch {
+    // Free challenges remain available if the optional paid-mode check is offline.
+  }
+}
+async function openPaidBounties(id, options) {
+  if (!paidBountyUIReady) {
+    await initializePaidBountyUI().catch(() => null);
+  }
+  return bountyUI.open(id, options);
+}
 friendlyUI = createFriendlyChallengesUI({
   navigate: go,
   show() {
@@ -3139,7 +3175,59 @@ friendlyUI = createFriendlyChallengesUI({
     arenaView();
     startBattle(false);
   },
+  replay(match) {
+    const replay = match?.replay;
+    if (!replay?.challenger || !replay?.defender) {
+      toast("The locked replay record is not available yet.");
+      return;
+    }
+    let challengerTerms;
+    let defenderTerms;
+    try {
+      challengerTerms = unpackChallenge(replay.challenger);
+      defenderTerms = unpackChallenge(replay.defender);
+    } catch {
+      toast("The locked replay record could not be opened.");
+      return;
+    }
+    restoreReplay();
+    replayRestore = {
+      machine: clone(machine),
+      challenge,
+      rules: clone(rules),
+      arenaId,
+      objective,
+      seed,
+      bountyContext,
+      officialAttemptId,
+    };
+    machine = challengerTerms.machine;
+    challenge = defenderTerms;
+    rules = clone(replay.rules || challengerTerms.rules);
+    arenaId = replay.arena || challengerTerms.arena;
+    objective = replay.objective || challengerTerms.objective || "reactor";
+    seed = Number(replay.seed);
+    battleMode = rules.combat;
+    bountyContext = { friendly: true, id: match.challengeId || match.id, title: "Verified challenge" };
+    officialReceipt = null;
+    officialAttemptId = null;
+    matchSource = {
+      a: clone(machine),
+      b: clone(challenge.machine),
+      arena: arenaId,
+      objective,
+      seed,
+      enemy: null,
+      mode: battleMode,
+      rules: clone(rules),
+      commands: [],
+      swapSpawns: !!replay.swapSpawns,
+    };
+    arenaView();
+    startBattle(true);
+  },
 });
+void syncPaidBountyMode();
 
 try {
   const theme = localStorage.getItem("wm-theme");
@@ -3167,8 +3255,7 @@ portal = createPortal({
   }),
   workshop,
   arena: arenaView,
-  contracts: () => bountyUI.open(),
-  account: () => bountyUI.profile(),
+  challenges: () => friendlyUI.open(),
   toast,
   tryArena(id) {
     restoreReplay();
@@ -3205,9 +3292,9 @@ $$("[data-view]").forEach(
       return b.dataset.view === "workshop"
         ? workshop()
         : b.dataset.view === "friendly"
-          ? friendlyUI.open()
+        ? friendlyUI.open()
         : b.dataset.view === "bounties"
-          ? bountyUI.open()
+          ? openPaidBounties()
         : b.dataset.view === "meta"
           ? metaView()
         : b.dataset.view === "rules"
@@ -3242,10 +3329,10 @@ function metaView() {
   cleanupView();
   view = "meta";
   setNav();
-  app.innerHTML = `<div class="page-heading meta-heading"><div><span class="eyebrow">BALANCE INTELLIGENCE / DAILY BATTLE REPORTS</span><h1>THE META.</h1><p>A transparent, date-by-date view of how real machines perform across the War Machines battlefield.</p></div><div class="meta-controls"><label for="meta-history">REPORT DATE · UTC</label><select id="meta-history" aria-label="Choose a daily battle report" disabled><option>Loading reports…</option></select><button id="meta-refresh" type="button">Refresh latest</button></div></div><section class="panel meta-disclosure"><div class="meta-disclosure-mark" aria-hidden="true">DATA</div><div><strong>Your battles power this report.</strong><p>Completed practice, friendly, challenge, and bounty battles feed these public balance reports. The analysis uses machine part layouts and upgrades, outcomes, weapon fire and hits, damage, heat, power, arena, rules, and engine release. Names and wallet addresses are not included in the report.</p><div class="meta-retention"><span><b>Daily analysis</b><i id="meta-interval">24 hours</i></span><span><b>Raw battle logs</b><i>7 days</i></span><span><b>Published reports</b><i>Up to 365 daily snapshots</i></span></div></div><small id="meta-updated" role="status" aria-live="polite">Loading the latest report…</small></section><div id="meta-content" class="meta-content" aria-live="polite"></div>`;
+  app.innerHTML = `<div class="page-heading meta-heading"><div><span class="eyebrow">BALANCE INTELLIGENCE / DAILY BATTLE REPORTS</span><h1>THE META.</h1><p>A transparent, date-by-date view of how real machines perform across the War Machines battlefield.</p></div><div class="meta-controls"><label for="meta-history">REPORT DATE · UTC</label><select id="meta-history" aria-label="Choose a daily battle report" disabled><option>Loading reports…</option></select><button id="meta-refresh" type="button">Refresh latest</button></div></div><section class="panel meta-disclosure"><div class="meta-disclosure-mark" aria-hidden="true">DATA</div><div><strong>Your battles power this report.</strong><p>Completed practice, friendly, and shared challenge battles feed these public balance reports. The analysis uses machine part layouts and upgrades, outcomes, weapon fire and hits, damage, heat, power, arena, rules, and engine release. Names are not included in the report.</p><div class="meta-retention"><span><b>Daily analysis</b><i id="meta-interval">24 hours</i></span><span><b>Raw battle logs</b><i>7 days</i></span><span><b>Published reports</b><i>Up to 365 daily snapshots</i></span></div></div><small id="meta-updated" role="status" aria-live="polite">Loading the latest report…</small></section><div id="meta-content" class="meta-content" aria-live="polite"></div>`;
   const content = $("#meta-content"), status = $("#meta-updated"), refresh = $("#meta-refresh"), history = $("#meta-history");
   let requestSequence = 0, reports = [];
-  const sourceLabel = (source) => ({ "server-paid": "Paid bounty", "server-practice": "Server practice", "browser-practice": "Practice", "browser-friendly": "Friendly match", "browser-challenge": "Shared challenge" }[source] || source || "Unknown source");
+  const sourceLabel = (source) => ({ "server-paid": "Archived match", "server-practice": "Server practice", "browser-practice": "Practice", "browser-friendly": "Friendly match", "browser-challenge": "Shared challenge" }[source] || source || "Unknown source");
   const dateLabel = (timestamp) => {
     const date = new Date(timestamp);
     return Number.isFinite(date.getTime()) ? `${date.toISOString().slice(0, 10)} UTC` : "Unknown date";
@@ -3358,7 +3445,7 @@ function metaView() {
       history.disabled = reports.length === 0;
       if (!selected) {
         status.textContent = reports.length ? "This saved report is unavailable." : "No battle report has been published yet.";
-        content.innerHTML = `<section class="panel meta-empty"><strong>${reports.length ? "Report could not be loaded." : "The first daily report is waiting for completed battles."}</strong><p>Every completed practice, friendly, shared challenge, and bounty battle is eligible for replay-verified aggregate analysis. Reports run every ${Number(data.intervalHours) || 24} hours. The seven-day raw log window gives the worker time to verify and process matches.</p><button class="primary" id="meta-play">Build a machine and fight</button></section>`;
+        content.innerHTML = `<section class="panel meta-empty"><strong>${reports.length ? "Report could not be loaded." : "The first daily report is waiting for completed battles."}</strong><p>Every completed practice, friendly, and shared challenge battle is eligible for replay-verified aggregate analysis. Reports run every ${Number(data.intervalHours) || 24} hours. The seven-day raw log window gives the worker time to verify and process matches.</p><button class="primary" id="meta-play">Build a machine and fight</button></section>`;
         $("#meta-play").onclick = workshop;
         return;
       }
@@ -3475,8 +3562,15 @@ function renderRoute(route) {
       requestAnimationFrame(() => document.getElementById(route.value)?.scrollIntoView());
       return;
     }
-    if (route.name === "bounties") return void bountyUI.open(undefined, { restore: true });
-    if (route.name === "bounty") return void bountyUI.open(route.value, { restore: true });
+    if (route.name === "bounties" || route.name === "bounty") {
+      if (!paidBountyUIReady) {
+        toast("Paid bounties are currently disabled. Free challenges are ready to play.");
+        return go({ name: "friendly" }, { replace: true });
+      }
+      return void bountyUI.open(route.name === "bounty" ? route.value : undefined, {
+        restore: true,
+      });
+    }
     if (route.name === "challenge") {
       try {
         return loadChallenge(decodeChallenge(route.value));

@@ -8,6 +8,7 @@ It runs the bundled Worker with D1 binding `DB` and the following live runtime c
 
 ```text
 WM_MODE=tempo-mainnet
+WM_PAID_CHALLENGES_ENABLED=false
 WM_BOUNTY_ESCROW_VERSION=6
 WM_ALLOW_ESCROW_V6=true
 WM_BOUNTY_ESCROW_ADDRESS=<verified deployed V6 escrow>
@@ -17,7 +18,15 @@ WM_TEMPO_SUPPORTED_TOKENS=0x20C0000000000000000000000000000000000000,0x20C000000
 WM_TEMPO_SWAP_SLIPPAGE_BPS=100
 ```
 
-The Worker serves the game, account build vault, bounty metadata, wallet identity flow, direct escrow transaction plans, native MPP bounty relaying, receipt verification, deterministic simulations, and result-attestation state. The active V6 relayer key is stored only as a protected runtime secret; it is never sent to the browser or persisted in D1.
+The Worker serves the game, account build vault, friendly challenges, deterministic simulations, and result-attestation state. The Tempo payment rail is dormant by default. Its active V6 relayer key is stored only as a protected runtime secret; it is never sent to the browser or persisted in D1.
+
+## Dormant paid-challenge mode
+
+`WM_PAID_CHALLENGES_ENABLED` is the single operator switch for new paid bounty activity. It defaults to `false` in the deployment configuration. In this mode, `/api/rules`, discovery, and `/api/health` publish `features.paidChallenges: false`; browser clients should not load bounty or Tempo payment features. Ordinary public and friendly-challenge requests do not run payment readiness probes, RPC balance checks, or MPP payment authentication.
+
+Existing escrow records are deliberately preserved. Recovery of a saved direct-wallet request, an existing MPP journal, an accepted attempt, or an on-chain timeout/refund remains available while the switch is off. Do not delete payment journals, D1 rows, or deployed contracts to disable new paid activity.
+
+To resume paid bounties, set `WM_PAID_CHALLENGES_ENABLED=true` in the Worker environment and deploy a new revision only after reviewing the escrow address, signer, relayer, payment health, and recovery backlog. `WM_EMERGENCY_PAUSE` is separate: it pauses automatic payout operations and does not replace this admission switch.
 
 ## Deploying a change
 
@@ -51,7 +60,7 @@ Static hosting supports local saves, exports, ordinary challenge links, and loca
 - Keep `WM_BOUNTY_ESCROW_ADDRESS` pinned to the verified deployed escrow.
 - Never put a payout custody key, signer private key, or wallet seed phrase in public Site configuration, frontend code, D1, Git, or browser storage. The active V6 signer and relayer keys belong only in protected server-side Worker secret bindings. The V6 relayer is a bounded forwarding secret: native MPP payments are temporarily held by that relayer until the matching escrow call, so keep its balance, allowance and exposure small.
 - V6 uses one fixed settlement signer; keep its key separate from the relayer and guardian. This is a trusted-operator model, not independent multi-signer protection.
-- Keep native MPP bounty charging enabled only with the reviewed V6 escrow, relayer address/key, `WM_AGENT_BOUNTY_MPP_*` values, and `MPP_SECRET_KEY` intentionally configured. The relayer must be funded and approved for the deployed V6 escrow.
+- Keep native MPP bounty charging enabled only when `WM_PAID_CHALLENGES_ENABLED=true` and the reviewed V6 escrow, relayer address/key, `WM_AGENT_BOUNTY_MPP_*` values, and `MPP_SECRET_KEY` are intentionally configured. The relayer must be funded and approved for the deployed V6 escrow.
 - The V6 escrow is the only active version for new paid bounty actions. Older contracts and recovery material are archived under [`contracts/stale/`](../contracts/stale/README.md); legacy Worker reads/recovery must not be used for new bounties.
 
 ## Release compatibility

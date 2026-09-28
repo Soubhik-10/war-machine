@@ -20,6 +20,7 @@ const signerKey = "0x" + "0a".repeat(32);
 const signer = privateKeyToAccount(signerKey);
 const base = {
   WM_MODE: "tempo-mainnet",
+  WM_PAID_CHALLENGES_ENABLED: "true",
   WM_BOUNTY_ESCROW_ADDRESS: "0x6666666666666666666666666666666666666666",
   WM_ESCROW_SETTLEMENT_SIGNER: signer.address,
   WM_SETTLEMENT_PRIVATE_KEY: signerKey,
@@ -197,6 +198,7 @@ async function confirmTimeoutVariant(variant = {}) {
       {
         DB: db,
         ...base,
+        WM_PAID_CHALLENGES_ENABLED: "false",
         WM_BOUNTY_ESCROW_VERSION: "6",
         WM_ALLOW_ESCROW_V6: "true",
         WM_TEMPO_RPC_URL: "https://tempo-rpc.fixture",
@@ -467,7 +469,18 @@ test("V6 timeout refund validates event amount, creator, challenger, and nonce",
   }
 });
 
-test("finalized V6 timeout refund is recorded with zero net, exact entry, and public history", async () => {
+test("finalized V6 timeout recovery remains available while paid admission is dormant", async () => {
+  const dormant = runtimeConfig(
+    {
+      ...base,
+      WM_PAID_CHALLENGES_ENABLED: "false",
+      WM_BOUNTY_ESCROW_VERSION: "6",
+      WM_ALLOW_ESCROW_V6: "true",
+    },
+    "https://foundry.example",
+  );
+  assert.equal(dormant.paidChallengesEnabled, false);
+  assert.equal(dormant.acceptingNewBounties, false);
   const { response, db } = await confirmTimeoutVariant();
   const body = await response.json();
   assert.equal(response.status, 200, JSON.stringify(body));

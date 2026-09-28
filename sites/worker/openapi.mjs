@@ -73,6 +73,104 @@ const attempt = { type: "object", additionalProperties: true, required: ["id", "
   result: { type: ["object", "null"] }, payment: { type: ["object", "null"] }, error: { type: ["string", "null"] },
 } };
 
+const freeErrors = {
+  "400": response("Invalid JSON, field, blueprint, or request state.", ref("Error")),
+  "404": response("Challenge, match, or replay was not found.", ref("Error")),
+  "409": response("The challenge is no longer open or the locked terms do not match.", ref("Error")),
+  "429": response("Rate or capacity limit.", ref("Error")),
+  "503": response("Challenge service is temporarily unavailable.", ref("Error")),
+};
+const friendlyChallengeInput = {
+  type: "object",
+  additionalProperties: false,
+  required: ["challengerName", "title", "clientId", "blueprint"],
+  properties: {
+    challengerName: { type: "string", minLength: 1, maxLength: 28 },
+    title: { type: "string", minLength: 1, maxLength: 70 },
+    clientId: { type: "string", format: "uuid", description: "Browser-local UUID. The service stores only its hash." },
+    blueprint,
+    rated: { type: "boolean", default: false },
+  },
+};
+const friendlyAcceptInput = {
+  type: "object",
+  additionalProperties: false,
+  required: ["participantName", "clientId", "blueprint"],
+  properties: {
+    participantName: { type: "string", minLength: 1, maxLength: 28 },
+    clientId: { type: "string", format: "uuid", description: "Browser-local UUID. The service stores only its hash." },
+    blueprint,
+    rated: { type: "boolean", default: false },
+  },
+};
+const friendlyIdentity = {
+  type: "object",
+  additionalProperties: false,
+  required: ["clientId"],
+  properties: {
+    clientId: { type: "string", format: "uuid", description: "Browser-local UUID. The service stores only its hash." },
+  },
+};
+const friendlyMatch = {
+  type: "object",
+  additionalProperties: true,
+  required: ["id", "challengeId", "status", "challengerName", "defenderName", "rated"],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    challengeId: { type: "string", format: "uuid" },
+    status: { enum: ["running", "complete", "retry"] },
+    challengerName: { type: "string" },
+    defenderName: { type: "string" },
+    rated: { type: "boolean" },
+    result: { type: ["object", "null"] },
+    replay: { type: "object", description: "Locked challenger and defender builds, arena, seed, rules, and objective." },
+    rating: { type: ["object", "null"], description: "Verified game-only Elo data when both players chose rated play." },
+    verifiedAt: { type: ["integer", "null"], description: "Unix milliseconds when server verification completed." },
+    links: { type: "object", properties: { self: { type: "string" }, replay: { type: "string" }, share: { type: "string" } } },
+  },
+};
+
+export const freeChallengesOpenApi = {
+  openapi: "3.1.0",
+  info: {
+    title: "War Machines free Challenges API",
+    version: "1.0.0",
+    description: "Free, server-verified friendly challenges, replay records, and game-only rankings. No wallet, payment, escrow, or cash value is involved.",
+  },
+  servers: [{ url: "/api" }],
+  security: [],
+  components: {
+    schemas: {
+      Error: { type: "object", required: ["error"], properties: { error: { type: "string" }, message: { type: "string" }, status: { type: "integer" } }, additionalProperties: true },
+      Rules: { type: "object", additionalProperties: true },
+      Blueprint: blueprint,
+      FriendlyChallengeInput: friendlyChallengeInput,
+      FriendlyAcceptInput: friendlyAcceptInput,
+      FriendlyIdentity: friendlyIdentity,
+      FriendlyMatch: friendlyMatch,
+    },
+  },
+  paths: {
+    "/rules": { get: operation({ operationId: "getRules", summary: "Read the live game and free challenge rules.", result: ref("Rules"), errors: freeErrors }) },
+    "/health": { get: operation({ operationId: "getHealth", summary: "Read current game service status.", result: { type: "object", additionalProperties: true }, errors: freeErrors }) },
+    "/openapi.json": { get: operation({ operationId: "getOpenApi", summary: "Read this API contract.", result: { type: "object", additionalProperties: true }, errors: freeErrors }) },
+    "/mcp": { post: operation({ operationId: "mcp", summary: "Stateless MCP Streamable HTTP JSON-RPC endpoint.", body: { type: "object", additionalProperties: true }, result: { type: "object", additionalProperties: true }, errors: freeErrors }) },
+    "/blueprints/validate": { post: operation({ operationId: "validateBlueprint", summary: "Validate a readable or packed blueprint.", body: { type: "object", additionalProperties: true }, result: { type: "object", additionalProperties: true }, errors: freeErrors }) },
+    "/friendly-challenges": {
+      get: operation({ operationId: "listFriendlyChallenges", summary: "List open free challenges.", result: { type: "array", items: { type: "object", additionalProperties: true } }, errors: freeErrors }),
+      post: operation({ operationId: "createFriendlyChallenge", summary: "Post a free 24-hour challenge invite.", body: ref("FriendlyChallengeInput"), success: "201", result: { type: "object", additionalProperties: true }, errors: freeErrors }),
+    },
+    "/friendly-challenges/{id}": { get: operation({ operationId: "getFriendlyChallenge", summary: "Read a challenge invite and any completed match.", parameters: [uuid("Challenge UUID")], result: { type: "object", additionalProperties: true }, errors: freeErrors }) },
+    "/friendly-challenges/{id}/accept": { post: operation({ operationId: "acceptFriendlyChallenge", summary: "Lock two builds and let the server verify their free match.", parameters: [uuid("Challenge UUID")], body: ref("FriendlyAcceptInput"), success: "201", result: ref("FriendlyMatch"), errors: freeErrors }) },
+    "/friendly-challenges/{id}/cancel": { post: operation({ operationId: "cancelFriendlyChallenge", summary: "Cancel your still-open free challenge.", parameters: [uuid("Challenge UUID")], body: ref("FriendlyIdentity"), result: { type: "object", additionalProperties: true }, errors: freeErrors }) },
+    "/friendly-challenges/{id}/decline": { post: operation({ operationId: "declineFriendlyChallenge", summary: "Hide a challenge for this browser identity.", parameters: [uuid("Challenge UUID")], body: ref("FriendlyIdentity"), result: { type: "object", additionalProperties: true }, errors: freeErrors }) },
+    "/friendly-matches/{id}": { get: operation({ operationId: "getFriendlyMatch", summary: "Read a server-verified free match record.", parameters: [uuid("Match UUID")], result: ref("FriendlyMatch"), errors: freeErrors }) },
+    "/friendly-matches/{id}/verify": { post: operation({ operationId: "verifyFriendlyMatch", summary: "Resume a rare interrupted match verification without changing its locked seed.", parameters: [uuid("Match UUID")], body: { type: "object", additionalProperties: false }, result: ref("FriendlyMatch"), errors: freeErrors }) },
+    "/friendly-replays/{id}": { get: operation({ operationId: "getFriendlyReplay", summary: "Read locked replay terms and compact battle telemetry.", parameters: [uuid("Match UUID")], result: ref("FriendlyMatch"), errors: freeErrors }) },
+    "/friendly-leaderboard": { get: operation({ operationId: "getFriendlyLeaderboard", summary: "Read verified game-only Elo rankings.", parameters: [{ name: "scope", in: "query", schema: { enum: ["global", "season"], default: "global" } }, { name: "arena", in: "query", schema: { type: "string" } }, { name: "machineClass", in: "query", schema: { enum: ["light", "medium", "heavy"] } }], result: { type: "object", additionalProperties: true }, errors: freeErrors }) },
+  },
+};
+
 export const mainnetOpenApi = {
   openapi: "3.1.0",
   info: { title: "War Machines Tempo mainnet API", version: "4.0.0", description: "Guest discovery and validation plus wallet or MPP-authenticated bounty lifecycle, escrow confirmation, settlement and private account tools." },

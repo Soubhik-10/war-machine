@@ -58,7 +58,7 @@ import {
 import { paymentHealth, paymentHealthSnapshot, persistedPaymentHealthSnapshot, settlementCapacity } from "./payment-health.mjs";
 import { purgePreV6Bounties } from "./legacy-purge.mjs";
 import { repairMislabeledBounties } from "./payment-migrations.mjs";
-import { mainnetOpenApi } from "./openapi.mjs";
+import { freeChallengesOpenApi, mainnetOpenApi } from "./openapi.mjs";
 import { handleMcpRequest } from "../../server/mcp.mjs";
 import { handleFriendlyChallenges } from "../../server/friendly-challenges.mjs";
 import { captureBattleMeta } from "../../settlement/meta-snapshot.mjs";
@@ -80,6 +80,13 @@ const check = (value, message, status = 400) => {
   if (!value) fail(status, message);
   return value;
 };
+const PAID_CHALLENGES_DORMANT_REASON =
+  "Paid challenges are disabled by operator configuration. Existing escrow attempts remain available for recovery.";
+const paidChallengesActive = (config) => config?.paidChallengesEnabled === true;
+const paidChallengesReason = (config) =>
+  config?.paidChallengesReason || PAID_CHALLENGES_DORMANT_REASON;
+const requirePaidChallengesActive = (config) =>
+  check(paidChallengesActive(config), paidChallengesReason(config), 503);
 function paidComplexityIssues(machine) {
   const summary = stats(machine), issues = [];
   if (machine.modules.length > PAID_SIMULATION_MAX_MODULES)
@@ -276,6 +283,11 @@ function requireV6PaymentAdmission(config) {
 }
 
 async function refreshPaymentAdmission(db, config) {
+  if (!paidChallengesActive(config)) {
+    config.acceptingNewBounties = false;
+    config.paymentHealth = paymentHealthSnapshot(config);
+    return config.paymentHealth;
+  }
   config.paymentHealth = await paymentHealth(
     db, config,
     async address => pathUsdToUnits(await pathUsdBalance(config, address), { allowZero: true }),
@@ -399,6 +411,9 @@ function canonicalBlueprint(input, locked) {
 
 export function runtimeConfig(env, origin) {
   if (env.WM_MODE !== "tempo-mainnet") return { mode: "demo", enabled: false };
+  // This is deliberately opt-in. Keeping mainnet bindings and recovery data
+  // configured must not make paid creation or entry live after a deployment.
+  const paidChallengesEnabled = env.WM_PAID_CHALLENGES_ENABLED === "true";
   const v3Escrow = "0xb14a3aA99C9349094612143089F55aE5372DeB24",
     deployedV5Escrow = "0x399A5BB89E814Cc3d7232f428796C56003D78983",
     escrowVersion = String(env.WM_BOUNTY_ESCROW_VERSION || "3"),
@@ -539,6 +554,10 @@ export function runtimeConfig(env, origin) {
   return {
     mode: "tempo-mainnet",
     enabled: true,
+    paidChallengesEnabled,
+    paidChallengesReason: paidChallengesEnabled
+      ? null
+      : PAID_CHALLENGES_DORMANT_REASON,
     directEscrow: true,
     escrowVersion,
     escrowAddress: getAddress(escrow),
@@ -567,7 +586,10 @@ export function runtimeConfig(env, origin) {
     // V3/V4 remain readable for reconciliation, while V5 and explicitly
     // enabled V6 accept new funds after their own readiness checks.
     // a short relay outage cannot turn a valid result into a user loss.
-    acceptingNewBounties: automaticSettlementReady && (escrowVersion === "5" || escrowVersion === "6"),
+    acceptingNewBounties:
+      paidChallengesEnabled &&
+      automaticSettlementReady &&
+      (escrowVersion === "5" || escrowVersion === "6"),
     automaticSettlementReady,
     settlementReason,
     reason: null,
@@ -614,9 +636,13 @@ function catalogParts() {
 }
 
 function catalog(config) {
-  const paid = config.enabled,
+  const paid = config.enabled && paidChallengesActive(config),
     acceptingNewBounties = paid && config.acceptingNewBounties;
   return {
+    features: {
+      friendlyChallenges: true,
+      paidChallenges: paid,
+    },
     paymentHealth: config.paymentHealth,
     settlementCapacity: settlementCapacity(config.paymentHealth),
     mode: "tempo-mainnet",
@@ -637,17 +663,19 @@ function catalog(config) {
     ),
     economics: {
       platformFee: PLATFORM_FEE_POLICY,
-      creditScale: 10 ** PATH_USD_DECIMALS,
-      amountUnit: "pathUSD",
-      network: {
-        chainId: TEMPO_MAINNET_CHAIN_ID,
-        token: PATH_USD_TOKEN,
-        decimals: PATH_USD_DECIMALS,
-        explorer: "https://explore.tempo.xyz",
-      },
+      creditScale: paid ? 10 ** PATH_USD_DECIMALS : 1,
+      amountUnit: paid ? "pathUSD" : "game score",
+      network: paid
+        ? {
+            chainId: TEMPO_MAINNET_CHAIN_ID,
+            token: PATH_USD_TOKEN,
+            decimals: PATH_USD_DECIMALS,
+            explorer: "https://explore.tempo.xyz",
+          }
+        : null,
       maxInteger: 1000000000,
-      entryMin: "0.01",
-      rewardMin: "0.01",
+      entryMin: paid ? "0.01" : 0,
+      rewardMin: paid ? "0.01" : 0,
       rewardMustExceedEntry: false,
       personalCapsDefault: null,
       hours: { min: 0, max: 8760, zero: "No expiry" },
@@ -667,13 +695,11 @@ function catalog(config) {
         ? "enter a bounty with a native MPP payment"
         : "enter a bounty with Tempo Wallet",
           ]
-        : ["inspect existing direct-escrow bounties"]),
+        : ["free friendly challenges"]),
     ],
-    loginRequired: [
-      "save bounty",
-      "save account builds",
-      "private account history",
-    ],
+    loginRequired: paid
+      ? ["save bounty", "save account builds", "private account history"]
+      : ["save account builds", "friendly challenge history"],
     walletAuth: paid
       ? {
           enabled: true,
@@ -714,9 +740,7 @@ function catalog(config) {
         }
       : {
           enabled: false,
-          method: "tempo",
-          intent: "charge",
-          scope: "Native MPP bounty payments are not configured.",
+          scope: paidChallengesReason(config),
         },
     directEscrow: paid
       ? {
@@ -766,7 +790,7 @@ function catalog(config) {
       ? acceptingNewBounties
         ? undefined
         : { ready: false, reason: config.settlementReason }
-      : { ready: false, reason: config.reason },
+      : { ready: false, reason: paidChallengesReason(config) },
     versions: { hash: CLIENT_ENGINE_HASH },
     paidSimulation: {
       maxModules: PAID_SIMULATION_MAX_MODULES,
@@ -787,14 +811,19 @@ function catalog(config) {
       combat: "auto",
       timeLimitSeconds: 100,
       drawIntegrityThreshold: 0.025,
-      entryRefund:
-        "Only an infrastructure settlement timeout receives a free retry. Losses, draws and missed counter deadlines pay the entry to the bounty creator.",
-      spending:
-        "No application spending cap. Each bounty reward and entry amount is separately confirmed in Tempo Wallet.",
-      paidReveal:
-        "Public scouts expose only cost, mass, part count, weapon count, arena and limits. A confirmed entry reveals the exact defender to that challenger only.",
+      entryRefund: paid
+        ? "Only an infrastructure settlement timeout receives a free retry. Losses, draws and missed counter deadlines pay the entry to the bounty creator."
+        : "Friendly challenges do not collect entries or pay rewards.",
+      spending: paid
+        ? "No application spending cap. Each bounty reward and entry amount is separately confirmed in Tempo Wallet."
+        : "Ratings and game scores have no cash value and cannot be transferred or redeemed.",
+      paidReveal: paid
+        ? "Public scouts expose only cost, mass, part count, weapon count, arena and limits. A confirmed entry reveals the exact defender to that challenger only."
+        : "Friendly challenges lock both build snapshots when accepted.",
       timeout:
-        config.escrowVersion === "6"
+        !paid
+          ? "Friendly challenges can expire or be cancelled without moving funds."
+          : config.escrowVersion === "6"
           ? "Open bounties may remain available indefinitely. Once entered, a V6 attempt must settle or the 15-minute failsafe returns the held entry to the challenger and reopens the bounty."
           : "Missing the counter-build deadline is a loss. The entry was paid to the bounty creator when you entered and the bounty reopens after timeout. An unresolved settlement infrastructure timeout is technical and unlocks one sponsored retry instead.",
       payments: paid
@@ -803,12 +832,18 @@ function catalog(config) {
             ? `Direct Tempo mainnet pathUSD escrow. MPP clients may atomically swap an allowlisted Tempo stablecoin into pathUSD before the bounded V${config.escrowVersion} relayer forwards the payment.`
             : "Direct Tempo mainnet pathUSD escrow. MPP clients may use the same allowlisted stablecoin swap for separately priced API work; the escrow still receives pathUSD."
           : config.settlementReason
-        : "Payments are unavailable until escrow configuration is complete. No synthetic credits are issued.",
+        : paidChallengesActive(config)
+          ? "Payments are unavailable until escrow configuration is complete. No synthetic credits are issued."
+          : paidChallengesReason(config),
     },
   };
 }
 
 const discovery = (config) => ({
+  features: {
+    friendlyChallenges: true,
+    paidChallenges: config.enabled && paidChallengesActive(config),
+  },
   paymentHealth: config.paymentHealth,
   settlementCapacity: settlementCapacity(config.paymentHealth),
   name: "War Machines",
@@ -832,7 +867,7 @@ const discovery = (config) => ({
     protocolVersion: "2025-11-25",
     tools: "war_machines_*",
   },
-  payments: config.enabled
+  payments: config.enabled && paidChallengesActive(config)
     ? {
         enabled: true,
         directEscrow: true,
@@ -901,21 +936,21 @@ const discovery = (config) => ({
         enabled: false,
         directEscrow: false,
         mpp: false,
-        tempoMainnet: true,
-        currency: "pathUSD",
-        cashValue: true,
-        reason: config.reason,
+        tempoMainnet: false,
+        cashValue: false,
+        recoveryAvailable: !!config.enabled,
+        reason: paidChallengesReason(config),
       },
   authentication: {
-    guest: ["catalog", "bounties", "validation"],
-    account: [
-      "create/cancel bounty",
-      "official entry",
-      "save builds",
-      "history",
-    ],
-  scheme:
-    "Tempo wallet session for browser players or paid native MPP for agents (REST and MCP)",
+    guest: config.enabled && paidChallengesActive(config)
+      ? ["catalog", "bounties", "validation"]
+      : ["catalog", "friendly challenges", "validation"],
+    account: config.enabled && paidChallengesActive(config)
+      ? ["create/cancel bounty", "official entry", "save builds", "history"]
+      : ["save builds", "friendly challenge history", "escrow recovery"],
+    scheme: config.enabled && paidChallengesActive(config)
+      ? "Tempo wallet session for browser players or paid native MPP for agents (REST and MCP)"
+      : "No payment authentication is required for friendly challenges. Existing escrow recovery remains owner-authorized.",
   },
   invariants: {
     oneActiveAttemptPerBounty: true,
@@ -1594,6 +1629,7 @@ export async function mppCharge(
   // deployment into a fresh 402 challenge. Existing journals took the
   // recovery path above and remain available for receipt reconciliation.
   if (monetary) {
+    requirePaidChallengesActive(config);
     await refreshPaymentAdmission(db, config);
     check(config.acceptingNewBounties, config.settlementReason || "Paid bounty admission is temporarily unavailable.", 503);
     requireV6PaymentAdmission(config);
@@ -3340,6 +3376,7 @@ export async function mppCreateBounty(db, config, request, body, key, internal =
   }
   if (!existingJournal && (!state || state.phase === "quoted")) {
     enforcePaidComplexity(unpackChallenge(blueprint).machine);
+    requirePaidChallengesActive(config);
     await refreshPaymentAdmission(db, config);
     requireV6PaymentAdmission(config);
   }
@@ -3709,6 +3746,7 @@ export async function mppEnterBounty(db, config, request, bountyId, body, key, i
     if (denied) return denied;
   }
   if (!existingJournal && (!state || state.phase === "quoted")) {
+    requirePaidChallengesActive(config);
     await refreshPaymentAdmission(db, config);
     requireV6PaymentAdmission(config);
   }
@@ -4200,6 +4238,7 @@ async function directCreateIntent(db, auth, body, key, config) {
       };
     return directPlanFromCreate(config, hold);
   }
+  requirePaidChallengesActive(config);
   await refreshPaymentAdmission(db, config);
   check(config.acceptingNewBounties, config.settlementReason, 503);
   const count = await db
@@ -4346,6 +4385,7 @@ async function directEntryIntent(db, auth, bountyId, body, key, config) {
       };
     return directPlanFromEntry(config, hold, row);
   }
+  requirePaidChallengesActive(config);
   await refreshPaymentAdmission(db, config);
   check(config.acceptingNewBounties, config.settlementReason, 503);
   await requireCurrentBounty(db, row, config);
@@ -6468,7 +6508,11 @@ export async function acquireSettlementRunnerLease(db, at = now()) {
 export async function runAutomaticSettlement(env, reason = "scheduled") {
   const config = runtimeConfig(env, "https://service.internal");
   if (!config.enabled || !config.automaticSettlementReady || !env.DB) return;
-  await purgePreV6Bounties(env.DB, config);
+  // Dormant mode leaves scheduled recovery available for actual existing
+  // obligations, but does not wake the Tempo client or scan settlement work
+  // when there is nothing to recover.
+  if (!paidChallengesActive(config) && !await hasOutstandingPaidRecovery(env.DB, config)) return;
+  if (paidChallengesActive(config)) await purgePreV6Bounties(env.DB, config);
   console.info("Automatic settlement invoked", { reason });
   if (!await acquireSettlementRunnerLease(env.DB)) return;
   try {
@@ -6673,6 +6717,48 @@ export function settlementWakeupRequest(method, url) {
     path === "/api/bounties" && ["mine", "history"].includes(url.searchParams.get("scope"));
 }
 
+function paidAdmissionRoute(method, path) {
+  return method === "POST" && (
+    path === "/api/bounties" ||
+    /^\/api\/bounties\/[a-f0-9-]{36}\/attempts$/.test(path)
+  );
+}
+
+// A direct wallet plan or MPP challenge that was issued before the switch was
+// turned off may already have a real on-chain payment behind it. Allow only
+// that stored request to resume; never create a fresh payment state in
+// dormant mode.
+async function persistedPaidRecoveryRequest(db, path, key) {
+  if (!key) return false;
+  const entry = path.match(/^\/api\/bounties\/([a-f0-9-]{36})\/attempts$/);
+  const operation = entry
+    ? `agent-bounty-entry:${entry[1]}:${key}`
+    : `agent-bounty-create:${key}`;
+  const direct = entry
+    ? db.prepare("SELECT 1 AS found FROM payment_holds WHERE bounty=? AND request_key=? AND purpose='direct-entry' LIMIT 1").bind(entry[1], key)
+    : db.prepare("SELECT 1 AS found FROM payment_holds WHERE request_key=? AND purpose='direct-create' LIMIT 1").bind(key);
+  const mpp = db.prepare("SELECT 1 AS found FROM payment_kv WHERE key IN (?,?) LIMIT 1")
+    .bind(`mpp-bounty-state:${operation}`, paymentJournalKey(operation));
+  const [directResult, mppResult] = await Promise.all([direct.first(), mpp.first()]);
+  return !!(directResult || mppResult);
+}
+
+async function hasOutstandingPaidRecovery(db, config) {
+  const policy = escrowPolicy(config.escrowVersion);
+  const [attempt, hold, journal] = await Promise.all([
+    db.prepare(
+      "SELECT 1 AS found FROM attempts a JOIN bounties b ON b.id=a.bounty WHERE b.fee_policy_version=? AND a.status IN ('engineering','queued','awaiting-signatures','ready-to-settle') LIMIT 1",
+    ).bind(policy).first(),
+    db.prepare(
+      "SELECT 1 AS found FROM payment_holds WHERE status IN ('awaiting-onchain','awaiting-relay','relay-prepared','recovery-required') LIMIT 1",
+    ).first(),
+    db.prepare(
+      "SELECT 1 AS found FROM payment_kv WHERE key LIKE 'mpp-bounty-state:%' AND json_extract(value,'$.phase') IN ('quoted','paid') LIMIT 1",
+    ).first(),
+  ]);
+  return !!(attempt || hold || journal);
+}
+
 export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
   const url = new URL(request.url),
     path = url.pathname,
@@ -6681,14 +6767,14 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
   // still runs inside each new paid admission path before funds are requested.
   const publicConfigRead = request.method === "GET" &&
     ["/.well-known/war-machines.json", "/api/rules", "/api/health"].includes(path);
-  config.paymentHealth = publicConfigRead && env.DB
+  config.paymentHealth = publicConfigRead && env.DB && paidChallengesActive(config)
     ? await persistedPaymentHealthSnapshot(env.DB, config)
     : paymentHealthSnapshot(config);
   config.acceptingNewBounties = !!config.acceptingNewBounties &&
     config.paymentHealth.ready && config.paymentHealth.fresh;
-  if (!config.acceptingNewBounties && config.enabled)
+  if (!config.acceptingNewBounties && config.enabled && paidChallengesActive(config))
     config.settlementReason = config.paymentHealth.reason;
-  if (publicConfigRead && env.DB && config.enabled && !config.paymentHealth.fresh) {
+  if (publicConfigRead && env.DB && config.enabled && paidChallengesActive(config) && !config.paymentHealth.fresh) {
     // Discovery, rules and health are the admission documents consumed by
     // browser clients and agents. Return a bounded readiness result with
     // them instead of advertising recovery-only mode until a background task
@@ -6718,7 +6804,9 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
   if (request.method === "GET" && path === "/api/rules")
     return response(catalog(config));
   if (request.method === "GET" && path === "/api/openapi.json")
-    return response(mainnetOpenApi);
+    return response(
+      paidChallengesActive(config) ? mainnetOpenApi : freeChallengesOpenApi,
+    );
   if (request.method === "GET" && path === "/api/health")
     return response({
       ok: config.paymentHealth.ready && config.paymentHealth.fresh,
@@ -6727,17 +6815,20 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       app: "war-machines",
       mode: "tempo-mainnet",
       paymentsEnabled: !!config.acceptingNewBounties,
-      directEscrow: !!config.directEscrow,
-      mppAgentApi: !!(config.agentBountyMppEnabled && config.acceptingNewBounties),
-      activation: config.enabled ? config.acceptingNewBounties ? "ready" : "recovery-only" : "locked",
+      features: { friendlyChallenges: true, paidChallenges: config.enabled && paidChallengesActive(config) },
+      directEscrow: !!(config.directEscrow && paidChallengesActive(config)),
+      mppAgentApi: !!(config.agentBountyMppEnabled && config.acceptingNewBounties && paidChallengesActive(config)),
+      activation: !config.enabled ? "locked" : !paidChallengesActive(config) ? "dormant" : config.acceptingNewBounties ? "ready" : "recovery-only",
       engineHash: CLIENT_ENGINE_HASH,
     });
   try {
     check(env.DB, "D1 storage is unavailable.");
     const db = env.DB,
       method = request.method;
-    await purgePreV6Bounties(db, config);
-    await archivePreV5Bounties(db, config);
+    if (paidChallengesActive(config)) {
+      await purgePreV6Bounties(db, config);
+      await archivePreV5Bounties(db, config);
+    }
     if (config.automaticSettlementReady && settlementWakeupRequest(method, url) && ctx?.waitUntil)
       ctx.waitUntil(runAutomaticSettlement(env, method === "POST" ? "payment-api" : "payment-read"));
     check(
@@ -6756,11 +6847,23 @@ export async function mainnetFetch(request, env, ctx, serveStaticAsset) {
       // native MPP client may need a clone when using the legacy
       // Payment-Authorization alias.
       ? await bodyOf(request.clone())
-      : {},
-      sessionAuth = await dbAuth(db, request);
+      : {};
+    if (!paidChallengesActive(config) && paidAdmissionRoute(method, path))
+      check(
+        await persistedPaidRecoveryRequest(db, path, request.headers.get("idempotency-key")),
+        paidChallengesReason(config),
+        503,
+      );
+    // A wallet balance is a Tempo RPC read, not a recovery operation. Keep it
+    // out of the dormant request path along with new payment admission.
+    if (!paidChallengesActive(config) && path === "/api/me/wallet")
+      fail(503, paidChallengesReason(config));
+    // Do not look up a wallet session for a blocked fresh payment request.
+    // The only dormant exceptions above are persisted recovery operations.
+    const sessionAuth = await dbAuth(db, request);
     let auth = sessionAuth;
     const privateAgentRoute = path.startsWith("/api/me") || /^\/api\/attempts\/[a-f0-9-]{36}$/.test(path);
-    if (!auth && privateAgentRoute && config.agentBountyMppEnabled) {
+    if (!auth && privateAgentRoute && config.agentBountyMppEnabled && paidChallengesActive(config)) {
       const access = await mppAgentAuth(db, config, request, "read", "agent-private:" + method + ":" + path);
       if (access.response) return access.response;
       auth = access.auth;

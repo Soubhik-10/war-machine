@@ -121,6 +121,12 @@ class D1Mock {
         "utf8",
       ),
     );
+    this.sqlite.exec(
+      await readFile(
+        new URL("../drizzle/0012_social_challenges.sql", import.meta.url),
+        "utf8",
+      ),
+    );
   }
   close() {
     this.sqlite.close();
@@ -388,6 +394,7 @@ test("native MPP exposes only paid bounty routes and uses the standard Authoriza
     env = {
       DB,
       WM_MODE: "tempo-mainnet",
+      WM_PAID_CHALLENGES_ENABLED: "true",
       WM_BOUNTY_ESCROW_VERSION: "5",
       WM_BOUNTY_ESCROW_ADDRESS:
         "0x5555555555555555555555555555555555555555",
@@ -469,6 +476,7 @@ test("legacy V4 discovery is recovery-only even when its relayer is configured",
   const relayer = privateKeyToAccount("0x" + "09".repeat(32));
   const env = {
     WM_MODE: "tempo-mainnet",
+    WM_PAID_CHALLENGES_ENABLED: "true",
     WM_BOUNTY_ESCROW_VERSION: "4",
     WM_BOUNTY_ESCROW_ADDRESS: "0x5555555555555555555555555555555555555555",
     WM_BOUNTY_RELAYER_ADDRESS: relayer.address,
@@ -559,6 +567,7 @@ test("stateless MCP exposes War Machines tools and preserves the MPP challenge",
   const env = {
     DB,
     WM_MODE: "tempo-mainnet",
+    WM_PAID_CHALLENGES_ENABLED: "true",
     WM_BOUNTY_ESCROW_VERSION: "5",
     WM_BOUNTY_ESCROW_ADDRESS:
       "0xb14a3aA99C9349094612143089F55aE5372DeB24",
@@ -984,6 +993,7 @@ test("Tempo wallet sign-in verifies an EIP-191 account and issues a session", as
   const env = {
     DB,
     WM_MODE: "tempo-mainnet",
+    WM_PAID_CHALLENGES_ENABLED: "true",
     WM_BOUNTY_ESCROW_ADDRESS: "0xb14a3aA99C9349094612143089F55aE5372DeB24",
     WM_TEMPO_RPC_URL: "https://tempo-rpc.fixture",
   };
@@ -1349,6 +1359,7 @@ test("paid bounty creation does not accept funds without automatic settlement", 
   const env = {
     DB,
     WM_MODE: "tempo-mainnet",
+    WM_PAID_CHALLENGES_ENABLED: "true",
     WM_BOUNTY_ESCROW_ADDRESS: escrow,
     WM_TEMPO_RPC_URL: "https://tempo-rpc.fixture",
   };
@@ -1392,7 +1403,7 @@ test("paid bounty creation does not accept funds without automatic settlement", 
   );
 });
 
-test("a fully populated legacy custody configuration still cannot issue a payment challenge or hold funds", async (t) => {
+test("a legacy custody configuration cannot issue a payment challenge or hold funds while paid mode is dormant", async (t) => {
   const DB = new D1Mock();
   await DB.migrate();
   t.after(() => DB.close());
@@ -1435,7 +1446,7 @@ test("a fully populated legacy custody configuration still cannot issue a paymen
     res = await worker.fetch(request, env),
     raw = await res.text();
   assert.equal(res.status, 503, raw);
-  assert.match(raw, /WM_BOUNTY_ESCROW_ADDRESS/i);
+  assert.match(raw, /Paid challenges are disabled/i);
   assert.equal(res.headers.get("www-authenticate"), null);
   assert.equal(
     DB.sqlite.prepare("SELECT COUNT(*) AS total FROM payment_holds").get()

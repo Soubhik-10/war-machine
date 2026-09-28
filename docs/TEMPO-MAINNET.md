@@ -1,8 +1,9 @@
 # Tempo Mainnet operations
 
-War Machines' live payment rail is the non-upgradeable V6 pathUSD escrow on
-Tempo Mainnet. V6 is the only active contract version in this repository;
-versions V1–V5 are archived for historical reference and recovery.
+War Machines' optional payment rail is the non-upgradeable V6 pathUSD escrow
+on Tempo Mainnet. New paid bounties are dormant unless the Worker operator
+explicitly enables them. V6 is the only active contract version in this
+repository; versions V1–V5 are archived for historical reference and recovery.
 
 | Item | Live setting |
 | --- | --- |
@@ -39,12 +40,18 @@ event before marking an outcome or refund complete.
 
 ```text
 WM_MODE=tempo-mainnet
+WM_PAID_CHALLENGES_ENABLED=true
 WM_BOUNTY_ESCROW_VERSION=6
 WM_ALLOW_ESCROW_V6=true
 WM_BOUNTY_ESCROW_ADDRESS=<verified deployed V6 address>
 WM_ESCROW_SETTLEMENT_SIGNER=<configured V6 result signer>
 WM_BOUNTY_RELAYER_ADDRESS=<configured V6 relayer>
 ```
+
+`WM_PAID_CHALLENGES_ENABLED` defaults to `false`. With it off, the Worker keeps
+existing escrow recovery and timeout/refund handling available, but does not
+admit new direct-wallet or MPP bounty payments and does not run payment health
+checks for ordinary game traffic.
 
 For native MPP, also configure its protected secret, bounded maximum, and
 relayer private key in the approved server-side secret store. Confirm the
